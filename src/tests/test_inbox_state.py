@@ -1,6 +1,7 @@
 import pytest
 
 from src.lib.audiobook import Audiobook
+from src.lib.books_tree import BooksTree
 from src.lib.fs_utils import hash_path_audio_files
 from src.lib.inbox_state import InboxState
 
@@ -12,6 +13,14 @@ class TestInboxState:
         InboxState._instance = None
         yield
         InboxState._instance = None
+
+    def test_book_dirs(
+        self,
+        Chanur_Series: list[Audiobook],
+        reset_inbox_state: InboxState,
+    ):
+        assert reset_inbox_state.book_dirs
+        assert [isinstance(d, BooksTree) for d in reset_inbox_state.book_dirs]
 
     def test_get_item_by_key(
         self,

@@ -56,7 +56,7 @@ from src.lib.typing import SCAN_TTL
 
 
 def move_standalone_into_dir(book: Audiobook, item: InboxItem):
-    if not book.is_a("standalone", not_fmt="m4b"):
+    if not book.is_a("standalone_file", not_fmt="m4b"):
         return book, item
 
     ext = ensure_dot(book.orig_file_type)
@@ -83,7 +83,7 @@ def process_already_m4b(book: Audiobook, item: InboxItem):
     smart_print(f"\n{en.BOOK_ALREADY_CONVERTED}\n")
     print_moving_to_converted(book)
 
-    if book.structure == "standalone":
+    if book.structure == "standalone_file":
         file_name = item.key
         ext = ensure_dot(book.orig_file_type)
         folder_name = item.path.stem
@@ -249,7 +249,7 @@ def backup_ok(book: Audiobook):
     # Copy files to backup destination
     if not cfg.BACKUP:
         print_debug("Not backing up (backups are disabled)")
-    elif dir_is_empty_ignoring_hidden_files(book.inbox_dir):
+    elif dir_is_empty_ignoring_files(book.inbox_dir):
         print_dark_grey("Skipping backup (folder is empty)")
     else:
         ln = "Making a backup copy → "
@@ -593,7 +593,9 @@ def print_book_info(book: "Audiobook"):
     print_list_item(f"Source: {src}")
     print_list_item(f"Output: {dst}")
     print_list_item(f"Format: {book.orig_file_type}")
-    num_files = 1 if book.structure.count("standalone") else book.num_files("inbox")
+    num_files = (
+        1 if book.structure.count("standalone_file") else book.num_files("inbox")
+    )
     print_list_item(f"Audio files: {num_files}")
     print_list_item(f"Total size: {book.size('inbox', 'human')}")
     if book.cover_art_file:
@@ -698,12 +700,14 @@ def convert_book(book: Audiobook):
 
 
 def move_desc_file(book: Audiobook):
+    desc_files = []
     did_remove_old_desc = False
     for d in [book.build_dir, book.merge_dir, book.converted_dir]:
-        desc_files = list(Path(d).rglob(f"{book} [*kHz*].txt"))
-        for f in desc_files:
+        _desc_files = list(Path(d).rglob(f"{book} [*kHz*].txt"))
+        for f in _desc_files:
             f.unlink()
             did_remove_old_desc = True
+        desc_files.extend(_desc_files)
 
     if did_remove_old_desc:
         print_notice(f"Removed old description {pluralize(len(desc_files), 'file')}")
@@ -889,7 +893,7 @@ def process_book(b: int, item: InboxItem):
     # can't modify the inbox dir until we check whether it was modified recently
     book.log_file.unlink(missing_ok=True)
 
-    if book.is_a(("single", "standalone"), "m4b"):
+    if book.is_a(("single", "standalone_file"), "m4b"):
         b += process_already_m4b(book, item)
         if item.is_gone:
             return b
@@ -973,7 +977,6 @@ def process_inbox():
             only_once=True,
         )
         return
-
     if (
         # not inbox.inbox_needs_processing(on_will_scan=process_standalone_files)
         not inbox.inbox_needs_processing()

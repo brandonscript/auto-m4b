@@ -18,6 +18,7 @@ check_untyped_defs = true
 [tool.black]
 target-version = ['py312']
 preview = true
+line-length = 120
 
 [tool.isort]
 profile = "black"
@@ -38,7 +39,7 @@ reportUnusedVariable = "error"
 
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 120
 indent-width = 4
 preview = true
 
@@ -78,7 +79,7 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 minversion = "7.4"
-addopts = "-rP -vv --color=yes --capture=tee-sys --slow"
+addopts = "-rP -vv -s --color=yes --capture=tee-sys --slow --ignore=.venv"
 testpaths = ["src/tests"]
 python_files = ["*_test.py", "test_*.py"]
 python_classes = ["test_", "_test", "Test*"]

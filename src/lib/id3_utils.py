@@ -14,6 +14,7 @@ from rapidfuzz import fuzz
 from rapidfuzz.distance import LCSseq, Levenshtein
 from tinta import Tinta
 
+from src.lib.books_tree import BooksTree
 from src.lib.cleaners import clean_string, strip_author_narrator, strip_leading_articles
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim, fix_ffprobe, get_numbers_in_string
@@ -117,9 +118,7 @@ def _tags_from_book_or_dict(book_or_dict: "Audiobook | dict[str, Any]") -> TagSe
     return TagSet(title, artist, album, albumartist, composer, date, track_num, comment)
 
 
-def write_m4b_tags(
-    file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None
-):
+def write_m4b_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None):
     """Uses mutagen to write id3 tags to an m4b file"""
     try:
         from mutagen.mp4 import MP4, MP4Cover
@@ -129,13 +128,9 @@ def write_m4b_tags(
         )
 
     if not file.exists():
-        raise FileNotFoundError(
-            f"Error: Cannot write id3 tags, '{file}' does not exist"
-        )
+        raise FileNotFoundError(f"Error: Cannot write id3 tags, '{file}' does not exist")
 
-    title, artist, album, albumartist, composer, date, track_num, comment = (
-        _tags_from_book_or_dict(book)
-    )
+    title, artist, album, albumartist, composer, date, track_num, comment = _tags_from_book_or_dict(book)
 
     if f := MP4(file):
         f["\xa9nam"] = title
@@ -157,9 +152,7 @@ def write_m4b_tags(
             elif cover.suffix == ".png":
                 mime_type = MP4Cover.FORMAT_PNG
             else:
-                raise IOError(
-                    f"Error: Could not set cover art, '{cover}' is not a valid .jpg or .png file"
-                )
+                raise IOError(f"Error: Could not set cover art, '{cover}' is not a valid .jpg or .png file")
                 return
             f["covr"] = [MP4Cover(image_data, mime_type)]
 
@@ -167,17 +160,16 @@ def write_m4b_tags(
 
 
 def write_id3_tags_mutagen(
-    file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None
+    file: "Path | BooksTree", book: "Audiobook | dict[str, Any]", cover: Path | None = None
 ) -> None:
-    if file.suffix in [".m4b", ".m4a"]:
-        write_m4b_tags(file, book, cover)
+    path = file.path if isinstance(file, BooksTree) else file
+    if path.suffix in [".m4b", ".m4a"]:
+        write_m4b_tags(path, book, cover)
     else:
-        write_mp3_tags(file, book, cover)
+        write_mp3_tags(path, book, cover)
 
 
-def write_mp3_tags(
-    file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None
-) -> None:
+def write_mp3_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None) -> None:
     try:
         from mutagen.easyid3 import EasyID3
         from mutagen.id3 import APIC, ID3
@@ -190,13 +182,9 @@ def write_mp3_tags(
         )
 
     if not file.exists():
-        raise FileNotFoundError(
-            f"Error: Cannot write id3 tags, '{file}' does not exist"
-        )
+        raise FileNotFoundError(f"Error: Cannot write id3 tags, '{file}' does not exist")
 
-    title, artist, album, albumartist, composer, date, track_num, comment = (
-        _tags_from_book_or_dict(book)
-    )
+    title, artist, album, albumartist, composer, date, track_num, comment = _tags_from_book_or_dict(book)
 
     if f := EasyID3(file):
         f["title"] = title
@@ -223,9 +211,7 @@ def write_mp3_tags(
             elif cover.suffix == ".png":
                 mime_type = "image/png"
             else:
-                raise IOError(
-                    f"Error: Could not set cover art, '{cover}' is not a valid .jpg or .png file"
-                )
+                raise IOError(f"Error: Could not set cover art, '{cover}' is not a valid .jpg or .png file")
                 return
             image = APIC(
                 encoding=3,
@@ -238,14 +224,10 @@ def write_mp3_tags(
             f.add(image)
             f.save()
     else:
-        raise HeaderNotFoundError(
-            f"Error: Could not load '{file}' for tagging, it may be corrupt or not an audio file"
-        )
+        raise HeaderNotFoundError(f"Error: Could not load '{file}' for tagging, it may be corrupt or not an audio file")
 
 
-def verify_and_update_id3_tags(
-    book: "Audiobook", in_dir: Literal["build", "converted"]
-) -> None:
+def verify_and_update_id3_tags(book: "Audiobook", in_dir: Literal["build", "converted"]) -> None:
     # takes the inbound book, then checks the converted file and verifies that the id3 tags match the extracted metadata
     # if they do not match, it will print a notice and update the id3 tags
 
@@ -256,9 +238,7 @@ def verify_and_update_id3_tags(
     if not m4b_to_check.is_file():
         m4b_to_check = find_first_audio_file(book.converted_dir, ".m4b")
         if not m4b_to_check.is_file():
-            raise FileNotFoundError(
-                f"Cannot verify id3 tags, {m4b_to_check} does not exist"
-            )
+            raise FileNotFoundError(f"Cannot verify id3 tags, {m4b_to_check} does not exist")
 
     smart_print("\nVerifying id3 tags...", end="")
 
@@ -273,9 +253,7 @@ def verify_and_update_id3_tags(
 
     updates = []
 
-    def _print_needs_updating(
-        what: str, left_value: str | None, right_value: str
-    ) -> None:
+    def _print_needs_updating(what: str, left_value: str | None, right_value: str) -> None:
         s = Tinta().dark_grey(f"- ").grey(what).dark_grey("needs updating:")
         if left_value:
             s.amber(left_value)
@@ -286,71 +264,39 @@ def verify_and_update_id3_tags(
 
     if book.title and book_to_check.id3_title != book.title:
         title_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating("Title", book_to_check.id3_title, book.title)
-        )
+        updates.append(lambda: _print_needs_updating("Title", book_to_check.id3_title, book.title))
 
     if book.author and book_to_check.id3_artist != book.author:
         author_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating(
-                "Artist (author)", book_to_check.id3_artist, book.author
-            )
-        )
+        updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, book.author))
 
     if book.title and book_to_check.id3_album != book.title:
         title_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating(
-                "Album (title)", book_to_check.id3_album, book.title
-            )
-        )
+        updates.append(lambda: _print_needs_updating("Album (title)", book_to_check.id3_album, book.title))
 
     if book.title and book_to_check.id3_sortalbum != book.title:
         title_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating(
-                "Sort album (title)", book_to_check.id3_sortalbum, book.title
-            )
-        )
+        updates.append(lambda: _print_needs_updating("Sort album (title)", book_to_check.id3_sortalbum, book.title))
 
     if book.author and book_to_check.id3_albumartist != book.author:
         author_needs_updating = True
         updates.append(
-            lambda: _print_needs_updating(
-                "Album artist (author)", book_to_check.id3_albumartist, book.author
-            )
+            lambda: _print_needs_updating("Album artist (author)", book_to_check.id3_albumartist, book.author)
         )
 
     if book.narrator and book_to_check.id3_composer != book.narrator:
         narrator_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating(
-                "Composer (narrator)", book_to_check.id3_composer, book.narrator
-            )
-        )
+        updates.append(lambda: _print_needs_updating("Composer (narrator)", book_to_check.id3_composer, book.narrator))
 
-    if book.date and get_year_from_date(book_to_check.id3_date) != get_year_from_date(
-        book.date
-    ):
+    if book.date and get_year_from_date(book_to_check.id3_date) != get_year_from_date(book.date):
         date_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating("Date", book_to_check.id3_date, book.date)
-        )
+        updates.append(lambda: _print_needs_updating("Date", book_to_check.id3_date, book.date))
 
     if book.comment and compare_trim(book_to_check.id3_comment, book.comment):
         comment_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating(
-                "Comment", book_to_check.id3_comment, book.comment
-            )
-        )
+        updates.append(lambda: _print_needs_updating("Comment", book_to_check.id3_comment, book.comment))
 
-    if (
-        (cover := book.cover_art_file)
-        and cover.exists()
-        and not book_to_check.has_id3_cover
-    ):
+    if (cover := book.cover_art_file) and cover.exists() and not book_to_check.has_id3_cover:
         cover_needs_updating = True
         updates.append(lambda: _print_needs_updating("Cover art", None, cover.name))
 
@@ -383,20 +329,17 @@ def ffprobe_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = Fals
         return None
 
     if file and not file.exists():
-        raise FileNotFoundError(
-            f"Error: Cannot extract id3 tag, '{file}' does not exist"
-        )
+        raise FileNotFoundError(f"Error: Cannot extract id3 tag, '{file}' does not exist")
     try:
         probe_result = ffmpeg.probe(str(file), cmd="ffprobe", **options)
     except ffmpeg.Error as e:
         from src.lib.logger import write_err_file
 
         write_err_file(file, e, "ffprobe")
+        msg = f"Error: Could run ffprobe on file '{file}' with options {options}.\nTry running `pipenv run fix-ffprobe`..."
         if throw:
-            raise BadFileError(
-                f"Error: Could run ffprobe on file '{file}' with options {options}"
-            ) from e
-        print_error(f"Error: Could run ffprobe on file '{file}' with options {options}")
+            raise BadFileError(msg) from e
+        print_error(msg)
         if cfg.DEBUG:
             print_debug(e.stderr)
         return None
@@ -411,9 +354,7 @@ def ffmpeg_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = False
         return None
 
     if file and not file.exists():
-        raise FileNotFoundError(
-            f"Error: Cannot extract id3 tag, '{file}' does not exist"
-        )
+        raise FileNotFoundError(f"Error: Cannot extract id3 tag, '{file}' does not exist")
     try:
         ffmpeg_result = ffmpeg.run(str(file), cmd="ffmpeg", **options)
     except ffmpeg.Error as e:
@@ -421,9 +362,7 @@ def ffmpeg_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = False
 
         write_err_file(file, e, "ffmpeg")
         if throw:
-            raise BadFileError(
-                f"Error: Could run ffmpeg on file '{file}' with options {options}"
-            ) from e
+            raise BadFileError(f"Error: Could run ffmpeg on file '{file}' with options {options}") from e
         print_error(f"Error: Could run ffmpeg on file '{file}' with options {options}")
         if cfg.DEBUG:
             print_debug(e.stderr)
@@ -433,30 +372,26 @@ def ffmpeg_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = False
 
 
 @overload
-def extract_cover_art(file: Path, save_to_file: Literal[False] = False) -> bytes: ...
+def extract_cover_art(file: "BooksTree | Path", save_to_file: Literal[False] = False) -> bytes: ...
 
 
 @overload
-def extract_cover_art(
-    file: Path, save_to_file: Literal[True], filename: str = "cover"
-) -> Path: ...
+def extract_cover_art(file: "BooksTree | Path", save_to_file: Literal[True], filename: str = "cover") -> Path: ...
 
 
-def extract_cover_art(
-    file: Path, save_to_file: bool = False, filename: str = "cover"
-) -> bytes | Path:
+def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, filename: str = "cover") -> bytes | Path:
     from src.lib.config import cfg
 
-    out_file = file.parent / filename
+    path = file.path if isinstance(file, BooksTree) else file
+
+    out_file = path.parent / filename
 
     try:
-        if ffresult := ffprobe_file(file):
+        if ffresult := ffprobe_file(path):
             # '-s': '320x240'}):
             # find a stream that is jpg or png and has a disposition of attached_pic
             for stream in ffresult["streams"]:
-                if stream.get("codec_name") in ["mjpeg", "png"] and stream.get(
-                    "disposition", {}
-                ).get("attached_pic"):
+                if stream.get("codec_name") in ["mjpeg", "png"] and stream.get("disposition", {}).get("attached_pic"):
                     content_type = stream.get("codec_name")
                     common_steps = [
                         "ffmpeg",
@@ -464,7 +399,7 @@ def extract_cover_art(
                         "-loglevel",
                         "0",
                         "-i",
-                        str(file),
+                        str(path),
                         "-map",
                         f"0:{stream['index']}",
                         "-c",
@@ -531,25 +466,20 @@ def id3_tags_source_to_raw(
 
 
 def extract_id3_tags(
-    file: Path | None, *tags: TagSource | AdditionalTags, throw=False
+    file: "BooksTree | Path | None", *tags: TagSource | AdditionalTags, throw=False
 ) -> dict[TagSource | AdditionalTags, str]:
 
-    if isinstance(file, str):
-        file = Path(file)
-    if not file or not file.exists():
+    path = file.path if isinstance(file, BooksTree) else Path(file) if file else None
+
+    if not path or not path.exists():
         if throw:
-            raise HeaderNotFoundError(
-                f"Error: Cannot extract id3 tags, '{file}' does not exist"
-            )
+            raise HeaderNotFoundError(f"Error: Cannot extract id3 tags, '{file}' does not exist")
         return {}
 
     try:
-        if ffresult := ffprobe_file(file, throw=throw):
+        if ffresult := ffprobe_file(path, throw=throw):
             tag_dict = id3_tags_raw_to_source(
-                {
-                    key.lower(): value
-                    for key, value in (ffresult["format"]["tags"] or {}).items()
-                }
+                {key.lower(): value for key, value in (ffresult["format"]["tags"] or {}).items()}
             )
             if not tags:
                 return tag_dict
@@ -557,11 +487,11 @@ def extract_id3_tags(
     except Exception as e:
         if throw:
             raise HeaderNotFoundError(
-                f"Error: Could not extract id3 tags from {file} with tags {', '.join(tags)}"
+                f"Error: Could not extract id3 tags from {path} with tags {', '.join(tags)}"
             ) from e
         # if cfg.DEBUG:
         #     print_debug(
-        #         f"Could not read '{tag}' from {file}'s id3 tags, it probably doesn't exist"
+        #         f"Could not read '{tag}' from {path}'s id3 tags, it probably doesn't exist"
         #     )
     return {}
 
@@ -584,11 +514,7 @@ class BaseScoreCard:
         available = list(set([p.split("_")[-1] for p in self.props]))
         return {
             k: getattr(self._scorer._p, k)
-            for k in [
-                _k
-                for _k in dir(self._scorer._p)
-                if not _k.startswith("_") and any((p in _k for p in available))
-            ]
+            for k in [_k for _k in dir(self._scorer._p) if not _k.startswith("_") and any((p in _k for p in available))]
         }
 
     @property
@@ -606,9 +532,7 @@ class BaseScoreCard:
         scores = [
             (cast(TagSource, re.sub(rep, "", p)), getattr(self, p), p)
             for p in dir(self)
-            if not p.startswith("_")
-            and p.endswith(self._prop)
-            and isinstance(getattr(self, p), int)
+            if not p.startswith("_") and p.endswith(self._prop) and isinstance(getattr(self, p), int)
         ]
         if not scores or all(score[1] <= 0 for score in scores):
             return "unknown", 0, None
@@ -747,15 +671,9 @@ def custom_sort(key: str, next_key: str) -> int:
     underscored = key.startswith("_")
     next_underscored = next_key.startswith("_")
     # next_group = not next_key.startswith("_") and re.sub(r"(^[a-z])", "", next_key)
-    mapped_key = (
-        None
-        if not underscored
-        else next((KEY_MAP[i] for i in KEY_MAP if key.startswith(i)), None)
-    )
+    mapped_key = None if not underscored else next((KEY_MAP[i] for i in KEY_MAP if key.startswith(i)), None)
     next_mapped_key = (
-        None
-        if not next_underscored
-        else next((KEY_MAP[i] for i in KEY_MAP if next_key.startswith(i)), None)
+        None if not next_underscored else next((KEY_MAP[i] for i in KEY_MAP if next_key.startswith(i)), None)
     )
 
     # if neither have mapped keys, just compare them as is
@@ -763,9 +681,7 @@ def custom_sort(key: str, next_key: str) -> int:
         return -1 if key < next_key else int(key > next_key)
 
     group = mapped_key if mapped_key else re.sub(r"([^a-z]*)$", "", key)
-    next_group = (
-        next_mapped_key if next_mapped_key else re.sub(r"([^a-z]*)$", "", next_key)
-    )
+    next_group = next_mapped_key if next_mapped_key else re.sub(r"([^a-z]*)$", "", next_key)
     # next_group = not next_key.startswith("_") and re.sub(r"(^[a-z])", "", next_key)
     groups_match = group == next_group
 
@@ -791,9 +707,7 @@ class MetadataProps:
     ):
 
         common_filename = (
-            find_greatest_common_string(
-                [book.sample_audio1.name, book.sample_audio2.name]
-            )
+            find_greatest_common_string([book.sample_audio1.name, book.sample_audio2.name])
             if book.sample_audio2
             else book.sample_audio1.name
         )
@@ -813,9 +727,7 @@ class MetadataProps:
 
         self.sortalbum1 = book.id3_sortalbum
         self.sortalbum2 = sample_audio2_tags.get("sortalbum", "")
-        self.sortalbum_c = find_greatest_common_string(
-            [self.sortalbum1, self.sortalbum2]
-        )
+        self.sortalbum_c = find_greatest_common_string([self.sortalbum1, self.sortalbum2])
 
         self.artist1 = book.id3_artist
         self.artist2 = sample_audio2_tags.get("artist", "")
@@ -823,9 +735,7 @@ class MetadataProps:
 
         self.albumartist1 = book.id3_albumartist
         self.albumartist2 = sample_audio2_tags.get("albumartist", "")
-        self.albumartist_c = find_greatest_common_string(
-            [self.albumartist1, self.albumartist2]
-        )
+        self.albumartist_c = find_greatest_common_string([self.albumartist1, self.albumartist2])
 
         self.date = book.id3_date
         self.year = get_year_from_date(self.date)
@@ -835,10 +745,8 @@ class MetadataProps:
         self.author_in_comment = parse_author(self.comment, "comment", fallback="")
         self.narrator_in_comment = parse_narrator(self.comment, "comment", fallback="")
 
-        self._t_is_partno, self._t_partno_score, self._t_is_only_part_no = (
-            get_title_partno_score(
-                self.title1, self.title2, self.album1, self.sortalbum1
-            )
+        self._t_is_partno, self._t_partno_score, self._t_is_only_part_no = get_title_partno_score(
+            self.title1, self.title2, self.album1, self.sortalbum1
         )
         if self._t_is_partno:
             self.title_c = strip_part_number(self.title_c)
@@ -860,13 +768,9 @@ class MetadataProps:
             self._t1_startswith_num = startswith_num_pattern.match(self.title1)
             self._t1_is_numeric = self._t1_numbers == self.title1
             self._t1_is_in_fs_name = self.title1.lower() in self.fs_name_lower
-            self._t1_similarity_to_fs_name = similarity_score(
-                self.title1.lower(), self.fs_name_lower
-            )
+            self._t1_similarity_to_fs_name = similarity_score(self.title1.lower(), self.fs_name_lower)
             self._t1_eq_t2 = self.title1 == self.title2
-            self._t1_similarity_to_t2 = similarity_score(
-                self.title1.lower(), self.title2.lower()
-            )
+            self._t1_similarity_to_t2 = similarity_score(self.title1.lower(), self.title2.lower())
 
         self._t2_is_in_fs_name = False
         self._t2_is_missing = not self.title2
@@ -882,9 +786,7 @@ class MetadataProps:
         if self.title_c:
             self._tc_is_numeric = get_numbers_in_string(self.title_c) == self.title_c
             self._tc_is_in_fs_name = self.title_c.lower() in self.fs_name_lower
-            self._tc_similarity_to_fs_name = similarity_score(
-                self.title_c.lower(), self.fs_name_lower
-            )
+            self._tc_similarity_to_fs_name = similarity_score(self.title_c.lower(), self.fs_name_lower)
 
         # Album
         self._al1_eq_al2 = False
@@ -897,12 +799,8 @@ class MetadataProps:
         self._al1_is_missing = not self.album1
         if self.album1:
             self._al1_eq_al2 = self.album1 == self.album2
-            self._al1_similarity_to_fs_name = similarity_score(
-                self.album1.lower(), self.fs_name_lower
-            )
-            self._al1_similarity_to_al2 = similarity_score(
-                self.album1.lower(), self.album2.lower()
-            )
+            self._al1_similarity_to_fs_name = similarity_score(self.album1.lower(), self.fs_name_lower)
+            self._al1_similarity_to_al2 = similarity_score(self.album1.lower(), self.album2.lower())
             self._al1_is_in_fs_name = self.album1.lower() in self.fs_name_lower
             self._al1_is_in_title = self.album1.lower() in self.title1.lower()
             self._al1_numbers = get_numbers_in_string(self.album1)
@@ -930,12 +828,8 @@ class MetadataProps:
         self._sal1_is_missing = not self.sortalbum1
         if self.sortalbum1:
             self._sal1_eq_sal2 = self.sortalbum1 == self.sortalbum2
-            self._sal1_similarity_to_fs_name = similarity_score(
-                self.sortalbum1.lower(), self.fs_name_lower
-            )
-            self._sal1_similarity_to_sal2 = similarity_score(
-                self.sortalbum1.lower(), self.sortalbum2.lower()
-            )
+            self._sal1_similarity_to_fs_name = similarity_score(self.sortalbum1.lower(), self.fs_name_lower)
+            self._sal1_similarity_to_sal2 = similarity_score(self.sortalbum1.lower(), self.sortalbum2.lower())
             self._sal1_is_in_fs_name = self.sortalbum1.lower() in self.fs_name_lower
             self._sal1_is_in_title = self.sortalbum1.lower() in self.title1.lower()
             self._sal1_numbers = get_numbers_in_string(self.sortalbum1)
@@ -960,21 +854,15 @@ class MetadataProps:
         self._sal_similarity_to_t = 0
         self._sal_similarity_to_al = 0
         if all((self.title1, self.album1)):
-            self._al_similarity_to_t = similarity_score(
-                self.album1.lower(), self.title1.lower()
-            )
+            self._al_similarity_to_t = similarity_score(self.album1.lower(), self.title1.lower())
             self._al_similarity_to_t = self._al_similarity_to_t
 
         if all((self.title1, self.sortalbum1)):
-            self._sal_similarity_to_t = similarity_score(
-                self.sortalbum1.lower(), self.title1.lower()
-            )
+            self._sal_similarity_to_t = similarity_score(self.sortalbum1.lower(), self.title1.lower())
             self._sal_similarity_to_t = self._sal_similarity_to_t
 
         if all((self.album1, self.sortalbum1)):
-            self._al_similarity_to_sal = similarity_score(
-                self.album1.lower(), self.sortalbum1.lower()
-            )
+            self._al_similarity_to_sal = similarity_score(self.album1.lower(), self.sortalbum1.lower())
             self._al_similarity_to_sal = self._al_similarity_to_sal
 
         # Artist
@@ -987,9 +875,7 @@ class MetadataProps:
         if self.artist1:
             self._ar1_eq_ar2 = self.artist1 == self.artist2
             self._ar1_is_in_fs_name = self.artist1.lower() in self.fs_name_lower
-            self._ar1_similarity_to_fs_name = similarity_score(
-                self.artist1.lower(), self.fs_name_lower
-            )
+            self._ar1_similarity_to_fs_name = similarity_score(self.artist1.lower(), self.fs_name_lower)
             self._ar1_is_graphic_audio = has_graphic_audio(self.artist1)
 
         self._ar2_is_in_fs_name = False
@@ -1008,9 +894,7 @@ class MetadataProps:
         if self.albumartist1:
             self._aar1_eq_aar2 = self.albumartist1 == self.albumartist2
             self._aar1_is_in_fs_name = self.albumartist1.lower() in self.fs_name_lower
-            self._aar1_similarity_to_fs_name = similarity_score(
-                self.albumartist1.lower(), self.fs_name_lower
-            )
+            self._aar1_similarity_to_fs_name = similarity_score(self.albumartist1.lower(), self.fs_name_lower)
             self._aar1_is_graphic_audio = has_graphic_audio(self.albumartist1)
 
         self._aar2_is_missing = not self.albumartist2
@@ -1022,24 +906,18 @@ class MetadataProps:
         self._ar_similarity_to_aar = 0
         self._aar_similarity_to_ar = 0
         if all((self.artist1, self.albumartist1)):
-            self._ar_similarity_to_aar = similarity_score(
-                self.artist1.lower(), self.albumartist1.lower()
-            )
+            self._ar_similarity_to_aar = similarity_score(self.artist1.lower(), self.albumartist1.lower())
             self._ar_similarity_to_aar = self._ar_similarity_to_aar
 
         self._ar1_parsed_author = parse_author(self.artist1, "generic")
         self._ar1_parsed_narrator = parse_narrator(self.artist1, "generic")
         self._ar1_parsed_author_similarity_to_narrator = (
-            similarity_score(self._ar1_parsed_author, self._ar1_parsed_narrator)
-            if self._ar1_parsed_author
-            else 0
+            similarity_score(self._ar1_parsed_author, self._ar1_parsed_narrator) if self._ar1_parsed_author else 0
         )
         self._aar1_parsed_author = parse_author(self.albumartist1, "generic")
         self._aar1_parsed_narrator = parse_narrator(self.albumartist1, "generic")
         self._aar1_parsed_author_similarity_to_narrator = (
-            similarity_score(self._aar1_parsed_author, self._aar1_parsed_narrator)
-            if self._aar1_parsed_author
-            else 0
+            similarity_score(self._aar1_parsed_author, self._aar1_parsed_narrator) if self._aar1_parsed_author else 0
         )
 
         # Comment
@@ -1050,32 +928,24 @@ class MetadataProps:
         self._comment_author_eq_comment_narrator = False
 
         # Complex
-        self._ar_eq_aar = bool(
-            self.artist1 and self.albumartist1 and self.artist1 == self.albumartist1
-        )
+        self._ar_eq_aar = bool(self.artist1 and self.albumartist1 and self.artist1 == self.albumartist1)
         self._ar_but_no_aar = bool(self.artist1 and not self.albumartist1)
         self._aar_but_no_ar = bool(self.albumartist1 and not self.artist1)
         self._ar_has_slash = bool("/" in self.artist1)
         self._aar_has_slash = bool("/" in self.albumartist1)
 
         if self.author_in_comment:
-            self._comment_author_eq_comment_narrator = (
-                self.narrator_in_comment == self.author_in_comment
-            )
+            self._comment_author_eq_comment_narrator = self.narrator_in_comment == self.author_in_comment
             if self.artist1:
                 self._ar1_eq_comment_author = self.author_in_comment == self.artist1
             if self.albumartist1:
-                self._aar1_eq_comment_author = (
-                    self.author_in_comment == self.albumartist1
-                )
+                self._aar1_eq_comment_author = self.author_in_comment == self.albumartist1
 
         if self.narrator_in_comment:
             if self.artist1:
                 self._ar1_eq_comment_narrator = self.narrator_in_comment == self.artist1
             if self.albumartist1:
-                self._aar1_eq_comment_narrator = (
-                    self.narrator_in_comment == self.albumartist1
-                )
+                self._aar1_eq_comment_narrator = self.narrator_in_comment == self.albumartist1
 
         str(self)
 
@@ -1253,12 +1123,7 @@ class MetadataScore:
             common_title_is_title += 3 * self._p._tc_similarity_to_fs_name
             common_title_is_title -= 2 * int(self._p._tc_is_numeric)
             common_title_is_title += int(
-                (
-                    len(self._p.title_c)
-                    if not self._p._t1_eq_t2
-                    else -len(self._p.title_c)
-                )
-                / 10
+                (len(self._p.title_c) if not self._p._t1_eq_t2 else -len(self._p.title_c)) / 10
             )
             common_title_is_title += 4 * self._p._t1_similarity_to_t2
 
@@ -1297,12 +1162,7 @@ class MetadataScore:
         if self._p.album1 and self._p.album2:
             common_album_is_title = max(0, album_is_title)
             common_album_is_title += int(
-                (
-                    len(self._p.album_c)
-                    if not self._p._al1_eq_al2
-                    else -len(self._p.album_c)
-                )
-                / 10
+                (len(self._p.album_c) if not self._p._al1_eq_al2 else -len(self._p.album_c)) / 10
             )
             common_album_is_title += 4 * int(self._p._al1_similarity_to_al2)
 
@@ -1325,12 +1185,7 @@ class MetadataScore:
         if self._p.sortalbum1 and self._p.sortalbum2:
             common_sortalbum_is_title = max(0, sortalbum_is_title)
             common_sortalbum_is_title += int(
-                (
-                    len(self._p.sortalbum_c)
-                    if not self._p._sal1_eq_sal2
-                    else -len(self._p.sortalbum_c)
-                )
-                / 10
+                (len(self._p.sortalbum_c) if not self._p._sal1_eq_sal2 else -len(self._p.sortalbum_c)) / 10
             )
             common_sortalbum_is_title += 4 * int(self._p._sal1_similarity_to_sal2)
 
@@ -1381,13 +1236,9 @@ class MetadataScore:
             artist_is_author += self._p._ar1_parsed_author_similarity_to_narrator
 
             if self._p.author_in_comment:
-                artist_is_author += similarity_score(
-                    self._p.author_in_comment, self._p.artist1
-                )
+                artist_is_author += similarity_score(self._p.author_in_comment, self._p.artist1)
             if self._p.narrator_in_comment:
-                artist_is_author += 10 * int(
-                    -1 if self._p._ar1_eq_comment_narrator else 1
-                )
+                artist_is_author += 10 * int(-1 if self._p._ar1_eq_comment_narrator else 1)
         else:
             artist_is_author = -404
 
@@ -1409,14 +1260,10 @@ class MetadataScore:
             albumartist_is_author += self._p._aar1_parsed_author_similarity_to_narrator
 
             if self._p.author_in_comment:
-                albumartist_is_author += similarity_score(
-                    self._p.author_in_comment, self._p.albumartist1
-                )
+                albumartist_is_author += similarity_score(self._p.author_in_comment, self._p.albumartist1)
 
             if self._p.narrator_in_comment:
-                albumartist_is_author += 10 * int(
-                    -1 if self._p._aar1_eq_comment_narrator else 1
-                )
+                albumartist_is_author += 10 * int(-1 if self._p._aar1_eq_comment_narrator else 1)
         else:
             albumartist_is_author = -404
 
@@ -1426,18 +1273,14 @@ class MetadataScore:
 
         if self._p.albumartist1 and self._p.albumartist2:
             common_albumartist_is_author = max(0, albumartist_is_author)
-            common_albumartist_is_author += int(
-                10 if not self._p._aar1_eq_aar2 else -10
-            )
+            common_albumartist_is_author += int(10 if not self._p._aar1_eq_aar2 else -10)
             albumartist_is_author += int(10 if self._p._aar1_eq_aar2 else -10)
 
         if self._p.artist1 != self._p.albumartist1:
             artist_is_author += 1
 
         if self._p.author_in_comment and self._p.narrator_in_comment:
-            comment_contains_author += 10 * int(
-                -1 if self._p._comment_author_eq_comment_narrator else 1
-            )
+            comment_contains_author += 10 * int(-1 if self._p._comment_author_eq_comment_narrator else 1)
 
         # Update the scores
         self.author.artist_is_author = artist_is_author
@@ -1497,13 +1340,9 @@ class MetadataScore:
                 artist_is_narrator -= self._p._ar1_parsed_author_similarity_to_narrator
 
                 if self._p.narrator_in_comment:
-                    artist_is_narrator += similarity_score(
-                        self._p.narrator_in_comment, self._p.artist1
-                    )
+                    artist_is_narrator += similarity_score(self._p.narrator_in_comment, self._p.artist1)
                 if self._p.author_in_comment:
-                    artist_is_narrator += 10 * int(
-                        -1 if self._p._ar1_eq_comment_author else 1
-                    )
+                    artist_is_narrator += 10 * int(-1 if self._p._ar1_eq_comment_author else 1)
 
             else:
                 artist_is_narrator = -404
@@ -1521,26 +1360,16 @@ class MetadataScore:
             # Album Artist weights
             if self._p.albumartist1 and not self.author._is_likely[0] == "albumartist":
                 albumartist_is_narrator += int(self._p._aar1_is_in_fs_name)
-                albumartist_is_narrator -= max(
-                    0, int(self._p._aar1_similarity_to_fs_name)
-                )
+                albumartist_is_narrator -= max(0, int(self._p._aar1_similarity_to_fs_name))
                 albumartist_is_narrator -= 500 * int(self._p._aar1_is_graphic_audio)
-                albumartist_is_narrator += int(
-                    10 if self._p._aar1_parsed_narrator else -10
-                )
-                albumartist_is_narrator -= (
-                    self._p._aar1_parsed_author_similarity_to_narrator
-                )
+                albumartist_is_narrator += int(10 if self._p._aar1_parsed_narrator else -10)
+                albumartist_is_narrator -= self._p._aar1_parsed_author_similarity_to_narrator
 
                 if self._p.narrator_in_comment:
-                    albumartist_is_narrator += similarity_score(
-                        self._p.narrator_in_comment, self._p.albumartist1
-                    )
+                    albumartist_is_narrator += similarity_score(self._p.narrator_in_comment, self._p.albumartist1)
 
                 if self._p.author_in_comment:
-                    albumartist_is_narrator += 10 * int(
-                        -1 if self._p._aar1_eq_comment_author else 1
-                    )
+                    albumartist_is_narrator += 10 * int(-1 if self._p._aar1_eq_comment_author else 1)
             else:
                 albumartist_is_narrator = -404
 
@@ -1551,9 +1380,7 @@ class MetadataScore:
 
             if self._p.albumartist1 and self._p.albumartist2:
                 common_albumartist_is_narrator = max(0, albumartist_is_narrator)
-                common_albumartist_is_narrator += int(
-                    10 if not self._p._aar1_eq_aar2 else -10
-                )
+                common_albumartist_is_narrator += int(10 if not self._p._aar1_eq_aar2 else -10)
                 albumartist_is_narrator += int(10 if self._p._aar1_eq_aar2 else -10)
 
         if self._p.composer and self._p.composer != self._p.artist1:
@@ -1576,9 +1403,7 @@ class MetadataScore:
             return self._albumartist
 
         if self._p._aar1_is_missing or self._p._aar1_eq_comment_narrator:
-            self._albumartist = parse_author(
-                self.author._value, "generic", fallback=self._p.author_in_comment
-            )
+            self._albumartist = parse_author(self.author._value, "generic", fallback=self._p.author_in_comment)
         elif self._p._aar_has_slash or self.narrator._value != self.author._value:
             self._albumartist = parse_narrator(self._p.albumartist1, "generic")
         else:
@@ -1632,8 +1457,7 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     # read id3 tags of audio file
     sample_audio1_tags = extract_id3_tags(book.sample_audio1)
     sample_audio2_tags = extract_id3_tags(
-        book.sample_audio2
-        or book.sample_audio1  # if only one audio file, fall back to the same file
+        book.sample_audio2 or book.sample_audio1  # if only one audio file, fall back to the same file
     )
 
     for tag, value in sample_audio1_tags.items():

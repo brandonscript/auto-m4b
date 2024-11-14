@@ -7,7 +7,6 @@ from pytest import CaptureFixture
 from src.auto_m4b import app
 from src.lib.audiobook import Audiobook
 from src.lib.config import OnComplete
-from src.lib.fs_utils import find_book_dirs_in_inbox
 from src.lib.id3_utils import extract_cover_art
 from src.lib.inbox_state import InboxState
 from src.lib.misc import re_group
@@ -29,13 +28,9 @@ class test_happy_paths:
         ],
         indirect=["indirect_fixture", "capfd"],
     )
-    def test_basic_book_mp3(
-        self, indirect_fixture: Audiobook, capfd: CaptureFixture[str]
-    ):
+    def test_basic_book_mp3(self, indirect_fixture: Audiobook, capfd: CaptureFixture[str]):
         book = indirect_fixture
-        quality = f"{book.bitrate_friendly} @ {book.samplerate_friendly}".replace(
-            "kb/s", "kbps"
-        )
+        quality = f"{book.bitrate_friendly} @ {book.samplerate_friendly}".replace("kb/s", "kbps")
         app(max_loops=1)
         assert testutils.assert_processed_output(
             capfd,
@@ -56,9 +51,7 @@ class test_happy_paths:
             loops=[testutils.check_output(found_books_eq=4, converted_eq=3)],
         )
 
-    def test_backup_book_mp3(
-        self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str], enable_backups
-    ):
+    def test_backup_book_mp3(self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str], enable_backups):
         app(max_loops=1)
         out = testutils.get_stdout(capfd)
         assert "Making a backup copy" in out
@@ -137,11 +130,7 @@ class test_happy_paths:
         converted = len(testutils.get_all_processed_books(out))
         assert found == matched_books
         assert ignoring == filtered_books
-        assert (
-            found + ignoring
-            == len(inbox_dirs)
-            == len(find_book_dirs_in_inbox()) + converted
-        )
+        assert found + ignoring == len(inbox_dirs) == len(find_book_dirs_in_inbox()) + converted
         # With archiving enabled, the inbox should have 2 fewer books.
         # If archiving is disabled, the inbox should have the same number of books.
 
@@ -170,10 +159,7 @@ class test_happy_paths:
     ):
         with testutils.set_backups(backups_enabled):
             qualities = [
-                f"{b.bitrate_friendly} @ {b.samplerate_friendly}".replace(
-                    "kb/s", "kbps"
-                )
-                for b in Chanur_Series
+                f"{b.bitrate_friendly} @ {b.samplerate_friendly}".replace("kb/s", "kbps") for b in Chanur_Series
             ]
             app(max_loops=1)
             out = testutils.get_stdout(capfd)
@@ -309,9 +295,7 @@ class test_happy_paths:
         ],
         indirect=["indirect_fixture", "capfd"],
     )
-    def test_cover_art_is_tagged(
-        self, indirect_fixture: Audiobook, capfd: CaptureFixture[str]
-    ):
+    def test_cover_art_is_tagged(self, indirect_fixture: Audiobook, capfd: CaptureFixture[str]):
         book = indirect_fixture
         # testutils.set_match_filter(r"^basic_\w+_cover")
         app(max_loops=1)

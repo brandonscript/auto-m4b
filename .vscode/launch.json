@@ -10,7 +10,16 @@
       "request": "launch",
       "envFile": "${workspaceFolder}/.env",
       "module": "src",
-      "args": ["-l", "1", "--env", "${workspaceFolder}/.env.local.stardust", "--debug"]
+      "justMyCode": false,
+      "args": [
+        "--env",
+        "${workspaceFolder}/.env.local.stardust",
+        "--debug",
+        "--test",
+        "--match",
+        "Touch of Frost"
+      ]
+      // "args": ["-l", "1", "--env", "${workspaceFolder}/.env.local.stardust", "--debug"]
     }
   ]
 }

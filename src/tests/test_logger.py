@@ -104,9 +104,7 @@ def test_load_existing_log(tower_treasure__flat_mp3: Audiobook, global_test_log:
     )
 
 
-def test_repeat_success_writes_to_log(
-    tower_treasure__flat_mp3: Audiobook, global_test_log: Path
-):
+def test_repeat_success_writes_to_log(tower_treasure__flat_mp3: Audiobook, global_test_log: Path):
     check_ground_truth(global_test_log)
 
     log_global_results(tower_treasure__flat_mp3, "success", 163, global_test_log)
@@ -124,9 +122,7 @@ def test_repeat_success_writes_to_log(
     )
 
 
-def test_repeat_failed_writes_to_log(
-    tower_treasure__flat_mp3: Audiobook, global_test_log: Path
-):
+def test_repeat_failed_writes_to_log(tower_treasure__flat_mp3: Audiobook, global_test_log: Path):
     check_ground_truth(global_test_log)
 
     orig_duration = tower_treasure__flat_mp3.duration
@@ -155,9 +151,7 @@ def test_repeat_failed_writes_to_log(
     )
 
 
-def test_write_long_title_to_log(
-    conspiracy_theories__flat_mp3: Audiobook, global_test_log: Path
-):
+def test_write_long_title_to_log(conspiracy_theories__flat_mp3: Audiobook, global_test_log: Path):
     check_ground_truth(global_test_log)
 
     log_global_results(conspiracy_theories__flat_mp3, "success", 163, global_test_log)
@@ -198,5 +192,5 @@ def test_logs_m4b_tool_failures(corrupt_audiobook: Audiobook, global_test_log: P
     app(max_loops=1, test=True)
     assert global_test_log.exists()
     assert log_file.exists()
-    ffprobe_log = corrupt_audiobook.sample_audio1.with_suffix(".ffprobe-error.txt")
+    ffprobe_log = corrupt_audiobook.sample_audio1.path.with_suffix(".ffprobe-error.txt")
     assert ffprobe_log.exists()

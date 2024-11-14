@@ -26,6 +26,10 @@ cfg.PID_FILE.unlink(missing_ok=True)
 
 class testutils:
 
+    @staticmethod
+    def pring_out_lines(out_run: str):
+        print(out_run.splitlines())
+
     class check_output(BaseModel):
         already_converted_eq: int | None = None
         already_converted_gt: int | None = None

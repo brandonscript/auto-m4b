@@ -7,13 +7,8 @@ from pathlib import Path
 from typing import Any, cast, TypeVar
 
 from src.lib.audiobook import Audiobook
+from src.lib.books_tree import BooksTree
 from src.lib.formatters import friendly_short_date
-from src.lib.fs_utils import (
-    count_audio_files_in_inbox,
-    find_book_dirs_in_inbox,
-    find_books_in_inbox,
-    find_standalone_books_in_inbox,
-)
 from src.lib.hasher import Hasher
 from src.lib.inbox_item import get_item, get_key, InboxItem, InboxItemStatus
 from src.lib.misc import singleton
@@ -71,6 +66,7 @@ class InboxState(Hasher):
         self.loop_counter = 0
         self.banner_printed = False
         # print_debug("Set banner_printed to False")
+        self._tree = BooksTree(cfg.inbox_dir)
         self._last_scan = 0
 
     def set(
@@ -89,9 +85,7 @@ class InboxState(Hasher):
             self._items[item.key].status = status
 
     @requires_scan
-    def get(
-        self, key_path_hash_or_book: str | Path | Audiobook | None
-    ) -> InboxItem | None:
+    def get(self, key_path_hash_or_book: str | Path | Audiobook | None) -> InboxItem | None:
         if not key_path_hash_or_book:
             return None
         key = get_key(key_path_hash_or_book)
@@ -99,11 +93,7 @@ class InboxState(Hasher):
         if simple:
             return simple
         return next(
-            (
-                item
-                for item in self._items.values()
-                if key in [item.key, item.hash, item.path]
-            ),
+            (item for item in self._items.values() if key in [item.key, item.hash, item.path]),
             None,
         )
 
@@ -114,7 +104,6 @@ class InboxState(Hasher):
 
     def scan(
         self,
-        *paths: str | Path,
         recheck_failed: bool = False,
         skip_failed_sync: bool = False,
         set_ready: bool = False,
@@ -132,16 +121,9 @@ class InboxState(Hasher):
 
         super().scan()
 
-        if paths:
-            _paths = [
-                p.relative_to(cfg.inbox_dir)
-                for p in map(Path, paths)
-                if not p.is_absolute()
-            ]
-        else:
-            _paths = find_books_in_inbox()
+        self._tree = BooksTree(cfg.inbox_dir)
 
-        new_items = {p.name: InboxItem(p) for p in _paths}
+        new_items = {str(t.path): InboxItem(t) for t in self._tree.books_and_series}
 
         # smart_print(f"scan calls: {SCAN_CALLS}", SCAN_CALLS)
         # try:
@@ -156,9 +138,7 @@ class InboxState(Hasher):
             if k not in self._items:
                 self._items[k] = v
             elif recheck_failed and (item := self._items[k]):
-                if item.status == "failed" and (
-                    item.did_change or item.hash_age < cfg.SLEEP_TIME
-                ):
+                if item.status == "failed" and (item.did_change or item.hash_age < cfg.SLEEP_TIME):
                     item.set_needs_retry()
 
         # remove items that are no longer in the inbox
@@ -185,9 +165,7 @@ class InboxState(Hasher):
 
         if not cfg.MATCH_FILTER and (env := os.getenv("MATCH_FILTER")):
             self.set_match_filter(env)
-            print_debug(
-                f"Setting match filter from env: {cfg.MATCH_FILTER} (was not previoulsy set in state)"
-            )
+            print_debug(f"Setting match filter from env: {cfg.MATCH_FILTER} (was not previoulsy set in state)")
         return cfg.MATCH_FILTER
 
     def set_match_filter(self, match_filter: str | None):
@@ -252,19 +230,15 @@ class InboxState(Hasher):
 
     @property
     def num_audio_files_deep(self):
-        return count_audio_files_in_inbox()
+        return len(self._tree.files_recursive)
 
     @property
     def standalone_files(self):
-        return find_standalone_books_in_inbox()
+        return self._tree.standalone_files
 
     @property
     def standalone_books(self):
-        return {
-            k: v
-            for k, v in self._items.items()
-            if v.is_file and v.status in ("ok", "new", "needs_retry")
-        }
+        return {k: v for k, v in self._items.items() if v.is_file and v.status in ("ok", "new", "needs_retry")}
 
     @property
     def num_standalone_books(self):
@@ -272,19 +246,17 @@ class InboxState(Hasher):
 
     @property
     def book_dirs(self):
-        return find_book_dirs_in_inbox()
+        return list(filter(lambda x: x.is_dir(), self._tree.books_and_series))
 
     @property
     def series_parents(self):
-        return find_book_dirs_in_inbox(only_series_parents=True)
+        return list(filter(lambda x: x.has_structure("series_parent"), self._tree.books_and_series))
 
     def series_items_for_key(self, key: str):
         return [
             v
             for _k, v in self._items.items()
-            if v.series_key == key
-            or Path(v.key).parts[0] == key
-            and v.is_maybe_series_book
+            if v.series_key == key or Path(v.key).parts[0] == key and v.is_maybe_series_book
         ]
 
     @property
@@ -306,11 +278,7 @@ class InboxState(Hasher):
     @property
     def matched_books(self):
         return filter_series_parents(
-            {
-                k: v
-                for k, v in self._items.items()
-                if not v.is_filtered and not v.status in ["gone"]
-            }
+            {k: v for k, v in self._items.items() if not v.is_filtered and not v.status in ["gone"]}
         )
 
     @property
@@ -319,13 +287,7 @@ class InboxState(Hasher):
 
     @property
     def ok_books(self):
-        return filter_series_parents(
-            {
-                k: v
-                for k, v in self._items.items()
-                if v.status in ["ok", "new", "needs_retry"]
-            }
-        )
+        return filter_series_parents({k: v for k, v in self._items.items() if v.status in ["ok", "new", "needs_retry"]})
 
     @property
     def num_ok(self):
@@ -353,11 +315,7 @@ class InboxState(Hasher):
 
     @property
     def all_books_failed(self):
-        haystack = (
-            self._items.values()
-            if not self.match_filter
-            else self.matched_books.values()
-        )
+        haystack = self._items.values() if not self.match_filter else self.matched_books.values()
         return all(v.status == "failed" for v in haystack)
 
     @requires_scan
@@ -395,32 +353,24 @@ class InboxState(Hasher):
 
         self.changed_after_waiting = False
         waited_count = 0
-        before_modified_hash = (
-            self.prev_hash if self.hash_age < cfg.SLEEP_TIME else self.curr_hash
-        )
+        before_modified_hash = self.prev_hash if self.hash_age < cfg.SLEEP_TIME else self.curr_hash
         _banner_printed = False
         # rec_mod = self.dir_was_recently_modified
         while self.dir_was_recently_modified:
-            print_debug(
-                f"{en.DEBUG_WAITING_FOR_INBOX} {waited_count + 1} ({before_modified_hash} → {self.curr_hash})"
-            )
+            print_debug(f"{en.DEBUG_WAITING_FOR_INBOX} {waited_count + 1} ({before_modified_hash} → {self.curr_hash})")
             self.scan()
             if not self.changed_after_waiting:
                 self.changed_after_waiting = self.next_hash != before_modified_hash
 
             if self.changed_after_waiting and not _banner_printed:
                 self.stale = True
-                print_banner(
-                    after=lambda: print_notice(f"{en.INBOX_RECENTLY_MODIFIED}\n")
-                )
+                print_banner(after=lambda: print_notice(f"{en.INBOX_RECENTLY_MODIFIED}\n"))
                 _banner_printed = True
 
             waited_count += 1
             time.sleep(0.5)
 
-        needs_scan = (
-            self.changed_since_last_run_ended or self.changed_since_last_run_started
-        )
+        needs_scan = self.changed_since_last_run_ended or self.changed_since_last_run_started
 
         # print_debug(
         #     f"----------------------------\n"
@@ -474,17 +424,11 @@ class InboxState(Hasher):
         return False
 
     def to_dict(self, refresh_hashes=False):
-        return {
-            path: item.to_dict(refresh_hashes) for path, item in self._items.items()
-        }
+        return {path: item.to_dict(refresh_hashes) for path, item in self._items.items()}
 
     @property
     def fixed_books(self):
-        return {
-            k: v
-            for k, v in self._items.items()
-            if v.status == "needs_retry" and v.failed_reason
-        }
+        return {k: v for k, v in self._items.items() if v.status == "needs_retry" and v.failed_reason}
 
     def set_failed(
         self,
@@ -550,14 +494,10 @@ class InboxState(Hasher):
 
 
 def _sync_failed_to_env():
-    os.environ["FAILED_BOOKS"] = json.dumps(
-        {k: v.last_updated for k, v in InboxState().failed_books.items()}
-    )
+    os.environ["FAILED_BOOKS"] = json.dumps({k: v.last_updated for k, v in InboxState().failed_books.items()})
 
 
 def _sync_failed_from_env():
-    failed_books = {
-        k: float(v) for k, v in json.loads(os.getenv("FAILED_BOOKS", "{}")).items()
-    }
+    failed_books = {k: float(v) for k, v in json.loads(os.getenv("FAILED_BOOKS", "{}")).items()}
     for k, lu in failed_books.items():
         InboxState().set_failed(k, "From ENV", lu)

@@ -16,10 +16,7 @@ from src.tests.test_cleaners import strip_partno_tests
 
 def test_extract_path_info(benedict_society__mp3):
 
-    assert (
-        extract_path_info(benedict_society__mp3).fs_title
-        == "The Mysterious Benedict Society"
-    )
+    assert extract_path_info(benedict_society__mp3).fs_title == "The Mysterious Benedict Society"
 
 
 def test_bitrate_vbr(bitrate_vbr__mp3: Audiobook):
@@ -97,9 +94,7 @@ def test_get_roman_numerals_dict(input, expected):
         ),
     ],
 )
-def test_roman_numerals_affect_file_order(
-    test_files: list[str], expected, tmp_path: Path
-):
+def test_roman_numerals_affect_file_order(test_files: list[str], expected, tmp_path: Path):
 
     from src.lib.parsers import roman_numerals_affect_file_order
 
@@ -353,15 +348,15 @@ series_true_tests = [
         ],
     ],
 )
-def test_is_maybe_multi_book_or_series(test_case, expected):
+def test_is_maybe_multiple_books_or_series(test_case, expected):
 
-    from src.lib.parsers import is_maybe_multi_book_or_series
+    from src.lib.parsers import is_maybe_multiple_books_or_series
 
-    assert is_maybe_multi_book_or_series(test_case) == expected
-    assert is_maybe_multi_book_or_series(test_case.lower()) == expected
-    assert is_maybe_multi_book_or_series(test_case.title()) == expected
-    assert is_maybe_multi_book_or_series(test_case.capitalize()) == expected
-    assert is_maybe_multi_book_or_series(test_case.upper()) == expected
+    assert is_maybe_multiple_books_or_series(test_case) == expected
+    assert is_maybe_multiple_books_or_series(test_case.lower()) == expected
+    assert is_maybe_multiple_books_or_series(test_case.title()) == expected
+    assert is_maybe_multiple_books_or_series(test_case.capitalize()) == expected
+    assert is_maybe_multiple_books_or_series(test_case.upper()) == expected
 
 
 @pytest.mark.parametrize(

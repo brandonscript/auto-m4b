@@ -7,6 +7,7 @@ import cachetools
 import cachetools.func
 from pydantic import BaseModel
 
+from src.lib.books_tree import BooksTree
 from src.lib.config import cfg
 from src.lib.ffmpeg_utils import (
     DurationFmt,
@@ -14,14 +15,10 @@ from src.lib.ffmpeg_utils import (
     get_duration,
     get_samplerate_py,
 )
-from src.lib.formatters import human_bitrate
+from src.lib.formatters import human_bitrate, to_audiobook_fmt
 from src.lib.fs_utils import (
-    count_audio_files_in_dir,
     cp_file_to_dir,
-    find_book_audio_files,
     find_cover_art_file,
-    find_first_audio_file,
-    find_next_audio_file,
     get_size,
     hash_path_audio_files,
     last_updated_at,
@@ -29,11 +26,12 @@ from src.lib.fs_utils import (
 from src.lib.id3_utils import extract_cover_art, extract_metadata
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info
-from src.lib.typing import AudiobookFmt, BookStructure, DirName, SizeFmt
+from src.lib.typing import AudiobookFmt, BookStructure2, BookStructureTuple, DirName, SizeFmt
 
 
 class Audiobook(BaseModel):
     path: Path
+    tree: BooksTree
     id3_title: str = ""
     id3_artist: str = ""
     id3_albumartist: str = ""
@@ -67,17 +65,24 @@ class Audiobook(BaseModel):
     m4b_num_parts: int = 1
     _active_dir: DirName | None = None
 
-    def __init__(self, path: Path):
+    def __init__(self, path_or_tree: Path | BooksTree):
 
-        if not path.is_absolute():
-            path = cfg.inbox_dir.resolve() / path
+        if isinstance(path_or_tree, BooksTree):
+            tree = path_or_tree
+            path = path_or_tree.path
+        else:
+            path = path_or_tree
+            if not path_or_tree.is_absolute():
+                path = cfg.inbox_dir.resolve() / path_or_tree
+            tree = BooksTree(path_or_tree)
 
-        super().__init__(path=path)
+        super().__init__(path=path, tree=tree)
 
         self.path = path
+        self.tree = tree
         self._active_dir = get_dir_name_from_path(path)
-        if f := find_first_audio_file(self.path, ignore_errors=True):
-            self.orig_file_type = cast(AudiobookFmt, f.suffix.replace(".", ""))
+        if f := self.tree.first_audio_file():
+            self.orig_file_type = to_audiobook_fmt(f.path.suffix)
 
     def __str__(self):
         return f"{self.key}"
@@ -95,7 +100,7 @@ class Audiobook(BaseModel):
         if self.cover_art_file:
             return self.cover_art_file
         try:
-            extract_cover_art(self.sample_audio1, save_to_file=True)
+            extract_cover_art(self.sample_audio1.path, save_to_file=True)
             self._inbox_cover_art_file = cast(Path, find_cover_art_file(self.path))
             cp_file_to_dir(self._inbox_cover_art_file, self.merge_dir)
             return self.cover_art_file
@@ -136,7 +141,7 @@ class Audiobook(BaseModel):
         if self.build_dir.suffix == ".m4b":
             return self.build_dir
         try:
-            return find_first_audio_file(self.build_dir, ".m4b")
+            return BooksTree(self.build_dir).first_audio_file(".m4b").path
         except FileNotFoundError:
             return self.build_dir / f"{self.basename}.m4b"
 
@@ -145,17 +150,17 @@ class Audiobook(BaseModel):
         if self.converted_dir.suffix == ".m4b":
             return self.converted_dir
         try:
-            return find_first_audio_file(self.converted_dir, ".m4b")
+            return BooksTree(self.converted_dir).first_audio_file(".m4b").path
         except FileNotFoundError:
             return self.converted_dir / f"{self.basename}.m4b"
 
     @cached_property
     def sample_audio1(self):
-        return find_first_audio_file(self.path)
+        return self.tree.first_audio_file()
 
     @cached_property
     def sample_audio2(self):
-        return find_next_audio_file(self.sample_audio1)
+        return self.tree.next_audio_file(self.sample_audio1, ignore_errors=True)
 
     def rescan_structure(self):
         for attr in ["sample_audio1", "sample_audio2", "structure"]:
@@ -166,20 +171,18 @@ class Audiobook(BaseModel):
             getattr(self, attr)
 
     def last_updated_at(self, for_dir: DirName = "inbox"):
-        return last_updated_at(
-            getattr(self, for_dir + "_dir"), only_file_exts=cfg.AUDIO_EXTS
-        )
+        return last_updated_at(getattr(self, for_dir + "_dir"), only_file_exts=cfg.AUDIO_EXTS)
 
     def hash(self, for_dir: DirName = "inbox"):
         return hash_path_audio_files(getattr(self, for_dir + "_dir"))
 
     @cached_property
-    def structure(self) -> BookStructure:
-        return find_book_audio_files(self)[0]
+    def structure(self) -> BookStructureTuple:
+        return self.tree.structure
 
     def is_a(
         self,
-        structure: BookStructure | tuple[BookStructure, ...],
+        structure: BookStructure2 | tuple[BookStructure2, ...],
         fmt: AudiobookFmt | None = None,
         *,
         not_fmt: AudiobookFmt | tuple[AudiobookFmt | None, ...] | None = None,
@@ -227,7 +230,7 @@ class Audiobook(BaseModel):
         return self._inbox_item.num_books_in_series if self._inbox_item else -1
 
     def num_files(self, for_dir: DirName):
-        return count_audio_files_in_dir(getattr(self, for_dir + "_dir"))
+        return BooksTree(getattr(self, for_dir + "_dir")).count_files()
 
     @property
     def num_roman_numerals(self):
@@ -269,9 +272,7 @@ class Audiobook(BaseModel):
 
     @property
     def log_file(self) -> Path:
-        return (
-            self.active_dir.parent if self.active_dir.is_file() else self.active_dir
-        ) / self.log_filename
+        return (self.active_dir.parent if self.active_dir.is_file() else self.active_dir) / self.log_filename
 
     def write_log(self, *s: str):
         self.log_file.touch(exist_ok=True)
@@ -316,9 +317,7 @@ class Audiobook(BaseModel):
     def cover_art_file(self):
         if not self._inbox_cover_art_file:
             return None
-        merge_cover = self.merge_dir / self._inbox_cover_art_file.relative_to(
-            self.inbox_dir
-        )
+        merge_cover = self.merge_dir / self._inbox_cover_art_file.relative_to(self.inbox_dir)
         if not merge_cover.exists():
             cp_file_to_dir(self._inbox_cover_art_file, self.merge_dir)
         return merge_cover
@@ -350,9 +349,7 @@ class Audiobook(BaseModel):
 
     @property
     def final_desc_file(self):
-        quality = f"{self.bitrate_friendly} @ {self.samplerate_friendly}".replace(
-            "kb/s", "kbps"
-        )
+        quality = f"{self.bitrate_friendly} @ {self.samplerate_friendly}".replace("kb/s", "kbps")
         return self.converted_dir / f"{self.basename} [{quality}].txt"
 
     def write_description_txt(self, out_path: Path | None = None):
@@ -365,9 +362,7 @@ class Audiobook(BaseModel):
         )
         converted_duration = get_duration(m4b_file, "human") if m4b_file else "N/A"
         converted_size = get_size(m4b_file, "human") if m4b_file else "N/A"
-        orig_basename = (
-            f"{'File' if self.path.is_file() else 'Folder'} name: {self.basename}"
-        )
+        orig_basename = f"{'File' if self.path.is_file() else 'Folder'} name: {self.basename}"
 
         content = f"""Book title: {self.title}
 Author: {self.author}

@@ -5,6 +5,7 @@ from typing import Any, Literal, overload
 import cachetools.func
 import ffmpeg
 
+from src.lib.books_tree import BooksTree
 from src.lib.misc import fix_ffprobe
 
 fix_ffprobe()
@@ -80,7 +81,7 @@ def is_variable_bitrate(file: Path) -> bool:
 
 
 @cachetools.func.ttl_cache(maxsize=128, ttl=MEMO_TTL)
-def get_bitrate_py(file: Path) -> tuple[int, int]:
+def get_bitrate_py(file: "BooksTree | Path") -> tuple[int, int]:
     """Returns the bitrate of an audio file in bits per second.
 
     Args:
@@ -90,15 +91,16 @@ def get_bitrate_py(file: Path) -> tuple[int, int]:
     Returns:
         tuple[int, int]: (in kbps) The nearest standard bitrate, and the actual bitrate rounded to the nearest int.
     """
+    path = file.path if isinstance(file, BooksTree) else file
     try:
-        probe_result = ffmpeg.probe(str(file))
+        probe_result = ffmpeg.probe(str(path))
         actual_bitrate = int(probe_result["streams"][0]["bit_rate"])
         return get_nearest_standard_bitrate(actual_bitrate), actual_bitrate
     except ffmpeg.Error as e:
         from src.lib.logger import write_err_file
 
-        write_err_file(file, e, "ffprobe", e.stderr.decode())
-        print_error(f"Error getting bitrate for {file}")
+        write_err_file(path, e, "ffprobe", e.stderr.decode())
+        print_error(f"Error getting bitrate for {path}")
         return 0, 0
 
 
@@ -109,16 +111,17 @@ def get_bitrate_py(file: Path) -> tuple[int, int]:
 
 
 @cachetools.func.ttl_cache(maxsize=128, ttl=MEMO_TTL)
-def get_samplerate_py(file: Path) -> int:
+def get_samplerate_py(file: "BooksTree | Path") -> int:
+    path = file.path if isinstance(file, BooksTree) else file
     try:
-        probe_result = ffmpeg.probe(str(file))
+        probe_result = ffmpeg.probe(str(path))
         sample_rate = probe_result["streams"][0]["sample_rate"]
         return int(sample_rate)
     except ffmpeg.Error as e:
         from src.lib.logger import write_err_file
 
-        write_err_file(file, e, "ffprobe", e.stderr.decode())
-        print_error(f"Error getting sample rate for {file}")
+        write_err_file(path, e, "ffprobe", e.stderr.decode())
+        print_error(f"Error getting sample rate for {path}")
         return 0
 
 

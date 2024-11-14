@@ -10,7 +10,7 @@ import pytest
 from src.lib.fs_utils import clean_dirs, find_adjacent_files_with_same_basename
 from src.lib.id3_utils import extract_id3_tags, write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState
-from src.tests.helpers.pytest_dirs import FIXTURES_ROOT, GIT_ROOT, MOCKED, TEST_DIRS
+from src.tests.helpers.pytest_dumps import FIXTURES_ROOT, GIT_ROOT, MOCKED, TEST_DIRS
 from src.tests.helpers.pytest_utils import testutils
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -88,9 +88,7 @@ def load_test_fixture(
 
     src = next((f for f in [src_mp3, src_m4b, src_dir] if f.exists()), None)
     if not src or not src.exists():
-        raise FileNotFoundError(
-            f"Fixture {name} not found. Does it exist in {FIXTURES_ROOT}?"
-        )
+        raise FileNotFoundError(f"Fixture {name} not found. Does it exist in {FIXTURES_ROOT}?")
     if src.is_dir():
         dst = TEST_DIRS.inbox / (override_name or name)
         dst.mkdir(parents=True, exist_ok=True)
@@ -142,24 +140,17 @@ def load_test_fixtures(
     if exclusive and not match_filter:
         short_names = [
             n if len(s[:1][0]) < 5 else s[:1][0]
-            for n, s in [
-                ("_".join(s[:2]), s)
-                for s in [n.split("_") for n in (override_names or names)]
-            ]
+            for n, s in [("_".join(s[:2]), s) for s in [n.split("_") for n in (override_names or names)]]
         ]
         match_filter = rf"^({'|'.join(short_names)})"
 
     fixtures: list[Audiobook] = []
     for name, override in zip(names, override_names or names):
-        fixtures.extend(
-            load_test_fixture(name, match_filter=match_filter, override_name=override)
-        )
+        fixtures.extend(load_test_fixture(name, match_filter=match_filter, override_name=override))
 
     if cleanup_inbox:
         if not request:
-            raise ValueError(
-                "cleanup_inbox requires `request` to be a pytest.FixtureRequest"
-            )
+            raise ValueError("cleanup_inbox requires `request` to be a pytest.FixtureRequest")
         request.addfinalizer(lambda: rm_from_inbox(*names))
 
     return fixtures
@@ -283,9 +274,7 @@ def all_hardy_boys(request: pytest.FixtureRequest):
 
 @pytest.fixture(scope="function")
 def the_crusades_through_arab_eyes__flat_mp3():
-    yield from load_test_fixture(
-        "the_crusades_through_arab_eyes__flat_mp3", exclusive=True
-    )
+    yield from load_test_fixture("the_crusades_through_arab_eyes__flat_mp3", exclusive=True)
 
 
 @pytest.fixture(scope="function")
@@ -323,9 +312,7 @@ def conspiracy_theories__flat_mp3():
 
 @pytest.fixture(scope="function")
 def secret_project_series__nested_flat_mixed():
-    yield from load_test_fixture(
-        "secret_project_series__nested_flat_mixed", exclusive=True
-    )
+    yield from load_test_fixture("secret_project_series__nested_flat_mixed", exclusive=True)
 
 
 @pytest.fixture(scope="function")
@@ -356,10 +343,7 @@ def benedict_society__mp3():
     dir_name = TEST_DIRS.inbox / "01 - The Mysterious Benedict Society"
 
     def _path(i: int) -> Path:
-        return (
-            dir_name
-            / f"Trenton_Lee_Stewart_-_MBS1_-_The_Mysterious_Benedict_Society_({i:02}of11).mp3"
-        )
+        return dir_name / f"Trenton_Lee_Stewart_-_MBS1_-_The_Mysterious_Benedict_Society_({i:02}of11).mp3"
 
     for i in range(1, 12):
         testutils.make_mock_file(_path(i))
@@ -371,6 +355,17 @@ def benedict_society__mp3():
     testutils.set_match_filter(None)
 
     shutil.rmtree(dir_name, ignore_errors=True)
+
+
+@pytest.fixture(scope="function", autouse=False)
+def nathan_lowell__nested_series_m4b():
+    # dir_name = TEST_DIRS.inbox / "nathan_lowell__nested_series_m4b"
+
+    yield from load_test_fixture(
+        "nathan_lowell__nested_series_m4b",
+        exclusive=True,
+        override_name="Nathan Lowell",
+    )
 
 
 @pytest.fixture(scope="function", autouse=False)
@@ -399,9 +394,7 @@ def roman_numeral__mp3():
     def _path(i: int, n: str) -> Path:
         return dir_name / f"Roman_Numeral_Book_{n} - Part_{i}.mp3"
 
-    for i, n in enumerate(
-        ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
-    ):
+    for i, n in enumerate(["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]):
         testutils.make_mock_file(_path(i, n))
 
     testutils.set_match_filter("Roman Numeral Book")
@@ -506,17 +499,13 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
 
     # make a book with a single flat nested folder
     for i in range(1, 4):
-        testutils.make_mock_file(
-            MOCKED.flat_nested_dir
-            / "inner_dir"
-            / f"mock_book_flat_nested - part_{i}.mp3"
-        )
+        testutils.make_mock_file(MOCKED.flat_nested_dir / "inner_dir" / f"mock_book_flat_nested - part_{i}.mp3")
 
     # make a multi-series directory
     names = ["Dawn", "High Noon", "Dusk"]
     for s in ["1", "2", "3"]:
         name = names[int(s) - 1]
-        series = MOCKED.multi_book_series_dir / f"{name} - Book {s}"
+        series = MOCKED.series_parent_dir / f"{name} - Book {s}"
         series.mkdir(parents=True, exist_ok=True)
         for i in range(1, 2 + int(s)):
             testutils.make_mock_file(series / f"mock_book_series - ch. {i}.mp3")
@@ -526,9 +515,7 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
         disc = MOCKED.multi_disc_dir / f"Disc {d} of 4"
         disc.mkdir(parents=True, exist_ok=True)
         for i in range(1, 3):
-            testutils.make_mock_file(
-                disc / f"mock_book_multi_disc{d} - ch_{d+(d-i+1)}.mp3"
-            )
+            testutils.make_mock_file(disc / f"mock_book_multi_disc{d} - ch_{d+(d-i+1)}.mp3")
 
     # make a mutli-part book
     romans = ["I", "II", "III", "IV"]
@@ -546,9 +533,7 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
         disc = MOCKED.multi_disc_dir_with_extras / f"Disc {d} of 4"
         disc.mkdir(parents=True, exist_ok=True)
         for i in range(1, 3):
-            testutils.make_mock_file(
-                disc / f"mock_book_multi_disc_dir_with_extras - part_{d+(d-i+1)}.mp3"
-            )
+            testutils.make_mock_file(disc / f"mock_book_multi_disc_dir_with_extras - part_{d+(d-i+1)}.mp3")
         testutils.make_mock_file(disc / f"{words[d-1]}.pdf")
         testutils.make_mock_file(disc / f"notes-{d}.txt")
         testutils.make_mock_file(disc / f"cover-{d}.jpg")
@@ -556,19 +541,20 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     # make a multi-folder nested dir (not specifically multi-disc or book)
     for i in range(1, 3):
         for j in range(1, 3):
-            testutils.make_mock_file(
-                MOCKED.multi_nested_dir
-                / f"nested_{i}"
-                / f"mock_book_multi_nested - {j:02}.mp3"
-            )
+            testutils.make_mock_file(MOCKED.multi_nested_dir / f"nested_{i}" / f"mock_book_multi_nested - {j:02}.mp3")
 
+    # PRAGMA – old, makes multi-part mixed, which isn't a thing right now
     # make a mixed dir with some files in the root, and some in nested dirs
-    for i in range(1, 3):
-        testutils.make_mock_file(MOCKED.mixed_dir / f"mock_book_mixed - part_{i}.mp3")
-    for i in range(3, 5):
-        testutils.make_mock_file(
-            MOCKED.mixed_dir / "nested" / f"mock_book_mixed - part_{i}.mp3"
-        )
+    # for i in range(1, 3):
+    #     testutils.make_mock_file(MOCKED.mixed_dir / f"mock_book_mixed - part_{i}.mp3")
+    # for i in range(3, 5):
+    #     testutils.make_mock_file(
+    #         MOCKED.mixed_dir / "nested" / f"mock_book_mixed - part_{i}.mp3"
+    #     )
+    testutils.make_mock_file(MOCKED.mixed_dir / "mock_book_mixed, a tale of whoa.mp3")
+    testutils.make_mock_file(MOCKED.mixed_dir / "mock_book_mixed, a book apart.mp3")
+    testutils.make_mock_file(MOCKED.mixed_dir / "nested" / "mock_book_mixed - part_42.mp3")
+    testutils.make_mock_file(MOCKED.mixed_dir / "nested" / "mock_book_mixed, random file no. 7.mp3")
 
     # make standalone files
     for f in MOCKED.standalone_files:
@@ -577,9 +563,7 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     # make a single files
     testutils.make_mock_file(MOCKED.single_dir_m4b / "mock_book_single_m4b.m4b")
     testutils.make_mock_file(MOCKED.single_dir_mp3 / "mock_book_single_mp3.mp3")
-    testutils.make_mock_file(
-        MOCKED.single_nested_dir_mp3 / "nested_single_mp3" / "mock_book_single_mp3.mp3"
-    )
+    testutils.make_mock_file(MOCKED.single_nested_dir_mp3 / "nested_single_mp3" / "mock_book_single_mp3.mp3")
 
     # make an empty dir
     MOCKED.empty.mkdir(parents=True, exist_ok=True)
@@ -642,7 +626,7 @@ def reset_all(reset_match_filter, reset_failed):
     yield
 
     inbox.reset_inbox()
-    cfg.MATCH_FILTER = None
+    cfg.MATCH_FILTER = None # type: ignore
     cfg.SLEEP_TIME = 0.1
     cfg.WAIT_TIME = 0.5
     cfg.TEST = True

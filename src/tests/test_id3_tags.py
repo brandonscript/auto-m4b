@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 import pytest
+from mutagen.id3._util import ID3NoHeaderError
 from mutagen.mp3 import HeaderNotFoundError
 
 from src.lib.audiobook import Audiobook
@@ -14,7 +15,7 @@ from src.tests.helpers.pytest_utils import testutils
 
 def test_tags_load_fails_for_non_audio_file(not_an_audio_file: Audiobook):
 
-    with pytest.raises(HeaderNotFoundError):
+    with pytest.raises(ID3NoHeaderError):
         write_id3_tags_mutagen(not_an_audio_file.sample_audio1, {})
 
 
@@ -167,14 +168,10 @@ def test_parse_combo_id3_tags(
     book = Audiobook(blank_audiobook.sample_audio1).extract_metadata()
 
     for key in expected.keys():
-        assert (
-            getattr(book, key) == expected[key]
-        ), f"Expected {key} '{expected[key]}', got '{getattr(book, key)}'"
+        assert getattr(book, key) == expected[key], f"Expected {key} '{expected[key]}', got '{getattr(book, key)}'"
 
 
-def test_ignore_graphic_audio(
-    graphic_audio__single_m4b: Audiobook, capfd: pytest.CaptureFixture
-):
+def test_ignore_graphic_audio(graphic_audio__single_m4b: Audiobook, capfd: pytest.CaptureFixture):
 
     b = graphic_audio__single_m4b
     b.extract_metadata()
@@ -213,9 +210,7 @@ def test_ignore_graphic_audio(
     "test_dict, expected_author",
     [
         (
-            {
-                "comment": "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand"
-            },
+            {"comment": "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand"},
             "Sarah J. Maas",
         ),
         (

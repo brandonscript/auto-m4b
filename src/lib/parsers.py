@@ -11,7 +11,11 @@ import cachetools
 import cachetools.func
 import regex as rex
 
-from src.lib.misc import get_numbers_in_string, isorted, re_group
+from src.lib.misc import (
+    get_numbers_in_string,
+    isorted,
+    re_group,
+)
 from src.lib.term import print_debug
 from src.lib.typing import AuthorNarrator, MEMO_TTL, NameParserTarget
 
@@ -40,8 +44,9 @@ lastname_firstname_pattern = re.compile(r"^(?P<lastname>.*?), (?P<firstname>.*)$
 firstname_lastname_pattern = re.compile(r"^(?P<firstname>.*?).*\s(?P<lastname>\S+)$", re.I)
 
 book_title_pattern = re.compile(r"(?<=[-_–—])[\W\s]*(?P<book_title>[\w\s]+?)\s*(?=\d{4}|\(|\[|$)", re.I)
-partno_or_ch_match_pattern = re.compile(rf",?{_div}(?:part|ch(?:\.|apter))?{_div}\W*(\d+)(?:$|{_div}(?:of|-){_div}(\d+)\W*$)", re.I)
+# partno_or_ch_match_pattern = re.compile(rf",?{_div}(?:part|ch(?:\.|apter))?{_div}\W*(?P<num1>\d+)(?:$|{_div}(?:of|-){_div}(?P<num2>\d+)\W*$)", re.I)
 partno_or_ch_match_pattern2 = re.compile(rf"(?:(?:(?:(?<=\W)|^)p|P)[Aa]?[Rr]?[Tt]|C[Hh]?(?:[\. ]|[Aa][Pp][Tt][Ee][Rr])|[^A-Za-z0-9\n]+?)\W*(?P<num1>\d+)(?:.?(?:of|-|to).?(?P<num2>\d+))?[^\n]*$")
+part_or_ch_match_words = re.compile(rf"(?:(?<=\W)|^){_div}(?:pa?r?t|ch(?:\.|apter)){_div}\d+.*$", re.I)
 path_junk_pattern = re.compile(r"^[ \,.\)\}\]_-]*|[ \,.\)\}\]_-]*$", re.I)
 path_garbage_pattern = re.compile(r"^[ \,.\)\}\]]*", re.I)
 path_strip_l_t_alphanum_pattern = re.compile(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", re.I)
@@ -53,8 +58,8 @@ year_pattern = re.compile(r"(?P<year>\d{4})", re.I)
 common_str_pattern = re.compile(r"(^common_|_c(ommon)?$)")
 startswith_num_pattern = re.compile(r"(?P<num>^\d+)")
 
-multi_disc_pattern = re.compile(r"(?:^|(?<=[\W_-]))(dis[ck]|cd)(\b|\s|[_.-])*#?(\b|\s|[_.-])*(?:\b|[\W_-])*(\d+)", re.I)
-book_series_pattern = re.compile(r"(^\d+|(?:^|(?<=[\W_-]))(bo{0,2}k|vol(?:ume)?|#)(?:\b|[\W_-])*(\d+)|(?<=[\W_-])Series.*/.+)", re.I)
+multi_disc_pattern = re.compile(r"(?:^|(?<=[\W_-]))(dis[ck]|cd)(\b|\s|[_.-])*#?(\b|\s|[_.-])*(?:\b|[\W_-])*(?P<num>\d+)", re.I)
+book_series_pattern = re.compile(r"(^\d+|(?:^|(?<=[\W_-]))(bo{0,2}k|vol(?:ume)?|#)(?:\b|[\W_-])*(?P<num>\d+)|(?<=[\W_-])Series.*/.+)", re.I)
 multi_part_pattern = re.compile(r"(?:^|(?<=[\W_-]))(pa?r?t|ch(?:\.|apter))(?:\b|[\W_-])*(\d+)", re.I)
 # fmt: on
 
@@ -138,49 +143,43 @@ def find_greatest_common_string(s: list[str]) -> str:
         prefix = os.path.commonprefix([file1, file2])
         common_prefixes.add(prefix)
 
-    valid_prefixes = [
-        prefix for prefix in common_prefixes if any(f.startswith(prefix) for f in s)
-    ]
+    valid_prefixes = [prefix for prefix in common_prefixes if any(f.startswith(prefix) for f in s)]
 
     return max(valid_prefixes, key=len, default="")
 
 
 def contains_partno_or_ch(s: str, s2: str | None = None) -> bool:
     s_matches_part_number = partno_or_ch_match_pattern2.search(s)
-    s_start_num = re_group(startswith_num_pattern.search(s), "num")
+    s_start_num = get_start_no(s)
 
     if not s2:
         # If there is no second to compare it to, we want to be conservative
         # and only return True if we don't think this is a series
-        return bool(s_matches_part_number and not is_maybe_multi_book_or_series(s))
+        return bool(s_matches_part_number and not is_maybe_multiple_books_or_series(s))
 
     s2_matches_part_number = partno_or_ch_match_pattern2.search(s2)
-    s2_start_num = re_group(startswith_num_pattern.search(s2), "num")
+    s2_start_num = get_start_no(s2)
 
     if s_start_num or s2_start_num and (s_start_num != s2_start_num):
         # If the two strings are maybe series, but the numbers don't match, they're parts
         return True
 
-    return re_group(s_matches_part_number, "num1") != re_group(
-        s2_matches_part_number, "num1"
-    )
+    return re_group(s_matches_part_number, "num1") != re_group(s2_matches_part_number, "num1")
 
 
 def startswith_partno(s: str, s2: str | None = None) -> bool:
     if s2:
-        first = startswith_num_pattern.search(s)
-        second = startswith_num_pattern.search(s2)
-        return bool(first and second) and re_group(first, 0) == re_group(second, 0)
-    return bool(startswith_num_pattern.search(s))
+        first = get_start_no(s)
+        second = get_start_no(s2)
+        return bool(first >= 0 and second >= 0) and first == second
+    return bool(get_start_no(s) >= 0)
 
 
 def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     # Replace single occurrences of . with spaces
     from src.lib.cleaners import strip_part_number
 
-    dir_author = swap_firstname_lastname(
-        re_group(author_fs_pattern.search(book.basename), "author")
-    )
+    dir_author = swap_firstname_lastname(re_group(author_fs_pattern.search(book.basename), "author"))
 
     dir_title = re_group(book_title_pattern.search(book.basename), "book_title")
     dir_year = re_group(year_pattern.search(book.basename), "year")
@@ -220,9 +219,7 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
         ["author", "title", "year"],
     ):
         if len(f) > len(d):
-            print_debug(
-                f"{o}: file name '{f}' is longer than dir name '{d}', prefer file name"
-            )
+            print_debug(f"{o}: file name '{f}' is longer than dir name '{d}', prefer file name")
             meta[o] = f
 
     book.fs_author = meta["author"]
@@ -232,17 +229,13 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
 
     def strip_garbage_chars(path: str) -> str:
         try:
-            return path_garbage_pattern.sub(
-                "", re.sub(path, "", book.basename, flags=re.I)
-            )
+            return path_garbage_pattern.sub("", re.sub(path, "", book.basename, flags=re.I))
         except re.error as e:
             print_debug(f"Error calling strip_garbage_chars: {e}")
             return path
 
     # everything else in the dir name after removing author, title, year, and narrator
-    for f, d in zip(
-        [file_author, file_title, file_year], [dir_author, dir_title, dir_year]
-    ):
+    for f, d in zip([file_author, file_title, file_year], [dir_author, dir_title, dir_year]):
         book.dir_extra_junk = strip_garbage_chars(d)
         book.file_extra_junk = strip_garbage_chars(f)
 
@@ -311,9 +304,7 @@ def get_name_from_str(s: str, max_words=6) -> str:
     return s.strip()
 
 
-def parse_names(
-    s: str, target: NameParserTarget, *, fallback: str | None = None
-) -> AuthorNarrator:
+def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None) -> AuthorNarrator:
     if fallback is None:
         fallback = s
     if not s or graphic_audio_pattern.search(s):
@@ -344,9 +335,7 @@ def parse_names(
     # )
 
     author = re_group(author_pattern.search(author), "author", default=fallback).strip()
-    narrator = re_group(
-        narrator_pattern.search(narrator), "narrator", default=fallback
-    ).strip()
+    narrator = re_group(narrator_pattern.search(narrator), "narrator", default=fallback).strip()
 
     if not author and not narrator:
         return AuthorNarrator(fallback, fallback)
@@ -367,9 +356,7 @@ def parse_names(
     )
 
 
-def parse_author(
-    s: str, target: NameParserTarget, *, fallback: str | None = None
-) -> str:
+def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = None) -> str:
     return parse_names(s, target, fallback=fallback).author
 
 
@@ -377,9 +364,7 @@ def has_graphic_audio(s: str) -> bool:
     return bool(graphic_audio_pattern.search(s))
 
 
-def parse_narrator(
-    s: str, target: NameParserTarget, *, fallback: str | None = None
-) -> str:
+def parse_narrator(s: str, target: NameParserTarget, *, fallback: str | None = None) -> str:
     return parse_names(s, target, fallback=fallback).narrator or fallback or ""
 
 
@@ -387,9 +372,7 @@ def parse_year(s: str) -> str:
     return re_group(year_pattern.search(s), "year")
 
 
-def get_title_partno_score(
-    title_1: str, title_2: str, album_1: str, sortalbum_1: str
-) -> tuple[bool, int, bool]:
+def get_title_partno_score(title_1: str, title_2: str, album_1: str, sortalbum_1: str) -> tuple[bool, int, bool]:
     """Returns a score for the likelihood that the title(s) indicate the part number of a multi-part book, e.g. "Part 01" or "The Martian Part 014. A positive score indicates a likely part #, negative indicates not a part #."""
     from src.lib.cleaners import strip_part_number
 
@@ -419,27 +402,187 @@ def get_title_partno_score(
         if not t1_part and not t2_part:
             score -= 2
 
-    contains_only_part = (
-        strip_part_number(title_1) == "" and strip_part_number(title_2) == ""
-    )
+    contains_only_part = strip_part_number(title_1) == "" and strip_part_number(title_2) == ""
 
     return score > 0, score, contains_only_part
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def is_maybe_multi_book_or_series(s: str) -> bool:
+def get_series_no(s: str | Path) -> int:
+    return int(re_group(book_series_pattern.search(str(s)), "num", default=-1))
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def is_maybe_multiple_books_or_series(s: str | Path) -> bool:
+    s = str(s)
     return not is_maybe_multi_disc(s) and bool(book_series_pattern.search(s))
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def is_maybe_multi_disc(s: str) -> bool:
-    return bool(multi_disc_pattern.search(s))
+def get_disc_no(s: str | Path) -> int:
+    return int(re_group(multi_disc_pattern.search(str(s)), "num", default=-1))
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def is_maybe_multi_disc(s: str | Path) -> bool:
+    return get_disc_no(str(s)) > -1
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def get_part_no(s: str | Path) -> int:
+    s = str(s)
+    if not part_or_ch_match_words.search(s):
+        return -1
+    return int(re_group(partno_or_ch_match_pattern2.search(s), "num1", default=-1))
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def get_start_no(s: str | Path) -> int:
+    return int(re_group(startswith_num_pattern.search(str(s)), "num", default=-1))
+
+
+def are_nums_sequential(nums: list[int], *, sort=False, skips_ok=False) -> bool:
+    if sort:
+        nums = sorted(nums)
+    if not skips_ok:
+        return all(nums[i] == nums[i - 1] + 1 for i in range(1, len(nums)))
+    # otherwise just check if they're in ascending order
+    return nums == list(range(nums[0], nums[-1] + 1))
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
 def is_maybe_multi_part(s: str) -> bool:
     return (
-        not is_maybe_multi_disc(s)
-        and not is_maybe_multi_book_or_series(s)
-        and bool(multi_part_pattern.search(s))
+        not is_maybe_multi_disc(s) and not is_maybe_multiple_books_or_series(s) and bool(multi_part_pattern.search(s))
     )
+
+
+# def determine_structure(
+#     path: Path, *, adjacent_paths: list[Path] = [], root_dir: Path | None = None
+# ) -> str:
+
+#     if path.is_file():
+#         return "standalone_file"
+
+#     if not root_dir:
+#         root_dir = path if path.is_dir() else path.parent
+
+#     tree = get_path_tree(path)
+
+#     dir_contents = ls_path_tree(tree)
+#     if len(dir_contents) == 0:
+#         return "empty"
+
+#     sub_dirs = ls_path_tree(tree, only_dirs=True)
+#     audio_files = ls_path_tree(tree, only_files=True)
+#     if not sub_dirs:
+#         if len(audio_files) == 1:
+#             return "standalone_file"
+#         elif len(audio_files) > 1:
+#             return "flat"
+
+#     # Check if there are audio files only in a single subdirectory
+#     subdirs_with_audio_files = [
+#         (d, f)
+#         for d, f in [(d, ls_path_tree(d, only_files=True)) for d in sub_dirs]
+#         if len(f) > 0
+#     ]
+
+#     if len(subdirs_with_audio_files) == 1:
+#         files = subdirs_with_audio_files[0][1]
+#         if len(files) > 1:
+#             return "flat_nested"
+#         return "standalone_nested"
+
+#     if len(subdirs_with_audio_files) > 1:
+#         # If all of the subdirs appear to contain a disc number,
+#         # it's likely a multi-disc structure
+#         if _maybe_multi_disc := all(
+#             is_maybe_multi_disc(d.name) for d, _ in subdirs_with_audio_files
+#         ):
+#             return "multi_disc"
+
+#         # If all of the subdirs or at least one of their files appear to
+#         # contain a series or book number, it's likely a series structure
+
+#         multi_book_nested = False
+#         subdirs_maybe_series = [
+#             (d.name, is_maybe_multiple_books_or_series(d.name))
+#             for d, _ in subdirs_with_audio_files
+#         ]
+#         files_maybe_series = {
+#             d.name: [(f.name, is_maybe_multiple_books_or_series(f.name)) for f in files]
+#             for d, files in subdirs_with_audio_files
+#         }
+#         if _maybe_series := all(
+#             [
+#                 all((x, all([y for _f, y in files_maybe_series[d]])))
+#                 for d, x in subdirs_maybe_series
+#             ]
+#         ):
+#             return "series"
+
+#         if _multi_book_nested := any(
+#             [
+#                 any([y for _f, y in files_maybe_series[d]])
+#                 for d, _x in subdirs_maybe_series
+#             ]
+#         ):
+#             return "multi_book_series"
+
+#     if path.exists():
+#         adjacent_paths = sorted(
+#             [
+#                 p.relative_to(root_dir)
+#                 for p in path.parent.iterdir()
+#                 if p != path and (p.is_dir() or is_audio_file(p))
+#             ]
+#         )
+
+#     rel_parent = path.relative_to(root_dir).parent
+#     # if it's a standalone (no adjacent paths) we can do some simple things:
+#     if not adjacent_paths:
+#         if is_maybe_multi_disc(str(path)):
+#             # This can happen if the book is a multi-disc book split into multiple folders, e.g.:
+#             #   - The Martian
+#             #     - Disc 1
+#             #       - Chapters 1-14.mp3
+#             #     - Disc 2
+#             #       - Chapters 15-28.mp3
+#             # but is pretty rare.
+#             return "multi_disc"
+
+#         # Otherwise, there's a very good chance this is a standalone book.
+#         return "standalone_file"
+
+#     # If there are adjacent paths, we need to look at the paths to determine the structure.
+#     # We'll start by checking if the paths are all in the same folder.
+#     # If they are, we can assume it's a flat structure.
+#     if all(p.parent == adjacent_paths[0].parent for p in adjacent_paths):
+#         return "flat"
+
+#     # If the parents are different, we should look for multi-disc or series structures next.
+#     # If it's a multi-disc, we don't want to get a false-positive for a series structure.
+#     # If more than 50% of the adjacent paths are multi-disc, we'll assume it's a multi-disc structure.
+#     all_paths = [path, *adjacent_paths]
+#     if sum(is_maybe_multi_disc(p.name) for p in all_paths) > len(all_paths) / 2:
+#         return "multi_disc"
+
+#     # If there are numbers in the path, it could be a series. We should
+#     # check the parent first to see if it's a series_parent.
+
+#     contig_nums = [
+#         get_numbers_contiguous(path.name),
+#         *[get_numbers_contiguous(p.name) for p in adjacent_paths if p.is_dir()],
+#     ]
+
+#     parent_is_maybe_series = any(
+#         is_maybe_multiple_books_or_series(d.name) for d in dir_contents
+#     )
+
+#     if any(is_maybe_multiple_books_or_series(p.name) for p in all_paths):
+#         return "series"
+
+#     raise ValueError("Could not determine file structure")
+
+#

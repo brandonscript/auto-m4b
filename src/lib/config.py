@@ -239,13 +239,9 @@ def ensure_dir_exists_and_is_writable(path: Path, throw: bool = True) -> None:
 
     if not is_writable:
         if throw:
-            raise PermissionError(
-                f"{path} is not writable by current user, please fix permissions and try again"
-            )
+            raise PermissionError(f"{path} is not writable by current user, please fix permissions and try again")
         else:
-            print_warning(
-                f"Warning: {path} is not writable by current user, this may result in data loss"
-            )
+            print_warning(f"Warning: {path} is not writable by current user, this may result in data loss")
             return
 
 
@@ -265,9 +261,7 @@ def use_pid_file():
         cfg.PID_FILE.touch()
         current_local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pid = os.getpid()
-        cfg.PID_FILE.write_text(
-            f"auto-m4b started at {current_local_time}, watching {cfg.inbox_dir} - pid={pid}\n"
-        )
+        cfg.PID_FILE.write_text(f"auto-m4b started at {current_local_time}, watching {cfg.inbox_dir} - pid={pid}\n")
 
     try:
         yield already_exists
@@ -314,11 +308,7 @@ class Config:
                     if test_debug_msg := (
                         "TEST + DEBUG modes on"
                         if self.TEST and self.DEBUG
-                        else (
-                            "TEST mode on"
-                            if self.TEST
-                            else "DEBUG mode on" if self.DEBUG else ""
-                        )
+                        else ("TEST mode on" if self.TEST else "DEBUG mode on" if self.DEBUG else "")
                     ):
                         print_amber(test_debug_msg)
 
@@ -397,11 +387,7 @@ class Config:
     def sleeptime_friendly(self):
         """If it can be represented as a whole number, do so as {number}s
         otherwise, show as a float rounded to 1 decimal place, e.g. 0.1s"""
-        return (
-            f"{int(self.SLEEP_TIME)}s"
-            if self.SLEEP_TIME.is_integer()
-            else f"{self.SLEEP_TIME:.1f}s"
-        )
+        return f"{int(self.SLEEP_TIME)}s" if self.SLEEP_TIME.is_integer() else f"{self.SLEEP_TIME:.1f}s"
 
     # @cached_property
     # def MAX_CHAPTER_LENGTH(self):
@@ -422,12 +408,7 @@ class Config:
 
     @cached_property
     def max_chapter_length_friendly(self):
-        return (
-            "-".join(
-                [str(int(int(t) / 60)) for t in self.MAX_CHAPTER_LENGTH.split(",")]
-            )
-            + "m"
-        )
+        return "-".join([str(int(int(t) / 60)) for t in self.MAX_CHAPTER_LENGTH.split(",")]) + "m"
 
     @env_property(typ=bool, default=False)
     def _USE_FILENAMES_AS_CHAPTERS(self): ...
@@ -476,11 +457,7 @@ class Config:
     @cached_property
     def m4b_tool_version(self):
         """Runs m4b-tool --version"""
-        return (
-            subprocess.check_output(f"{self.m4b_tool} m4b-tool --version", shell=True)
-            .decode()
-            .strip()
-        )
+        return subprocess.check_output(f"{self.m4b_tool} m4b-tool --version", shell=True).decode().strip()
 
     @cached_property
     def _m4b_tool(self):
@@ -621,29 +598,63 @@ class Config:
             except AttributeError:
                 pass
 
-    def check_m4b_tool(self):
-        has_native_m4b_tool = bool(shutil.which(self.m4b_tool))
-        if has_native_m4b_tool:
-            return True
-
-        # docker images -q sandreas/m4b-tool:latest
-        has_docker = bool(self.docker_path)
-        docker_exe = self.docker_path or "docker"
-        docker_image_exists = has_docker and bool(
-            subprocess.check_output(
-                [docker_exe, "images", "-q", "sandreas/m4b-tool:latest"],
-                timeout=10,
-            ).strip()
-        )
-        docker_ready = has_docker and docker_image_exists
-        current_version = (
-            (
-                subprocess.check_output(["m4b-tool", "--version"], timeout=10)
-                .decode()
-                .strip()
+    def is_docker_running(self):
+        out = ""
+        if not (d := self.docker_path) or not Path(d).exists():
+            raise FileNotFoundError(
+                f"Could not find 'docker' executable at {d}, please ensure Docker is in your PATH or set DOCKER_PATH to the correct path"
             )
-            if not docker_ready
-            else (
+        docker_exe = self.docker_path or "docker"
+        try:
+            proc = subprocess.run(
+                [docker_exe, "ps"],
+                timeout=2,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            out = proc.stderr.decode() or proc.stdout.decode()
+            if not proc.returncode == 0:
+                raise subprocess.CalledProcessError(proc.returncode, "docker ps", out)
+            return True
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Could not find 'docker' in PATH, please install Docker and try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+            ) from e
+        except subprocess.CalledProcessError:
+            raise RuntimeError(
+                out or "Docker is not running or is not accessible. Make sure Docker is running and try again."
+            )
+
+    def check_m4b_tool(self):
+        env_use_docker = bool(os.getenv("USE_DOCKER", self.env.get("USE_DOCKER", False)))
+        has_native_m4b_tool = bool(shutil.which(self.m4b_tool))
+        docker_ready = False
+        current_version = ""
+        install_script = ""
+        docker_exe = ""
+        if has_native_m4b_tool and not env_use_docker:
+            current_version = subprocess.check_output(["m4b-tool", "--version"], timeout=10).decode().strip()
+
+        elif has_docker := bool(self.docker_path):
+            # docker images -q sandreas/m4b-tool:latest
+            install_script = "./scripts/install-docker-m4b-tool.sh"
+
+            docker_exe = self.docker_path or "docker"
+            if not self.is_docker_running():
+                return
+            docker_image_exists = bool(
+                subprocess.check_output(
+                    [docker_exe, "images", "-q", "sandreas/m4b-tool:latest"],
+                    timeout=10,
+                ).strip()
+            )
+
+            if not docker_image_exists:
+                raise RuntimeError(
+                    f"Could not find the image 'sandreas/m4b-tool:latest', run\n\n $ docker pull sandreas/m4b-tool:latest\n  # or\n $ {install_script}\n\nand try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+                )
+
+            current_version = (
                 subprocess.check_output(
                     [
                         docker_exe,
@@ -658,11 +669,7 @@ class Config:
                 .decode()
                 .strip()
             )
-        )
-        env_use_docker = bool(
-            os.getenv("USE_DOCKER", self.env.get("USE_DOCKER", False))
-        )
-        install_script = "./scripts/install-docker-m4b-tool.sh"
+            docker_ready = True
 
         if not re.search(r"v0.5", current_version):
             raise RuntimeError(
@@ -718,11 +725,7 @@ class Config:
         msg = ""
         self._args = args or AutoM4bArgs()
 
-        self.TEST = (
-            self._args.test
-            if self._args.test is not None
-            else (self.TEST or "pytest" in sys.modules)
-        )
+        self.TEST = self._args.test if self._args.test is not None else (self.TEST or "pytest" in sys.modules)
 
         if self.args.env:
             if self._dotenv_src != self.args.env:
@@ -746,9 +749,7 @@ class Config:
         yield "" if quiet else msg
 
     @overload
-    def load_path_env(
-        self, key: str, default: Path, allow_empty: bool = ...
-    ) -> Path: ...
+    def load_path_env(self, key: str, default: Path, allow_empty: bool = ...) -> Path: ...
 
     @overload
     def load_path_env(
@@ -766,15 +767,11 @@ class Config:
         allow_empty: Literal[False] = False,
     ) -> Path: ...
 
-    def load_path_env(
-        self, key: str, default: Path | None = None, allow_empty: bool = True
-    ) -> Path | None:
+    def load_path_env(self, key: str, default: Path | None = None, allow_empty: bool = True) -> Path | None:
         v = self.get_env_var(key, default=default)
         path = Path(v).expanduser() if v else default
         if not path and not allow_empty:
-            raise EnvironmentError(
-                f"{key} is not set, please make sure to set it in a .env file or as an ENV var"
-            )
+            raise EnvironmentError(f"{key} is not set, please make sure to set it in a .env file or as an ENV var")
         return path.resolve() if path else None
 
     @overload

@@ -27,35 +27,38 @@
     "python.analysis.completeFunctionParens": false,
     "python.autoComplete.addBrackets": false,
     "python.analysis.indexing": true,
+    "python.analysis.extraPaths": [
+      "${workspaceFolder}/src"
+    ],
     "python.analysis.packageIndexDepths": [
       {
         "name": "",
-        "depth": 6,
-        "includeAllSymbols": true
+        "depth": 8,
+        "includeAllSymbols": true,
       }
     ],
     "python.analysis.autoSearchPaths": true,
-    "python.languageServer": "Pylance",
+    // "python.languageServer": "Pylance",
     "python.formatting.provider": "ruff",
     "workbench.colorCustomizations": {
-      "activityBar.activeBackground": "#7078cc",
-      "activityBar.background": "#7078cc",
+      "activityBar.activeBackground": "#368fac",
+      "activityBar.background": "#368fac",
       "activityBar.foreground": "#e7e7e7",
       "activityBar.inactiveForeground": "#e7e7e799",
-      "activityBarBadge.background": "#e6b9bc",
+      "activityBarBadge.background": "#e8b6dc",
       "activityBarBadge.foreground": "#15202b",
       "commandCenter.border": "#e7e7e799",
-      "sash.hoverBorder": "#7078cc",
-      "statusBar.background": "#4a55bf",
+      "sash.hoverBorder": "#368fac",
+      "statusBar.background": "#2a6f85",
       "statusBar.foreground": "#e7e7e7",
-      "statusBarItem.hoverBackground": "#7078cc",
-      "statusBarItem.remoteBackground": "#4a55bf",
+      "statusBarItem.hoverBackground": "#368fac",
+      "statusBarItem.remoteBackground": "#2a6f85",
       "statusBarItem.remoteForeground": "#e7e7e7",
-      "titleBar.activeBackground": "#4a55bf",
+      "titleBar.activeBackground": "#2a6f85",
       "titleBar.activeForeground": "#e7e7e7",
-      "titleBar.inactiveBackground": "#4a55bf99",
+      "titleBar.inactiveBackground": "#2a6f8599",
       "titleBar.inactiveForeground": "#e7e7e799"
     },
-    "peacock.color": "#4a55bf"
+    "peacock.color": "#2a6f85"
   }
 }
