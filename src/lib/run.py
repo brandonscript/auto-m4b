@@ -426,57 +426,54 @@ def can_process_multi_dir(book: Audiobook):
     inbox = InboxState()
     if book.tree.has_structure_like("series") or book.tree.has_structure_like("multi"):
         help_msg = f"Please organize the files in a single folder and rename them so they sort alphabetically\nin the correct order"
-        match book.tree.structure:
-            case "multi_book_series":
-                if cfg.CONVERT_SERIES:
+        if book.tree.has_structure_like("series"):
+            if cfg.CONVERT_SERIES:
+                inbox.set_ok(book)
+            else:
+                print_error(f"{en.MULTI_ERR}, maybe this contains multiple books or a series?")
+                smart_print(f"{help_msg}, or set CONVERT_SERIES=Y to have auto-m4b convert\nbook series individually\n")
+                fail_book(book, f"{en.MULTI_ERR} (multiple books found) - {help_msg}")
+                return False
+        elif book.tree.has_structure("multi_disc"):
+            if cfg.FLATTEN_MULTI_DISC_BOOKS:
+                smart_print(
+                    "\nThis folder appears to be a multi-disc book, attempting to flatten it...",
+                    end="",
+                )
+                if flattening_files_in_dir_affects_order(book.inbox_dir):
+                    nl(2)
+                    print_error("Flattening this book would affect the file order, cannot proceed")
+                    smart_print(f"{help_msg}\n")
+                    fail_book(
+                        book,
+                        "This book appears to be a multi-disc book, but flattening it would affect the file order - it will need to be fixed manually by renaming the files so they sort alphabetically in the correct order",
+                    )
+                    return False
+                else:
+                    flatten_files_in_dir(book.inbox_dir)
+                    book.rescan_structure()
+                    # book = Audiobook(book.inbox_dir)
+                    print_mint(" ✓\n")
+                    # files = "\n".join([str(f) for f in book.inbox_dir.glob("*")])
+                    # print_debug(f"New file structure:\n{files}")
                     inbox.set_ok(book)
-                else:
-                    print_error(f"{en.MULTI_ERR}, maybe this contains multiple books or a series?")
-                    smart_print(
-                        f"{help_msg}, or set CONVERT_SERIES=Y to have auto-m4b convert\nbook series individually\n"
-                    )
-                    fail_book(book, f"{en.MULTI_ERR} (multiple books found) - {help_msg}")
-                    return False
-            case "multi_disc":
-                if cfg.FLATTEN_MULTI_DISC_BOOKS:
-                    smart_print(
-                        "\nThis folder appears to be a multi-disc book, attempting to flatten it...",
-                        end="",
-                    )
-                    if flattening_files_in_dir_affects_order(book.inbox_dir):
-                        nl(2)
-                        print_error("Flattening this book would affect the file order, cannot proceed")
-                        smart_print(f"{help_msg}\n")
-                        fail_book(
-                            book,
-                            "This book appears to be a multi-disc book, but flattening it would affect the file order - it will need to be fixed manually by renaming the files so they sort alphabetically in the correct order",
-                        )
-                        return False
-                    else:
-                        flatten_files_in_dir(book.inbox_dir)
-                        book.rescan_structure()
-                        # book = Audiobook(book.inbox_dir)
-                        print_mint(" ✓\n")
-                        # files = "\n".join([str(f) for f in book.inbox_dir.glob("*")])
-                        # print_debug(f"New file structure:\n{files}")
-                        inbox.set_ok(book)
-                else:
-                    print_error(f"{en.MULTI_ERR}, maybe this is a multi-disc book?")
-                    smart_print(
-                        f"{help_msg}, or set FLATTEN_MULTI_DISC_BOOKS=Y to have auto-m4b flatten\nmulti-disc books automatically\n"
-                    )
-                    fail_book(book, f"{en.MULTI_ERR} (multi-disc book) - {help_msg}")
-                    return False
-            case "multi_part":
-                print_error(f"{en.MULTI_ERR}, maybe this is a multi-part book or a series?")
-                smart_print(f"{help_msg}\n")
-                fail_book(book, f"{en.MULTI_ERR} (multi-part book) - {help_msg}")
+            else:
+                print_error(f"{en.MULTI_ERR}, maybe this is a multi-disc book?")
+                smart_print(
+                    f"{help_msg}, or set FLATTEN_MULTI_DISC_BOOKS=Y to have auto-m4b flatten\nmulti-disc books automatically\n"
+                )
+                fail_book(book, f"{en.MULTI_ERR} (multi-disc book) - {help_msg}")
                 return False
-            case _:
-                print_error(f"{en.MULTI_ERR}, cannot determine book structure")
-                smart_print(f"{help_msg}\n")
-                fail_book(book, f"{en.MULTI_ERR} (structure unknown) - {help_msg}")
-                return False
+        elif book.tree.has_structure("multi_part"):
+            print_error(f"{en.MULTI_ERR}, maybe this is a multi-part book or a series?")
+            smart_print(f"{help_msg}\n")
+            fail_book(book, f"{en.MULTI_ERR} (multi-part book) - {help_msg}")
+            return False
+        else:
+            print_error(f"{en.MULTI_ERR}, cannot determine book structure")
+            smart_print(f"{help_msg}\n")
+            fail_book(book, f"{en.MULTI_ERR} (structure unknown) - {help_msg}")
+            return False
 
     return True
 

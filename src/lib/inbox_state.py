@@ -92,10 +92,22 @@ class InboxState(Hasher):
         simple = self._items.get(key, None)
         if simple:
             return simple
-        return next(
-            (item for item in self._items.values() if key in [item.key, item.hash, item.path]),
-            None,
-        )
+        if isinstance(key_path_hash_or_book, BooksTree):
+            path = key_path_hash_or_book.path
+        elif isinstance(key_path_hash_or_book, Audiobook):
+            path = key_path_hash_or_book.path
+        else:
+            path = Path(key_path_hash_or_book)
+        if path.is_absolute():
+            return next(
+                (item for item in self._items.values() if item.path == path),
+                None,
+            )
+        else:
+            return next(
+                (item for item in self._items.values() if key in [item.key, item.hash, item.path]),
+                None,
+            )
 
     def rm(self, key_path_book_or_hash: str | Path | Audiobook):
         key = get_key(key_path_book_or_hash)

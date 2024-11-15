@@ -71,10 +71,16 @@ class Audiobook(BaseModel):
             tree = path_or_tree
             path = path_or_tree.path
         else:
+            from src.lib.inbox_state import InboxState
+
+            inbox_state = InboxState()
             path = path_or_tree
             if not path_or_tree.is_absolute():
                 path = cfg.inbox_dir.resolve() / path_or_tree
-            tree = BooksTree(path_or_tree)
+            if from_state := inbox_state.get(path):
+                tree = from_state.tree
+            else:
+                tree = BooksTree(path_or_tree)
 
         super().__init__(path=path, tree=tree)
 
@@ -126,7 +132,7 @@ class Audiobook(BaseModel):
 
     @property
     def converted_dir(self) -> Path:
-        return (cfg.converted_dir.resolve() / self.basename).with_suffix("")
+        return cfg.converted_dir.resolve() / self.key
 
     @property
     def archive_dir(self) -> Path:
@@ -272,11 +278,13 @@ class Audiobook(BaseModel):
 
     def write_log(self, *s: str):
         self.log_file.touch(exist_ok=True)
+        # for each s, replace \n with a space
+        lines = [x.replace("\n", " ") for x in s]
         with open(self.log_file, "a+") as f:
             # if file is not empty, and last line is not empty, add a newline
             if f.tell() and (existing := f.readlines()) and existing[-1].strip():
                 f.write("\n")
-            line = " ".join(s)
+            line = " ".join(lines)
             # ensure newline at end of file
             if not line.endswith("\n"):
                 line += "\n"
@@ -331,7 +339,8 @@ class Audiobook(BaseModel):
 
     @property
     def key(self):
-        return str(self.path.relative_to(cfg.inbox_dir))
+        return self.tree.key
+        # return str(self.path.relative_to(cfg.inbox_dir))
 
     @property
     def _inbox_item(self):

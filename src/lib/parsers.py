@@ -176,6 +176,7 @@ def startswith_partno(s: str, s2: str | None = None) -> bool:
 
 
 def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
+    # FIXME: This is completely broken and doesn't work at all, more false positives than negatives.
     # Replace single occurrences of . with spaces
     from src.lib.cleaners import strip_part_number
 

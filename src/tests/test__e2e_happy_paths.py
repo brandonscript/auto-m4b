@@ -163,7 +163,7 @@ class test_happy_paths:
             ]
             app(max_loops=1)
             out = testutils.get_stdout(capfd)
-            series = Chanur_Series[0]
+            series_parent = Chanur_Series[0]
             child_books = Chanur_Series[1:]
             assert len(child_books) == 5
             for book, quality in zip(child_books, qualities):
@@ -174,9 +174,25 @@ class test_happy_paths:
                 loops=[testutils.check_output(found_books_eq=5, converted_eq=5)],
             )
             assert out.count("Book Series •••••")
-            assert series.converted_dir.exists()
+            assert series_parent.converted_dir.exists()
             for book in child_books:
                 assert book.converted_dir.exists()
+
+    def test_book_series_output_to_series_dir(
+        self,
+        Chanur_Series: list[Audiobook],
+        enable_convert_series,
+        enable_archiving,
+    ):
+
+        app(max_loops=1)
+        series_parent = Chanur_Series[0]
+        assert series_parent.converted_dir.exists()
+        for book in Chanur_Series[1:]:
+            assert book.converted_dir.is_relative_to(series_parent.converted_dir)
+            assert book.converted_dir.exists()
+        assert not series_parent.inbox_dir.exists()
+        assert series_parent.archive_dir.exists()
 
     def test_book_series_handles_series_collateral(
         self,
@@ -186,8 +202,8 @@ class test_happy_paths:
     ):
 
         app(max_loops=1)
-        series = Chanur_Series[0]
-        assert series.converted_dir.exists()
+        series_parent = Chanur_Series[0]
+        assert series_parent.converted_dir.exists()
         for pic in [
             "414fL6J.png",
             "i367gyc.png",
@@ -195,9 +211,9 @@ class test_happy_paths:
             "mhHDEdX.png",
             "xEZNYAN.png",
         ]:
-            assert (series.converted_dir / pic).exists()
-        assert not series.inbox_dir.exists()
-        assert series.archive_dir.exists()
+            assert (series_parent.converted_dir / pic).exists()
+        assert not series_parent.inbox_dir.exists()
+        assert series_parent.archive_dir.exists()
 
     @pytest.mark.parametrize(
         "partial_flatten_backup_dirs",

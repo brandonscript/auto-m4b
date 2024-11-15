@@ -936,7 +936,7 @@ def find_first_audio_file(path: T, ext: str | None = None, ignore_errors: bool =
         if ext:
             err += f" with extension '{ext}'"
         raise FileNotFoundError(err)
-    return first_file # type: ignore
+    return first_file  # type: ignore
 
 
 # def find_next_audio_file(current_file: Path) -> Path | None:
@@ -1209,3 +1209,13 @@ def compare_dirs_by_files(dir1: Path, dir2: Path) -> list[tuple[Path, int, Path,
             mapped_files.append((f1, s1, None, 0))
 
     return mapped_files
+
+
+def find_root_from_path(path: Path):
+    from src.lib.config import cfg
+
+    # loop through cfg.all_roots and see if path is relative to any of them. If it is, return the root
+    for root in cfg.all_roots:
+        if try_relative_to(path, root):
+            return root
+    return None

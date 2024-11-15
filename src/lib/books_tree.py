@@ -603,7 +603,9 @@ class BooksTree(BaseModel):
 
     @property
     def key(self):
-        return str(self.path.relative_to(self.root.path)) if self.root and self.is_book_root else None
+        return (
+            str(self.path.relative_to(self.root.path)) if self.root and self.is_book_root else self.path.name
+        )  # TODO: We might not want self.path.name here as fallback; was None previously.
 
     @property
     def date_created(self):

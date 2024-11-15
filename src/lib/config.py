@@ -550,6 +550,19 @@ class Config:
     def trash_dir(self):
         return self.working_dir / "trash"
 
+    @property
+    def all_roots(self):
+        return [
+            self.inbox_dir,
+            self.converted_dir,
+            self.archive_dir,
+            self.backup_dir,
+            self.working_dir,
+            self.build_dir,
+            self.merge_dir,
+            self.trash_dir,
+        ]
+
     @cached_property
     def GLOBAL_LOG_FILE(self):
         log_file = self.converted_dir / "auto-m4b.log"
