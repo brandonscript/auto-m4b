@@ -420,7 +420,6 @@ class BooksTree(BaseModel):
         *,
         mindepth: int | None = None,
         maxdepth: int | None = None,
-        ignore_errors: bool = False,
         allow_file_root: bool = False,
     ) -> "BooksTree":
         """Given a path, returns a TreePath of all directories containing audio files, and their subdirectories, and the audio files within them.
@@ -456,12 +455,11 @@ class BooksTree(BaseModel):
 
         root = (root := self.root or self).path
 
-        if not root.is_dir():
-            if ignore_errors:
-                return self
-            if root.is_file() and allow_file_root:
-                return self
-            raise NotADirectoryError(f"Error: {root} is not a directory")
+        if not root.exists():
+            return self
+
+        if root.is_file() and allow_file_root:
+            return self
 
         # Do a recursive glob of all files in the directory, and prepend the root so we can get standalone files
         rglob = isorted([root, *root.rglob("*")])
@@ -773,6 +771,9 @@ class BooksTree(BaseModel):
         if self._is_dir is None:
             self._is_dir = self.path.is_dir()
         return self._is_dir
+
+    def exists(self):
+        return self.path.exists()
 
     @property
     def is_book_root(self):
@@ -1157,7 +1158,7 @@ class BooksTree(BaseModel):
             return self.structure
 
         if self.has_structure("mixed") and not structure == ("mixed",):
-            print_debug(f"{self.path} has 'mixed' which is not compatible with {structure}, removing 'mixed'")
+            # print_debug(f"{self.key} has 'mixed' which is not compatible with {structure}, removing 'mixed'")
             self.remove_structures("mixed", recursive=recursive)
 
         if any_matching(structure, ["_parent"]):

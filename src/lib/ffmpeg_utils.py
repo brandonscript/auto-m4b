@@ -45,6 +45,8 @@ def get_duration(path: Path, fmt: DurationFmt = "human") -> str | float:
     if not path.exists():
         raise ValueError(f"Error getting duration: Path {path} does not exist")
 
+    duration = 0
+
     if path.is_file():
         if path.suffix not in AUDIO_EXTS:
             raise ValueError(f"File {path} is not an audio file")
@@ -75,8 +77,9 @@ def get_duration(path: Path, fmt: DurationFmt = "human") -> str | float:
 #     return round_bitrate(int(bitrate)) if round else int(bitrate)
 
 
-def is_variable_bitrate(file: Path) -> bool:
-    bitrate, nearest_std_bitrate = get_bitrate_py(file)
+def is_variable_bitrate(file: "BooksTree | Path") -> bool:
+    path = file.path if isinstance(file, BooksTree) else file
+    bitrate, nearest_std_bitrate = get_bitrate_py(path)
     return abs(bitrate - nearest_std_bitrate) > 0.5
 
 

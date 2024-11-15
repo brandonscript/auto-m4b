@@ -3,7 +3,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import cast, Literal
 
-import cachetools
+from cachetools.func import ttl_cache
 
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
@@ -14,7 +14,6 @@ from src.lib.fs_utils import (
     last_updated_audio_files_at,
     name_matches,
 )
-from src.lib.parsers import is_maybe_multiple_books_or_series
 from src.lib.typing import DirName
 
 InboxItemStatus = Literal["new", "ok", "needs_retry", "failed", "gone"]
@@ -194,16 +193,18 @@ class InboxItem:
 
     @property
     def is_maybe_series_book(self):
-        return len(Path(self.key).parts) > 1
+        return self.tree.has_structure("series_book")
+        # return len(Path(self.key).parts) > 1
 
     @cached_property
     def is_maybe_series_parent(self):
-        return any(
-            [
-                is_maybe_multiple_books_or_series(d.name)
-                for d in find_base_dirs_with_audio_files(self.path, ignore_errors=True)
-            ]
-        )
+        return self.tree.has_structure("series_parent")
+        # return any(
+        #     [
+        #         is_maybe_multiple_books_or_series(d.name)
+        #         for d in find_base_dirs_with_audio_files(self.path, ignore_errors=True)
+        #     ]
+        # )
 
     @cached_property
     def is_first_book_in_series(self):
@@ -256,7 +257,7 @@ class InboxItem:
         return str(d.parent) if len(d.parts) > 1 and d.parts[-1] == self.basename else str(d)
 
     @property
-    @cachetools.func.ttl_cache(maxsize=6, ttl=10)
+    @ttl_cache(maxsize=6, ttl=10)
     def num_books_in_series(self):
         if not self.is_maybe_series_parent:
             return -1

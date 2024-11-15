@@ -26,7 +26,7 @@ from src.lib.fs_utils import (
 from src.lib.id3_utils import extract_cover_art, extract_metadata
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info
-from src.lib.typing import AudiobookFmt, BookStructure2, BookStructureTuple, DirName, SizeFmt
+from src.lib.typing import AudiobookFmt, BookStructure2, DirName, SizeFmt
 
 
 class Audiobook(BaseModel):
@@ -176,10 +176,6 @@ class Audiobook(BaseModel):
     def hash(self, for_dir: DirName = "inbox"):
         return hash_path_audio_files(getattr(self, for_dir + "_dir"))
 
-    @cached_property
-    def structure(self) -> BookStructureTuple:
-        return self.tree.structure
-
     def is_a(
         self,
         structure: BookStructure2 | tuple[BookStructure2, ...],
@@ -193,7 +189,7 @@ class Audiobook(BaseModel):
             not_fmt = (not_fmt,)
         not_fmt_matches = not not_fmt or self.orig_file_type not in not_fmt
         fmt_matches = not fmt or self.orig_file_type == fmt
-        return self.structure in structure and fmt_matches and not_fmt_matches
+        return self.tree.has_any_structure(*structure) and fmt_matches and not_fmt_matches
 
     @property
     def is_maybe_series_book(self):

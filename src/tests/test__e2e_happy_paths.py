@@ -47,8 +47,8 @@ class test_happy_paths:
         app(max_loops=1)
         assert testutils.assert_processed_output(
             capfd,
-            *all_hardy_boys[0:3],
-            loops=[testutils.check_output(found_books_eq=4, converted_eq=3)],
+            *all_hardy_boys[0:4],
+            loops=[testutils.check_output(found_books_eq=4, converted_eq=4)],
         )
 
     def test_backup_book_mp3(self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str], enable_backups):
