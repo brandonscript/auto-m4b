@@ -27,13 +27,13 @@
     "python.analysis.completeFunctionParens": false,
     "python.autoComplete.addBrackets": false,
     "python.analysis.indexing": true,
-    "python.analysis.extraPaths": [
-      "${workspaceFolder}/src"
-    ],
+    // "python.analysis.extraPaths": [
+    //   "${workspaceFolder}/src"
+    // ],
     "python.analysis.packageIndexDepths": [
       {
         "name": "",
-        "depth": 8,
+        "depth": 10,
         "includeAllSymbols": true,
       }
     ],

@@ -30,7 +30,7 @@ class M4bTool:
         self.book = book
         self._cmd = cfg._m4b_tool + [
             "merge",
-            dockerize_volume(book.merge_dir),
+            str(dockerize_volume(book.merge_dir)),
             "-n",
         ]
 
@@ -48,17 +48,13 @@ class M4bTool:
         _(("--logfile", dockerize_volume(book.log_file)))
         _("--no-chapter-reindexing")
 
-        if (
-            book.orig_file_type in ["m4a", "m4b"] or not book.has_id3_cover
-        ) and book.cover_art_file:
+        if (book.orig_file_type in ["m4a", "m4b"] or not book.has_id3_cover) and book.cover_art_file:
             _(("--cover", dockerize_volume(book.cover_art_file)))
 
         if cfg.USE_FILENAMES_AS_CHAPTERS:
             _("--use-filenames-as-chapters")
 
-        if chapters_files := list(
-            dockerize_volume(self.book.merge_dir).glob("*chapters.txt")
-        ):
+        if chapters_files := list(dockerize_volume(self.book.merge_dir).glob("*chapters.txt")):
             chapters_file = chapters_files[0]
             _(f'--chapters-file="{chapters_file}"')
             smart_print(
@@ -93,9 +89,7 @@ class M4bTool:
     def print_msg(self):
         starttime_friendly = friendly_date()
         if self.should_copy:
-            smart_print(
-                f"Starting merge/passthrough → {tinted_m4b()} at {tint_light_grey(starttime_friendly)}..."
-            )
+            smart_print(f"Starting merge/passthrough → {tinted_m4b()} at {tint_light_grey(starttime_friendly)}...")
         else:
             smart_print(
                 f"Starting {tinted_file(self.book.orig_file_type)} → {tinted_m4b()} conversion at {tint_light_grey(starttime_friendly)}..."

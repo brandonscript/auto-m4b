@@ -42,7 +42,6 @@ services:
       # - WORKING_FOLDER=/sandbox/working
       - OVERWRITE_EXISTING=Y
       - FLATTEN_MULTI_DISC_BOOKS=Y
-      - CONVERT_SERIES=Y
       - BACKUP=N
       - DEBUG=Y
       - TZ=America/Vancouver

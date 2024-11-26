@@ -67,6 +67,11 @@ def indirect_fixture(request: pytest.FixtureRequest):
     return request.getfixturevalue(request.param)
 
 
+@pytest.fixture(scope="function", params=[("fixture_names")])
+def indirect_fixtures(request: pytest.FixtureRequest):
+    return request.getfixturevalue(request.param)
+
+
 def rm_from_inbox(*names: str):
     for name in names:
         inbox = TEST_DIRS.inbox / name
@@ -358,13 +363,13 @@ def benedict_society__mp3():
 
 
 @pytest.fixture(scope="function", autouse=False)
-def nathan_lowell__nested_series_m4b():
-    # dir_name = TEST_DIRS.inbox / "nathan_lowell__nested_series_m4b"
-
+def nathan_lowell__nested_series_m4a():
+    # dir_name = TEST_DIRS.inbox / "nathan_lowell__nested_series_m4a"
     yield from load_test_fixture(
-        "nathan_lowell__nested_series_m4b",
+        "nathan_lowell__nested_series_m4a",
         exclusive=True,
         override_name="Nathan Lowell",
+        match_filter="^(Nathan Lowell)",
     )
 
 
@@ -492,14 +497,20 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     """Populate INBOX_FOLDER with mocked sample audiobooks."""
 
     # make 4 sample audiobooks using nealy empty txt files (~5kb) as pretend mp3 files.
-    for i, f in enumerate(MOCKED.flat_dirs):
+    for i, f in enumerate(MOCKED.flat_dirs[:4]):
         f.mkdir(parents=True, exist_ok=True)
         for j in range(1, 4):
             testutils.make_mock_file(f / f"mock_book_{i + 1} - part_{j}.mp3")
 
+    for f in ["01", "02", "03"]:
+        testutils.make_mock_file(MOCKED.flat_dirs[-1] / f"{f} - mock_book_5.mp3")
+
     # make a book with a single flat nested folder
     for i in range(1, 4):
         testutils.make_mock_file(MOCKED.flat_nested_dir / "inner_dir" / f"mock_book_flat_nested - part_{i}.mp3")
+
+    # make a deeply nested container dir
+    list(map(testutils.make_mock_file, [f for f in MOCKED.container_dirs if "." in f.name]))
 
     # make a multi-series directory
     names = ["Dawn", "High Noon", "Dusk"]
@@ -555,6 +566,9 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     testutils.make_mock_file(MOCKED.mixed_dir / "mock_book_mixed, a book apart.mp3")
     testutils.make_mock_file(MOCKED.mixed_dir / "nested" / "mock_book_mixed - part_42.mp3")
     testutils.make_mock_file(MOCKED.mixed_dir / "nested" / "mock_book_mixed, random file no. 7.mp3")
+    testutils.make_mock_file(MOCKED.mixed_dir / "01 - mixed drinks.mp3")
+    testutils.make_mock_file(MOCKED.mixed_dir / "02 - mixed drinks.mp3")
+    testutils.make_mock_file(MOCKED.mixed_dir / "03 - mixed drinks.mp3")
 
     # make standalone files
     for f in MOCKED.standalone_files:
@@ -626,7 +640,7 @@ def reset_all(reset_match_filter, reset_failed):
     yield
 
     inbox.reset_inbox()
-    cfg.MATCH_FILTER = None # type: ignore
+    cfg.MATCH_FILTER = None  # type: ignore
     cfg.SLEEP_TIME = 0.1
     cfg.WAIT_TIME = 0.5
     cfg.TEST = True
@@ -649,20 +663,6 @@ def disable_multidisc():
     testutils.disable_multidisc()
     yield
     testutils.enable_multidisc()
-
-
-@pytest.fixture(scope="function", autouse=False)
-def enable_convert_series():
-    testutils.enable_convert_series()
-    yield
-    testutils.disable_convert_series()
-
-
-@pytest.fixture(scope="function", autouse=False)
-def disable_convert_series():
-    testutils.disable_convert_series()
-    yield
-    testutils.enable_convert_series()
 
 
 @pytest.fixture(scope="function", autouse=False)

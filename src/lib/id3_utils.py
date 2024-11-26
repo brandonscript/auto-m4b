@@ -227,7 +227,7 @@ def write_mp3_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path |
         raise HeaderNotFoundError(f"Error: Could not load '{file}' for tagging, it may be corrupt or not an audio file")
 
 
-def verify_and_update_id3_tags(book: "Audiobook", in_dir: Literal["build", "converted"]) -> None:
+def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "converted"]) -> None:
     # takes the inbound book, then checks the converted file and verifies that the id3 tags match the extracted metadata
     # if they do not match, it will print a notice and update the id3 tags
 
@@ -236,7 +236,7 @@ def verify_and_update_id3_tags(book: "Audiobook", in_dir: Literal["build", "conv
     m4b_to_check = book.converted_file if in_dir == "converted" else book.build_file
 
     if not m4b_to_check.is_file():
-        m4b_to_check = find_first_audio_file(book.converted_dir, ".m4b")
+        m4b_to_check = find_first_audio_file(book.converted_dir, "m4b")
         if not m4b_to_check.is_file():
             raise FileNotFoundError(f"Cannot verify id3 tags, {m4b_to_check} does not exist")
 
@@ -322,7 +322,7 @@ def verify_and_update_id3_tags(book: "Audiobook", in_dir: Literal["build", "conv
     nl()
 
 
-def ffprobe_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = False):
+def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, throw: bool = False):
     from src.lib.config import cfg
 
     if file is None:
@@ -331,6 +331,7 @@ def ffprobe_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = Fals
     if file and not file.exists():
         raise FileNotFoundError(f"Error: Cannot extract id3 tag, '{file}' does not exist")
     try:
+        options = options or {}
         probe_result = ffmpeg.probe(str(file), cmd="ffprobe", **options)
     except ffmpeg.Error as e:
         from src.lib.logger import write_err_file
@@ -347,7 +348,7 @@ def ffprobe_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = Fals
     return cast(dict, probe_result)
 
 
-def ffmpeg_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = False):
+def ffmpeg_file(file: Path, *, options: dict[str, Any] | None = None, throw: bool = False):
     from src.lib.config import cfg
 
     if file is None:
@@ -356,6 +357,7 @@ def ffmpeg_file(file: Path, *, options: dict[str, Any] = {}, throw: bool = False
     if file and not file.exists():
         raise FileNotFoundError(f"Error: Cannot extract id3 tag, '{file}' does not exist")
     try:
+        options = options or {}
         ffmpeg_result = ffmpeg.run(str(file), cmd="ffmpeg", **options)
     except ffmpeg.Error as e:
         from src.lib.logger import write_err_file

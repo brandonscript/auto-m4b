@@ -56,7 +56,7 @@ from src.lib.typing import SCAN_TTL
 
 
 def move_standalone_into_dir(book: Audiobook, item: InboxItem):
-    if not book.is_a("standalone_file", not_fmt="m4b"):
+    if not book.is_not_a("standalone_file", "m4b"):
         return book, item
 
     ext = ensure_dot(book.orig_file_type)
@@ -65,11 +65,11 @@ def move_standalone_into_dir(book: Audiobook, item: InboxItem):
     smart_print(f"\nMoving standalone {ext} into its own folder → ./{folder_name}/")
     new_folder = cfg.inbox_dir / folder_name
     new_folder.mkdir(exist_ok=True)
-    mv_file_to_dir(item.path, new_folder, overwrite_mode="overwrite-silent")
+    mv_file_into_dir(item.path, new_folder, overwrite_mode="overwrite-silent")
 
     # move any other files with the same basename to the new folder
     for f in find_adjacent_files_with_same_basename(item.path):
-        mv_file_to_dir(f, new_folder)
+        mv_file_into_dir(f, new_folder)
 
     # update item
     item = InboxItem(new_folder / new_folder)
@@ -101,16 +101,16 @@ def process_already_m4b(book: Audiobook, item: InboxItem):
                 i += 1
                 unique_target = (target_dir / f"{folder_name} (copy {i})").with_suffix(ext)
 
-        mv_file_to_dir(item.path, target_dir, new_filename=unique_target.name)
+        mv_file_into_dir(item.path, target_dir, new_filename=unique_target.name)
 
         for f in find_adjacent_files_with_same_basename(item.path):
-            mv_file_to_dir(f, target_dir)
+            mv_file_into_dir(f, target_dir)
 
     elif book.tree.has_structure("single"):
         mv_dir_contents(book.inbox_dir, book.converted_dir, overwrite_mode="overwrite-silent")
 
     book.set_active_dir("converted")
-    verify_and_update_id3_tags(book, "converted")
+    verify_and_update_id3_tags(book, in_dir="converted")
 
     item.set_gone()
     return 1
@@ -274,7 +274,7 @@ def backup_ok(book: Audiobook):
 
                 # re-copy the files that are too small
                 for f in too_small_files:
-                    cp_file_to_dir(f, book.backup_dir, overwrite_mode="overwrite-silent")
+                    cp_file_into_dir(f, book.backup_dir, overwrite_mode="overwrite-silent")
 
                 # re-check the size of the backup
                 if too_small_files := find_too_small_files(book.inbox_dir, book.backup_dir):
@@ -366,10 +366,10 @@ def check_failed_books():
 def copy_to_working_dir(book: Audiobook):
     # Move from inbox to merge folder
     smart_print("\nCopying files to working folder...", end="")
-    cp_dir(book.inbox_dir, cfg.merge_dir, overwrite_mode="overwrite-silent")
+    cp_dir(book.inbox_dir, book.merge_dir.parent, overwrite_mode="overwrite-silent")
     # copy book.cover_art to merge folder
     if book.cover_art_file and not book.cover_art_file.exists():
-        cp_file_to_dir(book.cover_art_file, book.merge_dir, overwrite_mode="overwrite-silent")
+        cp_file_into_dir(book.cover_art_file, book.merge_dir, overwrite_mode="overwrite-silent")
     print_mint(" ✓\n")
     book.set_active_dir("merge")
 
@@ -427,13 +427,7 @@ def can_process_multi_dir(book: Audiobook):
     if book.tree.has_structure_like("series") or book.tree.has_structure_like("multi"):
         help_msg = f"Please organize the files in a single folder and rename them so they sort alphabetically\nin the correct order"
         if book.tree.has_structure_like("series"):
-            if cfg.CONVERT_SERIES:
-                inbox.set_ok(book)
-            else:
-                print_error(f"{en.MULTI_ERR}, maybe this contains multiple books or a series?")
-                smart_print(f"{help_msg}, or set CONVERT_SERIES=Y to have auto-m4b convert\nbook series individually\n")
-                fail_book(book, f"{en.MULTI_ERR} (multiple books found) - {help_msg}")
-                return False
+            inbox.set_ok(book)
         elif book.tree.has_structure("multi_disc"):
             if cfg.FLATTEN_MULTI_DISC_BOOKS:
                 smart_print(
@@ -451,7 +445,7 @@ def can_process_multi_dir(book: Audiobook):
                     return False
                 else:
                     flatten_files_in_dir(book.inbox_dir)
-                    book.rescan_structure()
+                    book.rescan()
                     # book = Audiobook(book.inbox_dir)
                     print_mint(" ✓\n")
                     # files = "\n".join([str(f) for f in book.inbox_dir.glob("*")])
@@ -509,7 +503,7 @@ def flatten_nested_book(book: Audiobook):
         )
         flatten_files_in_dir(book.inbox_dir)
         print_mint(" ✓\n")
-        book.rescan_structure()
+        book.rescan()
 
 
 def print_book_info(book: "Audiobook"):
@@ -535,6 +529,16 @@ def print_book_info(book: "Audiobook"):
 
 
 def convert_book(book: Audiobook):
+    if not book.merge_dir.exists():
+        raise FileNotFoundError(
+            f"Fatal: Merge folder '{book.merge_dir}' does not exist – ensure that auto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
+        )
+
+    if not book.num_files("merge"):
+        raise FileNotFoundError(
+            f"Fatal: No audio files found in merge folder '{book.merge_dir}' – ensure that auto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
+        )
+
     starttime = time.time()
     m4btool = M4bTool(book)
 
@@ -620,7 +624,7 @@ def convert_book(book: Audiobook):
     #         f"{endtime_log}  {book}  Converted in {log_format_elapsed_time(elapsedtime)}\n"
     #     )
 
-    verify_and_update_id3_tags(book, "build")
+    verify_and_update_id3_tags(book, in_dir="build")
 
     return int(time.time() - starttime)
 
@@ -638,7 +642,7 @@ def move_desc_file(book: Audiobook):
     if did_remove_old_desc:
         print_notice(f"Removed old description {pluralize(len(desc_files), 'file')}")
 
-    mv_file_to_dir(
+    mv_file_into_dir(
         book.merge_desc_file,
         book.final_desc_file.parent,
         new_filename=book.final_desc_file.name,
@@ -667,7 +671,7 @@ def move_converted_book_and_extras(book: Audiobook):
         if not book.log_file.read_text().strip():
             book.log_file.unlink()
         else:
-            mv_file_to_dir(
+            mv_file_into_dir(
                 book.log_file,
                 book.converted_dir,
                 new_filename=book.log_filename,
@@ -815,7 +819,7 @@ def process_book(b: int, item: InboxItem):
         b += process_already_m4b(book, item)
         if item.is_gone:
             return b
-    else:
+    elif book.is_a("standalone_file", but_not="m4b"):
         book, item = move_standalone_into_dir(book, item)
 
     if not has_audio_files(book):
@@ -824,7 +828,7 @@ def process_book(b: int, item: InboxItem):
     if not can_process_multi_dir(book):
         return b
 
-    if book.is_maybe_series_parent:
+    if book.tree.has_structure("series_parent"):
         return b
 
     if not can_process_roman_numeral_book(book):

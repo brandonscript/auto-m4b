@@ -127,9 +127,7 @@ class testutils:
         time.sleep(delay)
         last_updated_at = time.time() + from_now
         rel_time = human_elapsed_time(-from_now)
-        cls.print(
-            f"Adding '{book}' to failed list, setting last modified to {rel_time}"
-        )
+        cls.print(f"Adding '{book}' to failed list, setting last modified to {rel_time}")
         InboxState().set_failed(book, "Test", last_updated_at)
 
     @classmethod
@@ -261,20 +259,6 @@ class testutils:
 
         time.sleep(delay)
         cls.print("Disabling multidisc")
-        cfg.FLATTEN_MULTI_DISC_BOOKS = False
-
-    @classmethod
-    def enable_convert_series(cls, delay: int = 0):
-
-        time.sleep(delay)
-        cls.print("Enabling convert series")
-        cfg.CONVERT_SERIES = True
-
-    @classmethod
-    def disable_convert_series(cls, delay: int = 0):
-        time.sleep(delay)
-        cls.print("Disabling convert series")
-        cfg.CONVERT_SERIES = False
 
     @classmethod
     def enable_backups(cls, delay: int = 0):
@@ -327,11 +311,7 @@ class testutils:
 
     @classmethod
     def rm(cls, p: Path):
-        (
-            shutil.rmtree(p, ignore_errors=True)
-            if p.is_dir()
-            else p.unlink(missing_ok=True)
-        )
+        (shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True))
 
     @classmethod
     def strip_ansi_codes(cls, s: str) -> str:
@@ -355,9 +335,7 @@ class testutils:
 
     @classmethod
     def is_startup(cls, *lines: str | None) -> bool:
-        return any(
-            bool(line and line.startswith("Starting auto-m4b...")) for line in lines
-        )
+        return any(bool(line and line.startswith("Starting auto-m4b...")) for line in lines)
 
     @classmethod
     def is_footer(cls, *lines: str | None) -> bool:
@@ -367,19 +345,11 @@ class testutils:
 
     @classmethod
     def strip_test_debug_lines(cls, *lines: str) -> tuple[str, ...]:
-        return tuple(
-            (
-                line
-                for line in lines
-                if not line.startswith("[DEBUG") and not line.startswith("[PYTEST")
-            )
-        )
+        return tuple((line for line in lines if not line.startswith("[DEBUG") and not line.startswith("[PYTEST")))
 
     @classmethod
     def strip_startup_lines(cls, *lines: str):
-        startup_idx = next(
-            (i for i, line in enumerate(lines) if cls.is_startup(line)), -1
-        )
+        startup_idx = next((i for i, line in enumerate(lines) if cls.is_startup(line)), -1)
         if startup_idx == -1:
             return lines
 
@@ -391,10 +361,7 @@ class testutils:
                     break
                 if any(
                     (
-                        *(
-                            t in line
-                            for t in ["/", "[Beta]", "TEST", "DEBUG", "Loading"]
-                        ),
+                        *(t in line for t in ["/", "[Beta]", "TEST", "DEBUG", "Loading"]),
                         cls.is_startup(line),
                         re.match(r"- \w+", line),
                     ),
@@ -460,11 +427,7 @@ class testutils:
 
     @classmethod
     def get_last_cats_line_idx(cls, *lines: str) -> int:
-        return (
-            len(lines)
-            - next((i for i, line in enumerate(lines[::-1]) if "CATS" in line), 0)
-            - 1
-        )
+        return len(lines) - next((i for i, line in enumerate(lines[::-1]) if "CATS" in line), 0) - 1
 
     @classmethod
     def get_first_cats_line_idx(cls, *lines: str) -> int:
@@ -493,9 +456,7 @@ class testutils:
         return d
 
     @classmethod
-    def get_all_processed_books(
-        cls, s: str, *, root_dir: Path = TEST_DIRS.inbox
-    ) -> list[str]:
+    def get_all_processed_books(cls, s: str, *, root_dir: Path = TEST_DIRS.inbox) -> list[str]:
         lines = s.splitlines()
         books = []
         for i, line in enumerate(lines):
@@ -523,17 +484,11 @@ class testutils:
 
         actual = out.count("auto-m4b •")
         if expected_eq != -1:
-            assert (
-                actual == expected_eq
-            ), f"Expected header to print {expected_eq} time(s), got {actual}"
+            assert actual == expected_eq, f"Expected header to print {expected_eq} time(s), got {actual}"
         if expected_gte != -1:
-            assert (
-                actual >= expected_gte
-            ), f"Expected header to print at least {expected_gte} time(s), got {actual}"
+            assert actual >= expected_gte, f"Expected header to print at least {expected_gte} time(s), got {actual}"
         if expected_lte != -1:
-            assert (
-                actual <= expected_lte
-            ), f"Expected header to print at most {expected_lte} time(s), got {actual}"
+            assert actual <= expected_lte, f"Expected header to print at most {expected_lte} time(s), got {actual}"
 
         return True
 
@@ -546,9 +501,7 @@ class testutils:
                 (0, None),
             )
             if cls.is_divider(line) and cls.is_divider(next_non_empty_line):
-                raise AssertionError(
-                    f"Found double dividers at lines {i} and {i + 2 + j}"
-                )
+                raise AssertionError(f"Found double dividers at lines {i} and {i + 2 + j}")
         return True
 
     @classmethod
@@ -557,51 +510,35 @@ class testutils:
         all_runs = cls.get_loops_from_out_lines(*_out_lines)
         for i, run in enumerate(all_runs):
             if run:
-                assert cls.is_banner(
-                    *run[:4]
-                ), f"Expected a banner to print at the start of run {i + 1}"
+                assert cls.is_banner(*run[:4]), f"Expected a banner to print at the start of run {i + 1}"
         return True
 
     @classmethod
     def assert_no_duplicate_banners(cls, out_lines: list[str]):
         _out_lines = cls.strip_startup_lines(*cls.strip_test_debug_lines(*out_lines))
-        all_runs = [
-            cls.strip_banner_extras(*run)
-            for run in cls.get_loops_from_out_lines(*_out_lines)
-        ]
+        all_runs = [cls.strip_banner_extras(*run) for run in cls.get_loops_from_out_lines(*_out_lines)]
         banners = [[b for b in r if cls.is_banner(b) and b[0] == "-"] for r in all_runs]
         for i, run in enumerate(banners):
             if len(run) > 1:
-                raise AssertionError(
-                    f"Expected only one banner to print per loop, but got {len(run)} in run {i + 1}"
-                )
+                raise AssertionError(f"Expected only one banner to print per loop, but got {len(run)} in run {i + 1}")
         return True
 
     @classmethod
     def assert_not_ends_with_banner(cls, out_lines: list[str]):
         _out_lines = cls.strip_test_debug_lines(*out_lines)
-        lines_to_check = cls.strip_cats_ascii(
-            *_out_lines[cls.get_last_cats_line_idx(*_out_lines) :]
-        )
+        lines_to_check = cls.strip_cats_ascii(*_out_lines[cls.get_last_cats_line_idx(*_out_lines) :])
 
-        assert not cls.is_banner(
-            *lines_to_check
-        ), "Output should never end with a banner"
+        assert not cls.is_banner(*lines_to_check), "Output should never end with a banner"
         return True
 
     @classmethod
     def assert_count_inbox_hash_changed(cls, out_lines: list[str], eq: int):
-        assert (
-            len(list(set([l for l in out_lines if en.DEBUG_INBOX_HASH_UNCHANGED in l])))
-            == eq
-        )
+        assert len(list(set([l for l in out_lines if en.DEBUG_INBOX_HASH_UNCHANGED in l]))) == eq
         return True
 
     @classmethod
     def assert_count_no_audio_files_found(cls, out_lines: list[str], eq: int):
-        assert (
-            len(list(set([l for l in out_lines if "No audio files found" in l]))) == eq
-        )
+        assert len(list(set([l for l in out_lines if "No audio files found" in l]))) == eq
         return True
 
     @classmethod
@@ -615,9 +552,7 @@ class testutils:
         if isinstance(out, CaptureFixture):
             out = cls.get_stdout(out)
 
-        books = [
-            Audiobook(Path(b)) if not isinstance(b, Audiobook) else b for b in exp_books
-        ]
+        books = [Audiobook(Path(b)) if not isinstance(b, Audiobook) else b for b in exp_books]
 
         processed = cls.get_all_processed_books(out)
         did_process_all = all([book.key in processed for book in books])
@@ -626,9 +561,7 @@ class testutils:
         processed_list = f"\n{listify(processed)}" if processed else ""
         outs = out.split("CATS")[:-1] if "CATS" in out else [out]
         out_lines = out.splitlines()
-        assert (
-            ok
-        ), f"Expected {len(books)} to be converted: {books_list}\n\nGot {len(processed)}: {processed_list}"
+        assert ok, f"Expected {len(books)} to be converted: {books_list}\n\nGot {len(processed)}: {processed_list}"
 
         expect_num_loops = len(loops) if loops else None
         if expect_num_loops is not None:
@@ -636,17 +569,11 @@ class testutils:
                 len(outs) == expect_num_loops
             ), f"Expected {pluralize_with_count(expect_num_loops, 'loop')}, got {len(outs)}"
 
-        def assert_already_converted(
-            i: int, ch: testutils.check_output, out_run: str = out
-        ):
-            if all(
-                f is None for f in [ch.already_converted_eq, ch.already_converted_gt]
-            ):
+        def assert_already_converted(i: int, ch: testutils.check_output, out_run: str = out):
+            if all(f is None for f in [ch.already_converted_eq, ch.already_converted_gt]):
                 return
             all_already_converted = len(re.findall(r"has already been converted", out))
-            this_already_converted = len(
-                re.findall(r"has already been converted", out_run)
-            )
+            this_already_converted = len(re.findall(r"has already been converted", out_run))
             try:
                 if ch.already_converted_eq is not None:
                     assert this_already_converted == ch.already_converted_eq
@@ -677,9 +604,7 @@ class testutils:
             expected = ch.found_books_result()
 
             if ch.found_books_eq == 0:
-                assert (
-                    this_found == 0
-                ), f"Expected no books to be found, got {this_found}"
+                assert this_found == 0, f"Expected no books to be found, got {this_found}"
             elif this_found == 0:
                 assert this_found > 0, f"Expected {expected}, but found none"
             else:
@@ -700,11 +625,7 @@ class testutils:
                 return
 
             all_failed = len(re.findall(r"(\d+) that previously failed", out))
-            this_failed = int(
-                re_group(
-                    re.search(r"(\d+) that previously failed", out_run), 1, default=0
-                )
-            )
+            this_failed = int(re_group(re.search(r"(\d+) that previously failed", out_run), 1, default=0))
             try:
                 if ch.skipped_failed_eq is not None:
                     assert this_failed == ch.skipped_failed_eq
@@ -722,9 +643,7 @@ class testutils:
                 return
 
             all_ignored = len(re.findall(r"ignoring (\d+)", out))
-            this_ignored = int(
-                re_group(re.search(r"ignoring (\d+)", out_run), 1, default=0)
-            )
+            this_ignored = int(re_group(re.search(r"ignoring (\d+)", out_run), 1, default=0))
             try:
                 if ch.ignored_books_eq is not None:
                     assert this_ignored == ch.ignored_books_eq
@@ -737,9 +656,7 @@ class testutils:
                     f"Run {i + 1} - expected {expected} to be ignored, got {this_ignored} (total ignored: {all_ignored})"
                 )
 
-        def assert_retried(
-            i: int, t: int, ch: testutils.check_output, out_run: str = out
-        ):
+        def assert_retried(i: int, t: int, ch: testutils.check_output, out_run: str = out):
             if all(c is None for c in [ch.retried_books_eq, ch.retried_books_gt]):
                 return
 
@@ -757,9 +674,7 @@ class testutils:
                     f"Run {i + 1} of {t} - expected {expected} to retry, got {this_retried} (total retried: {all_retried})"
                 )
 
-        def assert_converted(
-            i: int, t: int, ch: testutils.check_output, loop: str = out
-        ):
+        def assert_converted(i: int, t: int, ch: testutils.check_output, loop: str = out):
             if all(c is None for c in [ch.converted_eq, ch.converted_gt]):
                 return
 
@@ -807,13 +722,13 @@ class testutils:
     @classmethod
     def assert_converted_book_and_collateral_exist(cls, book: Audiobook, quality: str):
         assert book.converted_dir.exists()
-        m4b = book.converted_dir / f"{book.path.name}.m4b"
+        m4b = book.converted_dir / f"{book.basename}.m4b"
         assert m4b.exists()
         assert m4b.stat().st_size > 0
-        log = book.converted_dir / f"auto-m4b.{book.path.name}.log"
+        log = book.converted_dir / f"auto-m4b.{book.basename}.log"
         assert not log.exists()
         # assert log.stat().st_size > 0
-        desc = book.converted_dir / f"{book.path.name} [{quality}].txt"
+        desc = book.converted_dir / f"{book.basename} [{quality}].txt"
         assert desc.exists()
         assert desc.stat().st_size > 0
         return True

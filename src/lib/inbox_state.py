@@ -9,6 +9,7 @@ from typing import Any, cast, TypeVar
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.formatters import friendly_short_date
+from src.lib.fs_utils import find_root_from_path, try_relative_to
 from src.lib.hasher import Hasher
 from src.lib.inbox_item import get_item, get_key, InboxItem, InboxItemStatus
 from src.lib.misc import singleton
@@ -54,6 +55,10 @@ def requires_scan(func: Callable[..., R]):
     return wrapper
 
 
+class InboxStateError(Exception):
+    pass
+
+
 @singleton
 class InboxState(Hasher):
 
@@ -66,8 +71,9 @@ class InboxState(Hasher):
         self.loop_counter = 0
         self.banner_printed = False
         # print_debug("Set banner_printed to False")
-        self._tree = BooksTree(cfg.inbox_dir)
+        self.tree = BooksTree(cfg.inbox_dir)
         self._last_scan = 0
+        self.scan()
 
     def set(
         self,
@@ -85,19 +91,32 @@ class InboxState(Hasher):
             self._items[item.key].status = status
 
     @requires_scan
-    def get(self, key_path_hash_or_book: str | Path | Audiobook | None) -> InboxItem | None:
+    def get(self, key_path_hash_or_book: str | Path | BooksTree | Audiobook | None) -> InboxItem | None:
         if not key_path_hash_or_book:
             return None
-        key = get_key(key_path_hash_or_book)
-        simple = self._items.get(key, None)
-        if simple:
-            return simple
-        if isinstance(key_path_hash_or_book, BooksTree):
-            path = key_path_hash_or_book.path
-        elif isinstance(key_path_hash_or_book, Audiobook):
-            path = key_path_hash_or_book.path
-        else:
-            path = Path(key_path_hash_or_book)
+
+        if not self._items:
+            return None
+        # key = get_key(key_path_hash_or_book)
+        path = (
+            Path(key_path_hash_or_book)
+            if isinstance(key_path_hash_or_book, (str, Path))
+            else key_path_hash_or_book.path
+        )
+        root = find_root_from_path(path)
+        rel_from_root = None if not root or not (rel := try_relative_to(path, root)) else rel
+        key: Path = rel_from_root or path
+        while len(key.parts) >= 1:
+            simple = self._items.get(str(key), None)
+            if simple:
+                return simple
+            key = key.parent
+        # if isinstance(key_path_hash_or_book, BooksTree):
+        #     path = key_path_hash_or_book.path
+        # elif isinstance(key_path_hash_or_book, Audiobook):
+        #     path = key_path_hash_or_book.path
+        # else:
+        #     path = Path(key_path_hash_or_book)
         if path.is_absolute():
             return next(
                 (item for item in self._items.values() if item.path == path),
@@ -113,6 +132,9 @@ class InboxState(Hasher):
         key = get_key(key_path_book_or_hash)
         if key or (item := self.get(str(key_path_book_or_hash))) and (key := item.key):
             return self._items.pop(key, None)
+
+    def is_empty(self):
+        return not bool(self._items)
 
     def scan(
         self,
@@ -133,9 +155,13 @@ class InboxState(Hasher):
 
         super().scan()
 
-        self._tree = BooksTree(cfg.inbox_dir)
+        if not self.tree:
+            self.tree = BooksTree(cfg.inbox_dir)
+        else:
+            self.tree.scan()
+        # self._tree.scan()
 
-        new_items = {str(t.path): InboxItem(t) for t in self._tree.books_and_series}
+        new_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}
 
         # smart_print(f"scan calls: {SCAN_CALLS}", SCAN_CALLS)
         # try:
@@ -194,6 +220,7 @@ class InboxState(Hasher):
 
         os.environ["MATCH_FILTER"] = match_filter
         cfg.MATCH_FILTER = match_filter
+        self.tree.match_filter = match_filter
 
     def reset_inbox(self, new_match_filter: str | None = None):
 
@@ -242,11 +269,11 @@ class InboxState(Hasher):
 
     @property
     def num_audio_files_deep(self):
-        return len(self._tree.files_recursive)
+        return len(self.tree.files_recursive)
 
     @property
     def standalone_files(self):
-        return self._tree.standalone_files
+        return self.tree.standalone_files
 
     @property
     def standalone_books(self):
@@ -258,11 +285,11 @@ class InboxState(Hasher):
 
     @property
     def book_dirs(self):
-        return list(filter(lambda x: x.is_dir(), self._tree.books_and_series))
+        return list(filter(lambda x: x.is_dir(), self.tree.books_and_series))
 
     @property
     def series_parents(self):
-        return list(filter(lambda x: x.has_structure("series_parent"), self._tree.books_and_series))
+        return list(filter(lambda x: x.has_structure("series_parent"), self.tree.books_and_series))
 
     def series_items_for_key(self, key: str):
         return [

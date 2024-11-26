@@ -190,6 +190,11 @@ def ensure_dot(s: str) -> str:
     return s if s.startswith(".") else f".{s}"
 
 
+def strip_dot(s: str) -> str:
+    """Ensure extension (suffix) has no leading dot '.' character."""
+    return s.lstrip(".")
+
+
 @overload
 def to_audiobook_fmt(s: str, ignore_errors: Literal[False] = False) -> AudiobookFmt: ...
 

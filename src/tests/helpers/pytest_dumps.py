@@ -22,6 +22,32 @@ class TEST_DIRS:
 
 
 _series_parent_dir = TEST_DIRS.inbox / "mock_book_series_parent"
+_container_dir = TEST_DIRS.inbox / "mock_book_container"
+_container_dir_series_parent = _container_dir / "mock_book_container_series"
+_container_dir_series_books = [
+    _container_dir_series_parent / "01_mock_book_d3_one",
+    _container_dir_series_parent / "02_mock_book_d3_two",
+    _container_dir_series_parent / "03_mock_book_d3_three",
+    _container_dir_series_parent / "04_mock_book_d3_four.m4b",
+]
+_container_dir_others = [
+    _container_dir / "mock_book_d2_this_one.mp3",
+    _container_dir / "mock_book_d2_it_takes_two",
+    _container_dir / "mock_book_d2_three_is_a_crowd.m4b",
+]
+_container_dir_files = [
+    _container_dir_series_books[0] / "mock_book_d4_one-01.mp3",
+    _container_dir_series_books[0] / "mock_book_d4_one-02.mp3",
+    _container_dir_series_books[1] / "mock_book_d4_two-01.mp3",
+    _container_dir_series_books[1] / "mock_book_d4_two-02.mp3",
+    _container_dir_series_books[2] / "mock_book_d4_three-01.mp3",
+    _container_dir_series_books[2] / "mock_book_d4_three-02.mp3",
+    _container_dir_series_books[3],
+    _container_dir_others[0],
+    _container_dir_others[1] / "mock_book_d3_it_takes_two-01.mp3",
+    _container_dir_others[1] / "mock_book_d3_it_takes_two-02.mp3",
+    _container_dir_others[2],
+]
 
 
 @dataclass
@@ -31,11 +57,13 @@ class MOCKED:
     flat_dir2 = TEST_DIRS.inbox / "mock_book_2"
     flat_dir3 = TEST_DIRS.inbox / "mock_book_3"
     flat_dir4 = TEST_DIRS.inbox / "mock_book_4"
-    flat_dirs = [flat_dir1, flat_dir2, flat_dir3, flat_dir4]
+    flat_dir5 = TEST_DIRS.inbox / "mock_book_5"
+    flat_dirs = [flat_dir1, flat_dir2, flat_dir3, flat_dir4, flat_dir5]
 
     mixed_dir = TEST_DIRS.inbox / "mock_book_mixed"
 
     flat_nested_dir = TEST_DIRS.inbox / "mock_book_flat_nested"
+
     series_books = [
         _series_parent_dir / "Dawn - Book 1",
         _series_parent_dir / "Dusk - Book 3",
@@ -61,12 +89,18 @@ class MOCKED:
     ]
     single_dirs = [single_dir_mp3, single_nested_dir_mp3, single_dir_m4b]
     series_dirs = [series_parent_dir, *series_books]
-
+    container_dirs = [
+        _container_dir,
+        _container_dir_series_parent,
+        *_container_dir_series_books,
+        *_container_dir_others,
+        *_container_dir_files,
+    ]
     all_dirs_no_series = isorted(flat_dirs + [mixed_dir] + multi_dirs + single_dirs)
 
-    all_dirs = isorted(flat_dirs + [mixed_dir] + multi_dirs + series_dirs[1:] + single_dirs)
+    all_dirs = isorted(flat_dirs + [mixed_dir] + multi_dirs + series_dirs[1:] + single_dirs + container_dirs)
 
-    all_book_dirs = [d for d in all_dirs if not d == _series_parent_dir]
+    all_book_dirs = [d for d in all_dirs if not d == _series_parent_dir and not d == _container_dir]
 
     standalone_m4b = TEST_DIRS.inbox / "mock_book_standalone_file.m4b"
     standalone_mp3_1 = TEST_DIRS.inbox / "mock_book_standalone_file_a.mp3"
@@ -80,7 +114,7 @@ class MOCKED:
 
     empty = TEST_DIRS.inbox / "mock_book_empty"
 
-    all_ = all_dirs + single_dirs
+    all_ = all_dirs + single_dirs + container_dirs + [empty] + standalone_files
 
 
 mock_book_mixed_full = {

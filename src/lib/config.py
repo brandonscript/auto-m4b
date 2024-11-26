@@ -271,13 +271,13 @@ def use_pid_file():
 
 @singleton
 class Config:
-    _env: dict[str, Any] = {}
     _dotenv_src: Any = None
     _USE_DOCKER = False
     _last_debug_print: str = ""
 
     def __init__(self):
         """Do a first load of the environment variables in case we need them before the app runs."""
+        self._env: dict[str, Any] = {}
         self.load_env(quiet=True)
 
     def startup(self, args: AutoM4bArgs | None = None):
@@ -302,7 +302,6 @@ class Config:
                             en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
                             self.FLATTEN_MULTI_DISC_BOOKS,
                         ),
-                        (en.FEATURE_CONVERT_SERIES, self.CONVERT_SERIES),
                     ]
 
                     if test_debug_msg := (
@@ -435,11 +434,6 @@ class Config:
 
     FLATTEN_MULTI_DISC_BOOKS = _FLATTEN_MULTI_DISC_BOOKS
 
-    @env_property(typ=bool, default=False)
-    def _CONVERT_SERIES(self): ...
-
-    CONVERT_SERIES = _CONVERT_SERIES
-
     @property
     def MAX_LOOPS(self):
         return self.args.max_loops if self.args.max_loops else -1
@@ -557,7 +551,6 @@ class Config:
             self.converted_dir,
             self.archive_dir,
             self.backup_dir,
-            self.working_dir,
             self.build_dir,
             self.merge_dir,
             self.trash_dir,

@@ -7,11 +7,8 @@ from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, overload, TYPE_CHECKING, TypeVar
 
-import cachetools
-import cachetools.func
-
 from src.lib.config import AUDIO_EXTS
-from src.lib.formatters import ensure_dot, friendly_date, human_size
+from src.lib.formatters import ensure_dot, friendly_date, human_size, strip_dot
 from src.lib.misc import (
     flatlist,
     isorted,
@@ -25,6 +22,7 @@ from src.lib.term import (
     print_warning,
 )
 from src.lib.typing import (
+    AudiobookFmt,
     BookHashesDict,
     copy_kwargs_omit_first_arg,
     Operation,
@@ -468,11 +466,15 @@ def _mv_or_copy_dir(
 
 @copy_kwargs_omit_first_arg(_mv_or_copy_dir)
 def mv_dir(*args, **kwargs):
+    """Moves a directory into the destination dir, creating the destination directory if it does not
+    exist. For example, mv_dir('/path/to/src', '/path/to_other/dst') will result in /path/to_other/dst/src."""
     _mv_or_copy_dir("move", *args, **kwargs)
 
 
 @copy_kwargs_omit_first_arg(_mv_or_copy_dir)
 def cp_dir(*args, **kwargs):
+    """Copies a directory into the destination dir, creating the destination directory if it does not
+    exist. For example, cp_dir('/path/to/src', '/path/to_other/dst') will result in /path/to_other/dst/src."""
     _mv_or_copy_dir("copy", *args, **kwargs)
 
 
@@ -496,7 +498,7 @@ def rename_dir(dir_path: Path, new_name: str | Path, ignore_errors: bool = False
     _mv_or_cp_dir_contents("move", dir_path, dst, overwrite_mode="skip", keep_src_dir=False)
 
 
-def mv_file_to_dir(
+def mv_file_into_dir(
     source_file: Path,
     dst_dir: Path,
     *,
@@ -518,7 +520,7 @@ def mv_file_to_dir(
     shutil.move(source_file, dst_file)
 
 
-def cp_file_to_dir(
+def cp_file_into_dir(
     source_file: Path,
     dst_dir: Path,
     new_filename: str | None = None,
@@ -604,8 +606,12 @@ def name_matches(name: Any, match_filter: str | None = None) -> bool:
     return re.search(match_filter, str(name), re.I) is not None
 
 
-def try_relative_to(p: Path, root: Path) -> Path | None:
+def try_relative_to(p: "str | Path | BooksTree", root: "str | Path | BooksTree") -> "Path | BooksTree | None":
+    from src.lib.books_tree import BooksTree
+
     try:
+        p = p.path if isinstance(p, BooksTree) else Path(p)
+        root = root.path if isinstance(root, BooksTree) else Path(root)
         return p.relative_to(root)
     except ValueError:
         return None
@@ -672,41 +678,6 @@ def is_valid_dir(root: Path, d: Path, mindepth: int | None = None, maxdepth: int
 #     )
 
 #     return list(isorted(all_roots_with_audio_files))
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=3600)
-def path_names_similarity(path: Path, *compare_to_paths: Path, precision: int = 2) -> dict[Path, float]:
-    """Uses the Levenshtein distance to calculate the similarity of the names in a list of paths.
-    Returns a dict of the paths and their similarity scores (0-1), rounded to the specified precision.
-    """
-
-    from rapidfuzz import fuzz
-
-    # if there are no paths to compare to, return an empty dict
-    if not compare_to_paths:
-        return {}
-
-    scores = {}
-    for p in compare_to_paths:
-        if not p.name in scores:
-            scores[p.name] = []
-        scores[p.name].append(fuzz.ratio(path.name, p.name))
-
-    # convert the scores to an average for each path in the the scores dict
-    return {p: round(sum(scores[p]) / len(scores[p]), precision) for p in scores}
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=3600)
-def avg_path_name_similarity(path: Path, *compare_to_paths: Path, precision: int = 2) -> float:
-    """Determines the average similarity score (0-1), rounded to the specified precision from
-    `path_names_similarity()` for a list of paths.
-    """
-
-    scores = path_names_similarity(path, *compare_to_paths, precision=precision)
-    # Remove `path` from the scores dict so we don't include it in the average
-    scores.pop(path, None)
-
-    return round(sum(scores.values()) / len(scores), precision)
 
 
 # def find_series_parents_in_inbox():
@@ -910,14 +881,16 @@ T = TypeVar("T", bound="BooksTree | Path")
 
 
 @overload
-def find_first_audio_file(path: T, ext: str | None = None, ignore_errors: Literal[False] = False) -> T: ...
+def find_first_audio_file(path: T, ext: AudiobookFmt | None = None, ignore_errors: Literal[False] = False) -> T: ...
 
 
 @overload
-def find_first_audio_file(path: T, ext: str | None = None, ignore_errors: Literal[True] = True) -> T | None: ...
+def find_first_audio_file(
+    path: T, ext: AudiobookFmt | None = None, ignore_errors: Literal[True] = True
+) -> T | None: ...
 
 
-def find_first_audio_file(path: T, ext: str | None = None, ignore_errors: bool = False) -> T | None:
+def find_first_audio_file(path: T, ext: AudiobookFmt | None = None, ignore_errors: bool = False) -> T | None:
     from src.lib.books_tree import BooksTree
 
     if path.is_file():
@@ -925,16 +898,18 @@ def find_first_audio_file(path: T, ext: str | None = None, ignore_errors: bool =
 
     tree = path if isinstance(path, BooksTree) else BooksTree(path)
 
+    fmt = strip_dot(ext) if ext else None
+
     first_file = next(
         iter(
-            sorted(filter(lambda x: x.path.suffix == ext or not ext, tree.files_recursive), key=lambda x: x.path.name)
+            sorted(filter(lambda x: x.path.suffix == fmt or not fmt, tree.files_recursive), key=lambda x: x.path.name)
         ),
         None,
     )
     if not first_file and not ignore_errors:
         err = f"No audio files found in '{tree}'"
-        if ext:
-            err += f" with extension '{ext}'"
+        if fmt:
+            err += f" with extension '{fmt}'"
         raise FileNotFoundError(err)
     return first_file  # type: ignore
 
@@ -1219,3 +1194,93 @@ def find_root_from_path(path: Path):
         if try_relative_to(path, root):
             return root
     return None
+
+
+def filter_depth(
+    p: Path,
+    root: Path,
+    *,
+    mindepth: int | None = None,
+    maxdepth: int | None = None,
+    offset: int = 0,
+) -> bool:
+    return (
+        root
+        and p
+        and (mindepth is None or len(p.relative_to(root).parts) + offset >= mindepth)
+        and (maxdepth is None or len(p.relative_to(root).parts) + offset <= maxdepth)
+    )
+
+
+def find_greatest_common_string(
+    strs: list[str] | list[Path], *, case_sensitive: bool = False, min_chars: int = 2
+) -> str | None:
+    if not strs:
+        return ""
+
+    # Extract just the base filenames (without extensions)
+    base_names = [os.path.splitext(f)[0] for f in strs]
+
+    if not case_sensitive:
+        base_names = [name.lower() for name in base_names]
+
+    # Take the shortest filename as the reference (optimization)
+    shortest_name = min(base_names, key=len)
+    other_names = base_names
+
+    gcs = ""
+
+    # Iterate over all substrings of the shortest name
+    for i in range(len(shortest_name)):
+        for j in range(i + 1, len(shortest_name) + 1):
+            substring = shortest_name[i:j]
+            # Check if this substring is present in all filenames
+            if all(substring in name for name in other_names):
+                # Update GCS if this substring is longer than the current GCS
+                if len(substring) > len(gcs):
+                    gcs = substring
+
+    return gcs if len(gcs) >= min_chars else None
+
+
+def calculate_gcs_percentage(strs: list[str] | list[Path], *, precision: int = 3, min_chars: int = 2) -> float:
+    if not strs:
+        return 0.0
+
+    # Find the greatest common string
+    gcs = find_greatest_common_string(strs, min_chars=min_chars)
+
+    # Determine the length of the longest filename
+    longest_filename_length = max(len(str(f.name if isinstance(f, Path) else f)) for f in strs)
+
+    # Calculate the percentage
+    return round(len(gcs or "") / longest_filename_length, precision)
+
+
+def get_similarity(strs: list[str] | list[Path], precision: int = 2) -> float:
+    """Uses the Levenshtein distance to calculate the similarity of a list of strings.
+    Returns a dict of the paths and their similarity scores (0-1), rounded to the specified precision.
+    """
+
+    from rapidfuzz import fuzz, process
+
+    # if there are no paths to compare to, return 0
+    if len(strs) < 2:
+        return -1
+
+    # Extract just the base filenames (without extensions)
+    base_names = [Path(s).stem for s in strs]
+
+    def scores_without_idx(i: int, _strs: list[str]) -> list[str]:
+        return [s for j, s in enumerate(_strs) if j != i]
+
+    # Compare each basename to the other basenames until all have been compared
+    scores: dict[str, list[tuple[str, int | float, int]]] = {
+        s: process.extract(s, scores_without_idx(i, base_names), scorer=fuzz.WRatio) for i, s in enumerate(base_names)
+    }
+
+    # Average the scores
+    scores_avg = {s: round(sum([score for _, score, _ in scores[s]]) / len(scores[s]), precision) for s in scores}
+
+    # Average the average scores
+    return round((sum(scores_avg.values()) / len(scores_avg)) / 100, precision)

@@ -50,16 +50,12 @@ class test_unhappy_paths:
     ORDER += 1
 
     @pytest.mark.order(ORDER)
-    def test_failed_books_only_print_once(
-        self, roman_numeral__mp3: Audiobook, capfd: CaptureFixture[str]
-    ):
+    def test_failed_books_only_print_once(self, roman_numeral__mp3: Audiobook, capfd: CaptureFixture[str]):
         app(max_loops=3)
         # assert the message only appears once
         out = testutils.get_stdout(capfd)
         assert out.count(en.ROMAN_ERR) == 1
-        assert testutils.assert_processed_output(
-            out, loops=[testutils.check_output(found_books_eq=1, converted_eq=0)]
-        )
+        assert testutils.assert_processed_output(out, loops=[testutils.check_output(found_books_eq=1, converted_eq=0)])
 
     ORDER += 1
 
@@ -112,11 +108,7 @@ class test_unhappy_paths:
         assert testutils.assert_processed_output(
             out,
             tower_treasure__flat_mp3,
-            loops=[
-                testutils.check_output(
-                    found_books_eq=2, converted_eq=1, skipped_failed_eq=1
-                )
-            ],
+            loops=[testutils.check_output(found_books_eq=2, converted_eq=1, skipped_failed_eq=1)],
         )
         assert out.count(en.ROMAN_ERR) == 0
 
@@ -154,11 +146,7 @@ class test_unhappy_paths:
                 out,
                 tower_treasure__flat_mp3,
                 house_on_the_cliff__flat_mp3,
-                loops=[
-                    testutils.check_output(
-                        found_books_eq=3, converted_eq=2, skipped_failed_eq=1
-                    )
-                ],
+                loops=[testutils.check_output(found_books_eq=3, converted_eq=2, skipped_failed_eq=1)],
             )
 
     ORDER += 1
@@ -232,9 +220,7 @@ class test_unhappy_paths:
                 tower_treasure__flat_mp3,
                 loops=[
                     testutils.check_output(found_books_eq=1, converted_eq=0),
-                    testutils.check_output(
-                        found_books_eq=2, converted_eq=1, skipped_failed_eq=1
-                    ),
+                    testutils.check_output(found_books_eq=2, converted_eq=1, skipped_failed_eq=1),
                 ],
             )
 
@@ -327,9 +313,7 @@ class test_unhappy_paths:
             app_task = asyncio.create_task(async_app())
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                await asyncio.get_running_loop().run_in_executor(
-                    executor, mock_inbox_being_copied_to, 5, 1
-                )
+                await asyncio.get_running_loop().run_in_executor(executor, mock_inbox_being_copied_to, 5, 1)
 
             await app_task
 
@@ -355,9 +339,7 @@ class test_unhappy_paths:
         enable_archiving,
         capfd: CaptureFixture[str],
     ):
-        the_sunlit_man__flat_mp3 = Audiobook(
-            TEST_DIRS.inbox / "the_sunlit_man__flat_mp3"
-        )
+        the_sunlit_man__flat_mp3 = Audiobook(TEST_DIRS.inbox / "the_sunlit_man__flat_mp3")
         tiny__flat_mp3 = Audiobook(TEST_DIRS.inbox / "tiny__flat_mp3")
         shutil.rmtree(the_sunlit_man__flat_mp3.inbox_dir, ignore_errors=True)
         shutil.rmtree(tiny__flat_mp3.inbox_dir, ignore_errors=True)
@@ -368,9 +350,7 @@ class test_unhappy_paths:
         def add_book_to_inbox():
             time.sleep(5)
             testutils.print("Loading additional test fixtures...")
-            load_test_fixtures(
-                "the_sunlit_man__flat_mp3", "tiny__flat_mp3", match_filter=match_filter
-            )
+            load_test_fixtures("the_sunlit_man__flat_mp3", "tiny__flat_mp3", match_filter=match_filter)
 
         async def async_app():
             with testutils.set_wait_time(1):
@@ -381,9 +361,7 @@ class test_unhappy_paths:
         app_task = asyncio.create_task(async_app())
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            await asyncio.get_running_loop().run_in_executor(
-                executor, add_book_to_inbox
-            )
+            await asyncio.get_running_loop().run_in_executor(executor, add_book_to_inbox)
 
         await app_task
 
@@ -408,7 +386,6 @@ class test_unhappy_paths:
         self,
         secret_project_series__nested_flat_mixed: Audiobook,
         capfd: CaptureFixture[str],
-        disable_convert_series,
     ):
 
         app(max_loops=1)
@@ -422,9 +399,7 @@ class test_unhappy_paths:
         inbox = InboxState()
 
         conspiracy_theories__flat_mp3_copy = deepcopy(conspiracy_theories__flat_mp3)
-        (TEST_DIRS.converted / "auto-m4b.log").unlink(
-            missing_ok=True
-        )  # remove the log file to force a conversion
+        (TEST_DIRS.converted / "auto-m4b.log").unlink(missing_ok=True)  # remove the log file to force a conversion
         testutils.set_match_filter("Conspiracies")
         app(max_loops=1)
         assert conspiracy_theories__flat_mp3.converted_dir.exists()
@@ -545,9 +520,7 @@ class test_unhappy_paths:
             out,
             loops=check,
         )
-        assert out.count("waiting for them to be fixed") == (
-            1 if loop_count == 0 else 0
-        )
+        assert out.count("waiting for them to be fixed") == (1 if loop_count == 0 else 0)
 
     ORDER += 1
 
@@ -587,9 +560,7 @@ class test_unhappy_paths:
             out,
             tiny__flat_mp3,
             loops=[
-                testutils.check_output(
-                    found_books_eq=2, converted_eq=1, skipped_failed_eq=1
-                ),
+                testutils.check_output(found_books_eq=2, converted_eq=1, skipped_failed_eq=1),
             ],
         )
 
@@ -627,17 +598,13 @@ class test_unhappy_paths:
     ORDER += 1
 
     @pytest.mark.order(ORDER)
-    def test_fatal_err_creates_err_file(
-        self, tiny__flat_mp3: Audiobook, enable_backups, tmp_path
-    ):
+    def test_fatal_err_creates_err_file(self, tiny__flat_mp3: Audiobook, enable_backups, tmp_path):
         from src.lib.config import cfg
 
         def bad__mv_or_cp_dir_contents(*args, **kwargs):
             raise FileNotFoundError(f"No such file or directory {args[1]}")
 
-        with patch(
-            "src.lib.fs_utils._mv_or_cp_dir_contents", bad__mv_or_cp_dir_contents
-        ):
+        with patch("src.lib.fs_utils._mv_or_cp_dir_contents", bad__mv_or_cp_dir_contents):
 
             try:
 

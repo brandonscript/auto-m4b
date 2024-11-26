@@ -17,7 +17,7 @@ from src.lib.ffmpeg_utils import (
 )
 from src.lib.formatters import human_bitrate, to_audiobook_fmt
 from src.lib.fs_utils import (
-    cp_file_to_dir,
+    cp_file_into_dir,
     find_cover_art_file,
     get_size,
     hash_path_audio_files,
@@ -67,19 +67,27 @@ class Audiobook(BaseModel):
 
     def __init__(self, path_or_tree: Path | BooksTree):
 
-        if isinstance(path_or_tree, BooksTree):
-            tree = path_or_tree
-            path = path_or_tree.path
-        else:
+        path: Path = Path(path_or_tree) if isinstance(path_or_tree, (str, Path)) else path_or_tree.path
+        tree = path_or_tree if isinstance(path_or_tree, BooksTree) else None
+        if not tree:
             from src.lib.inbox_state import InboxState
 
             inbox_state = InboxState()
-            path = path_or_tree
-            if not path_or_tree.is_absolute():
-                path = cfg.inbox_dir.resolve() / path_or_tree
             if from_state := inbox_state.get(path):
                 tree = from_state.tree
             else:
+                # from src.lib.inbox_state import InboxStateError
+                if inbox_state.is_empty():
+                    inbox_state.scan()
+
+                if not inbox_state.is_empty():
+                    x = inbox_state.get(path)
+                else:
+                    inbox_state.scan()
+
+                # raise InboxStateError(
+                #     f"Book not found in inbox state, cannot attach tree to Audiobook instance: {path}"
+                # )
                 tree = BooksTree(path_or_tree)
 
         super().__init__(path=path, tree=tree)
@@ -108,7 +116,7 @@ class Audiobook(BaseModel):
         try:
             extract_cover_art(self.sample_audio1.path, save_to_file=True)
             self._inbox_cover_art_file = cast(Path, find_cover_art_file(self.path))
-            cp_file_to_dir(self._inbox_cover_art_file, self.merge_dir)
+            cp_file_into_dir(self._inbox_cover_art_file, self.merge_dir)
             return self.cover_art_file
         except Exception:
             # no cover art found, probably
@@ -124,11 +132,11 @@ class Audiobook(BaseModel):
 
     @property
     def build_dir(self) -> Path:
-        return (cfg.build_dir.resolve() / self.basename).with_suffix("")
+        return cfg.build_dir.resolve() / self.key
 
     @property
     def build_tmp_dir(self) -> Path:
-        return self.build_dir / f"{self.basename}-tmpfiles"
+        return self.build_dir / f"~tmpfiles"
 
     @property
     def converted_dir(self) -> Path:
@@ -140,23 +148,27 @@ class Audiobook(BaseModel):
 
     @property
     def merge_dir(self) -> Path:
-        return cfg.merge_dir.resolve() / self.basename
+        return cfg.merge_dir.resolve() / self.key
 
     @property
     def build_file(self) -> Path:
+        from src.lib.fs_utils import find_first_audio_file
+
         if self.build_dir.suffix == ".m4b":
             return self.build_dir
         try:
-            return BooksTree(self.build_dir).first_audio_file(".m4b").path
+            return find_first_audio_file(self.build_dir, ext="m4b")
         except FileNotFoundError:
             return self.build_dir / f"{self.basename}.m4b"
 
     @property
     def converted_file(self) -> Path:
+        from src.lib.fs_utils import find_first_audio_file
+
         if self.converted_dir.suffix == ".m4b":
             return self.converted_dir
         try:
-            return BooksTree(self.converted_dir).first_audio_file(".m4b").path
+            return find_first_audio_file(self.converted_dir, ext="m4b")
         except FileNotFoundError:
             return self.converted_dir / f"{self.basename}.m4b"
 
@@ -168,8 +180,9 @@ class Audiobook(BaseModel):
     def sample_audio2(self):
         return self.tree.next_audio_file(self.sample_audio1, ignore_errors=True)
 
-    def rescan_structure(self):
-        for attr in ["sample_audio1", "sample_audio2", "structure"]:
+    def rescan(self):
+        self.tree.scan()
+        for attr in ["sample_audio1", "sample_audio2"]:
             try:
                 delattr(self, attr)
             except AttributeError:
@@ -187,15 +200,22 @@ class Audiobook(BaseModel):
         structure: BookStructure2 | tuple[BookStructure2, ...],
         fmt: AudiobookFmt | None = None,
         *,
-        not_fmt: AudiobookFmt | tuple[AudiobookFmt | None, ...] | None = None,
+        but_not: AudiobookFmt | tuple[AudiobookFmt | None, ...] | None = None,
     ):
         if not isinstance(structure, tuple):
             structure = (structure,)
-        if not isinstance(not_fmt, tuple):
-            not_fmt = (not_fmt,)
-        not_fmt_matches = not not_fmt or self.orig_file_type not in not_fmt
+        if not isinstance(but_not, tuple):
+            but_not = (but_not,)
+        not_fmt_matches = not but_not or self.orig_file_type not in but_not
         fmt_matches = not fmt or self.orig_file_type == fmt
         return self.tree.has_any_structure(*structure) and fmt_matches and not_fmt_matches
+
+    def is_not_a(
+        self,
+        structure: BookStructure2 | tuple[BookStructure2, ...],
+        fmt: AudiobookFmt | None = None,
+    ):
+        return not self.is_a(structure, fmt)
 
     @property
     def is_maybe_series_book(self):
@@ -323,7 +343,7 @@ class Audiobook(BaseModel):
             return None
         merge_cover = self.merge_dir / self._inbox_cover_art_file.relative_to(self.inbox_dir)
         if not merge_cover.exists():
-            cp_file_to_dir(self._inbox_cover_art_file, self.merge_dir)
+            cp_file_into_dir(self._inbox_cover_art_file, self.merge_dir)
         return merge_cover
 
     @cached_property

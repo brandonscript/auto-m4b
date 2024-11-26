@@ -10,8 +10,10 @@ from PIL import Image
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.fs_utils import (
+    calculate_gcs_percentage,
     filter_ignored,
     find_cover_art_file,
+    find_greatest_common_string,
 )
 from src.lib.misc import isorted, re_group
 from src.tests.conftest import TEST_DIRS
@@ -345,3 +347,67 @@ def test_find_cover_art_file_ignores_too_small_files(size: int, expect_size: int
     assert (tmp_path / "cover.jpg").stat().st_size == pytest.approx(expect_size, rel=0.1)
 
     assert bool(find_cover_art_file(tmp_path)) == is_valid
+
+
+def test_gcs_percent():
+
+    files = [
+        "i_like_candy_and_chocolate - part_01.txt",
+        "i_like_candy_and_chocolate - part_02.txt",
+        "i_like_candy_and_chocolate - part_03.txt",
+        "i_like_candy_and_chocolate - note.txt",
+    ]
+
+    gcs = find_greatest_common_string(files)
+    percentage = calculate_gcs_percentage(files)
+
+    assert gcs == "i_like_candy_and_chocolate - "
+    assert percentage == pytest.approx(0.725, rel=0.01)
+
+
+def test_gcs_percent_with_different_files():
+
+    files = [
+        "different_file_01.txt",
+        "another_file_02.txt",
+        "yet_another_file_03.txt",
+        "file_42.txt",
+    ]
+
+    gcs = find_greatest_common_string(files)
+    percentage = calculate_gcs_percentage(files)
+
+    assert gcs == "file_"
+    assert percentage == pytest.approx(0.217, rel=0.01)
+
+
+def test_gcs_percent_with_similar_files():
+
+    files = [
+        "similar_file_01.txt",
+        "similar_file_02.txt",
+        "similar_file_03.txt",
+        "similar_file_04.txt",
+    ]
+
+    gcs = find_greatest_common_string(files)
+    percentage = calculate_gcs_percentage(files)
+
+    assert gcs == "similar_file_0"
+    assert percentage == pytest.approx(0.737, rel=0.01)
+
+
+def test_gcs_percent_with_no_common_string():
+
+    files = [
+        "file_one.txt",
+        "fjle_two.txt",
+        "fkle_three.txt",
+        "flle_four.txt",
+    ]
+
+    gcs = find_greatest_common_string(files, min_chars=5)
+    percentage = calculate_gcs_percentage(files, min_chars=5)
+
+    assert gcs == None
+    assert percentage == pytest.approx(0.0, rel=0.01)

@@ -150,7 +150,7 @@ def find_greatest_common_string(s: list[str]) -> str:
 
 def contains_partno_or_ch(s: str, s2: str | None = None) -> bool:
     s_matches_part_number = partno_or_ch_match_pattern2.search(s)
-    s_start_num = get_start_no(s)
+    s_start_num = get_start_num(s)
 
     if not s2:
         # If there is no second to compare it to, we want to be conservative
@@ -158,7 +158,7 @@ def contains_partno_or_ch(s: str, s2: str | None = None) -> bool:
         return bool(s_matches_part_number and not is_maybe_multiple_books_or_series(s))
 
     s2_matches_part_number = partno_or_ch_match_pattern2.search(s2)
-    s2_start_num = get_start_no(s2)
+    s2_start_num = get_start_num(s2)
 
     if s_start_num or s2_start_num and (s_start_num != s2_start_num):
         # If the two strings are maybe series, but the numbers don't match, they're parts
@@ -169,10 +169,10 @@ def contains_partno_or_ch(s: str, s2: str | None = None) -> bool:
 
 def startswith_partno(s: str, s2: str | None = None) -> bool:
     if s2:
-        first = get_start_no(s)
-        second = get_start_no(s2)
+        first = get_start_num(s)
+        second = get_start_num(s2)
         return bool(first >= 0 and second >= 0) and first == second
-    return bool(get_start_no(s) >= 0)
+    return bool(get_start_num(s) >= 0)
 
 
 def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
@@ -373,6 +373,16 @@ def parse_year(s: str) -> str:
     return re_group(year_pattern.search(s), "year")
 
 
+def try_parse_num(s: str, fallback: Any = None) -> int | float | None:
+    try:
+        return int(s)
+    except ValueError:
+        try:
+            return float(s)
+        except ValueError:
+            return fallback
+
+
 def get_title_partno_score(title_1: str, title_2: str, album_1: str, sortalbum_1: str) -> tuple[bool, int, bool]:
     """Returns a score for the likelihood that the title(s) indicate the part number of a multi-part book, e.g. "Part 01" or "The Martian Part 014. A positive score indicates a likely part #, negative indicates not a part #."""
     from src.lib.cleaners import strip_part_number
@@ -409,7 +419,7 @@ def get_title_partno_score(title_1: str, title_2: str, album_1: str, sortalbum_1
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def get_series_no(s: str | Path) -> int:
+def get_series_num(s: str | Path) -> int:
     return int(re_group(book_series_pattern.search(str(s)), "num", default=-1))
 
 
@@ -420,17 +430,17 @@ def is_maybe_multiple_books_or_series(s: str | Path) -> bool:
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def get_disc_no(s: str | Path) -> int:
+def get_disc_num(s: str | Path) -> int:
     return int(re_group(multi_disc_pattern.search(str(s)), "num", default=-1))
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
 def is_maybe_multi_disc(s: str | Path) -> bool:
-    return get_disc_no(str(s)) > -1
+    return get_disc_num(str(s)) > -1
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def get_part_no(s: str | Path) -> int:
+def get_part_num(s: str | Path) -> int:
     s = str(s)
     if not part_or_ch_match_words.search(s):
         return -1
@@ -438,8 +448,15 @@ def get_part_no(s: str | Path) -> int:
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def get_start_no(s: str | Path) -> int:
-    return int(re_group(startswith_num_pattern.search(str(s)), "num", default=-1))
+def is_maybe_multi_part(s: str) -> bool:
+    return (
+        not is_maybe_multi_disc(s) and not is_maybe_multiple_books_or_series(s) and bool(multi_part_pattern.search(s))
+    )
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def get_start_num(s: str | Path) -> int:
+    return int(re_group(startswith_num_pattern.search(str(s).lstrip()), "num", default=-1))
 
 
 def are_nums_sequential(nums: list[int], *, sort=False, skips_ok=False) -> bool:
@@ -451,139 +468,11 @@ def are_nums_sequential(nums: list[int], *, sort=False, skips_ok=False) -> bool:
     return nums == list(range(nums[0], nums[-1] + 1))
 
 
-@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def is_maybe_multi_part(s: str) -> bool:
-    return (
-        not is_maybe_multi_disc(s) and not is_maybe_multiple_books_or_series(s) and bool(multi_part_pattern.search(s))
-    )
-
-
-# def determine_structure(
-#     path: Path, *, adjacent_paths: list[Path] = [], root_dir: Path | None = None
-# ) -> str:
-
-#     if path.is_file():
-#         return "standalone_file"
-
-#     if not root_dir:
-#         root_dir = path if path.is_dir() else path.parent
-
-#     tree = get_path_tree(path)
-
-#     dir_contents = ls_path_tree(tree)
-#     if len(dir_contents) == 0:
-#         return "empty"
-
-#     sub_dirs = ls_path_tree(tree, only_dirs=True)
-#     audio_files = ls_path_tree(tree, only_files=True)
-#     if not sub_dirs:
-#         if len(audio_files) == 1:
-#             return "standalone_file"
-#         elif len(audio_files) > 1:
-#             return "flat"
-
-#     # Check if there are audio files only in a single subdirectory
-#     subdirs_with_audio_files = [
-#         (d, f)
-#         for d, f in [(d, ls_path_tree(d, only_files=True)) for d in sub_dirs]
-#         if len(f) > 0
-#     ]
-
-#     if len(subdirs_with_audio_files) == 1:
-#         files = subdirs_with_audio_files[0][1]
-#         if len(files) > 1:
-#             return "flat_nested"
-#         return "standalone_nested"
-
-#     if len(subdirs_with_audio_files) > 1:
-#         # If all of the subdirs appear to contain a disc number,
-#         # it's likely a multi-disc structure
-#         if _maybe_multi_disc := all(
-#             is_maybe_multi_disc(d.name) for d, _ in subdirs_with_audio_files
-#         ):
-#             return "multi_disc"
-
-#         # If all of the subdirs or at least one of their files appear to
-#         # contain a series or book number, it's likely a series structure
-
-#         multi_book_nested = False
-#         subdirs_maybe_series = [
-#             (d.name, is_maybe_multiple_books_or_series(d.name))
-#             for d, _ in subdirs_with_audio_files
-#         ]
-#         files_maybe_series = {
-#             d.name: [(f.name, is_maybe_multiple_books_or_series(f.name)) for f in files]
-#             for d, files in subdirs_with_audio_files
-#         }
-#         if _maybe_series := all(
-#             [
-#                 all((x, all([y for _f, y in files_maybe_series[d]])))
-#                 for d, x in subdirs_maybe_series
-#             ]
-#         ):
-#             return "series"
-
-#         if _multi_book_nested := any(
-#             [
-#                 any([y for _f, y in files_maybe_series[d]])
-#                 for d, _x in subdirs_maybe_series
-#             ]
-#         ):
-#             return "multi_book_series"
-
-#     if path.exists():
-#         adjacent_paths = sorted(
-#             [
-#                 p.relative_to(root_dir)
-#                 for p in path.parent.iterdir()
-#                 if p != path and (p.is_dir() or is_audio_file(p))
-#             ]
-#         )
-
-#     rel_parent = path.relative_to(root_dir).parent
-#     # if it's a standalone (no adjacent paths) we can do some simple things:
-#     if not adjacent_paths:
-#         if is_maybe_multi_disc(str(path)):
-#             # This can happen if the book is a multi-disc book split into multiple folders, e.g.:
-#             #   - The Martian
-#             #     - Disc 1
-#             #       - Chapters 1-14.mp3
-#             #     - Disc 2
-#             #       - Chapters 15-28.mp3
-#             # but is pretty rare.
-#             return "multi_disc"
-
-#         # Otherwise, there's a very good chance this is a standalone book.
-#         return "standalone_file"
-
-#     # If there are adjacent paths, we need to look at the paths to determine the structure.
-#     # We'll start by checking if the paths are all in the same folder.
-#     # If they are, we can assume it's a flat structure.
-#     if all(p.parent == adjacent_paths[0].parent for p in adjacent_paths):
-#         return "flat"
-
-#     # If the parents are different, we should look for multi-disc or series structures next.
-#     # If it's a multi-disc, we don't want to get a false-positive for a series structure.
-#     # If more than 50% of the adjacent paths are multi-disc, we'll assume it's a multi-disc structure.
-#     all_paths = [path, *adjacent_paths]
-#     if sum(is_maybe_multi_disc(p.name) for p in all_paths) > len(all_paths) / 2:
-#         return "multi_disc"
-
-#     # If there are numbers in the path, it could be a series. We should
-#     # check the parent first to see if it's a series_parent.
-
-#     contig_nums = [
-#         get_numbers_contiguous(path.name),
-#         *[get_numbers_contiguous(p.name) for p in adjacent_paths if p.is_dir()],
-#     ]
-
-#     parent_is_maybe_series = any(
-#         is_maybe_multiple_books_or_series(d.name) for d in dir_contents
-#     )
-
-#     if any(is_maybe_multiple_books_or_series(p.name) for p in all_paths):
-#         return "series"
-
-#     raise ValueError("Could not determine file structure")
-
-#
+def get_all_nums_in_string(s: str) -> list[tuple[int | float, int]]:
+    """Finds all numbers (int and float) in a string, and returns a list of tuples with the number and its position in the string"""
+    return list(
+        filter(
+            lambda x: x[0] is not None,
+            [(try_parse_num(m.group()), m.start()) for m in rex.finditer(r"\d+(?:\.\d+)?", s) if m],
+        )
+    )  # type: ignore

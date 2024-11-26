@@ -152,10 +152,9 @@ class test_happy_paths:
     @pytest.mark.parametrize("backups_enabled", [False, True])
     def test_convert_series_mp3(
         self,
-        Chanur_Series: list[Audiobook],
-        enable_convert_series,
-        capfd: CaptureFixture[str],
         backups_enabled,
+        Chanur_Series: list[Audiobook],
+        capfd: CaptureFixture[str],
     ):
         with testutils.set_backups(backups_enabled):
             qualities = [
@@ -181,7 +180,6 @@ class test_happy_paths:
     def test_book_series_output_to_series_dir(
         self,
         Chanur_Series: list[Audiobook],
-        enable_convert_series,
         enable_archiving,
     ):
 
@@ -197,7 +195,6 @@ class test_happy_paths:
     def test_book_series_handles_series_collateral(
         self,
         Chanur_Series: list[Audiobook],
-        enable_convert_series,
         enable_archiving,
     ):
 

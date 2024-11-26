@@ -245,9 +245,11 @@ class InboxItem:
 
     @cached_property
     def series_key(self):
-        from src.lib.config import cfg
+        if not self.tree.root or not self.tree.has_structure("series_book"):
+            return None
 
-        return str(self.path.relative_to(cfg.inbox_dir).parent) if self.is_maybe_series_book else None
+        all_series_parents = list(filter(lambda x: x.has_structure("series_parent"), self.tree.root.books_and_series))
+        return next((p.key for p in all_series_parents if self.tree.key.startswith(p.key)), None)
 
     @cached_property
     def series_basename(self):
@@ -286,6 +288,7 @@ class InboxItem:
             "hash_age": self.hash_age,
             "status": status,
             "failed_reason": self.failed_reason,
+            "structure": self.tree.structure,
         }
 
     def to_audiobook(self, active_dir: DirName = "inbox") -> Audiobook:
