@@ -6,6 +6,10 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
+from src.lib.misc import fix_ffprobe
+
+fix_ffprobe()
+
 import bidict
 import ffmpeg
 from columnar import columnar
@@ -15,13 +19,9 @@ from rapidfuzz.distance import LCSseq, Levenshtein
 from tinta import Tinta
 
 from src.lib.books_tree import BooksTree
-from src.lib.cleaners import clean_string, strip_author_narrator, strip_leading_articles
+from src.lib.cleaners import clean_string, strip_author_narrator, strip_leading_articles, strip_part_number
 from src.lib.fs_utils import find_first_audio_file
-from src.lib.misc import compare_trim, fix_ffprobe, get_numbers_in_string
-
-fix_ffprobe()
-
-from src.lib.cleaners import strip_part_number
+from src.lib.misc import compare_trim, get_numbers_in_string
 from src.lib.parsers import (
     common_str_pattern,
     contains_partno_or_ch,

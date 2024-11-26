@@ -580,14 +580,6 @@ class test_tree_structures_series:
         container = tree.dirs["Nathan Lowell"]
         assert container.has_only_structure("container"), f"Expected ('container'), got {container.structure}"
 
-        def _assert_is_series_parent(p):
-            assert p.has_only_structure("series_parent"), f"Expected {p} to be ('series_parent'), got {p.structure}"
-
-        def _assert_is_single_nested(f):
-            assert f.has_only_structures(
-                "single", "nested"
-            ), f"Expected {f} to be ('standalone_file'), got {f.structure}"
-
         series_parents = cast(
             list[BooksTree],
             list(
@@ -696,7 +688,7 @@ class test_tree_finding:
             (TEST_DIRS.inbox, 1, 1, TREES["1, 1"]),
             (TEST_DIRS.inbox, 1, 2, TREES["1, 2"]),
             (TEST_DIRS.inbox, 2, 2, TREES["2, 2"]),
-            (TEST_DIRS.inbox, 2, 3, TREES["2, 2"])
+            (TEST_DIRS.inbox, 2, 3, TREES["2, 3"])
             # Only 2 levels deep, so same as above
             # fmt: on
         ],
@@ -720,11 +712,11 @@ class test_tree_finding:
         assert not any((p.root is None for p in children_sorted))
 
     def test_find_first_audio_file(self, tower_treasure__flat_mp3: Audiobook):
-        tree = BooksTree(tower_treasure__flat_mp3.path)
+        tree = tower_treasure__flat_mp3.tree
         assert tree.first_audio_file().path == tower_treasure__flat_mp3.path / "towertreasure4_01_dixon_64kb.mp3"
 
     def test_find_next_audio_file(self, tower_treasure__flat_mp3: Audiobook):
-        tree = BooksTree(tower_treasure__flat_mp3.path)
+        tree = tower_treasure__flat_mp3.tree
         assert (
             tree.next_audio_file(tree.first_audio_file()).path
             == tower_treasure__flat_mp3.path / "towertreasure4_02_dixon_64kb.mp3"

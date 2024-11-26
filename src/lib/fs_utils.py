@@ -5,7 +5,7 @@ import shutil
 import time
 from collections.abc import Generator, Iterable
 from pathlib import Path
-from typing import Any, Literal, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Literal, NamedTuple, overload, TYPE_CHECKING
 
 from src.lib.config import AUDIO_EXTS
 from src.lib.formatters import ensure_dot, friendly_date, human_size, strip_dot
@@ -104,20 +104,22 @@ def find_files_in_dir(  # type: ignore
     def depth(p: Path) -> int:
         return len(p.parts) - len(d.parts)
 
-    return [
-        f if resolve else str(f.relative_to(d))
-        for f in isorted(d.rglob("*"))
-        if all(
-            [
-                f.is_file(),
-                not f.name.startswith("."),
-                f.name not in ignore_files,
-                not only_file_exts or f.suffix in only_file_exts,
-                mindepth is None or depth(f) >= mindepth,
-                maxdepth is None or depth(f) <= maxdepth,
-            ]
-        )
-    ]
+    return isorted(
+        [
+            f if resolve else str(f.relative_to(d))
+            for f in d.rglob("*")
+            if all(
+                [
+                    f.is_file(),
+                    not f.name.startswith("."),
+                    f.name not in ignore_files,
+                    not only_file_exts or f.suffix in only_file_exts,
+                    mindepth is None or depth(f) >= mindepth,
+                    maxdepth is None or depth(f) <= maxdepth,
+                ]
+            )
+        ]
+    )
 
 
 def count_audio_files_in_dir(
@@ -877,59 +879,62 @@ def rm_dirs(dirs: list[Path], ignore_errors: bool = False, even_if_not_empty: bo
         rm_dir(d, ignore_errors, even_if_not_empty)
 
 
-T = TypeVar("T", bound="BooksTree | Path")
-
-
 @overload
-def find_first_audio_file(path: T, ext: AudiobookFmt | None = None, ignore_errors: Literal[False] = False) -> T: ...
+def find_first_audio_file(
+    path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: Literal[False] = False
+) -> Path: ...
 
 
 @overload
 def find_first_audio_file(
-    path: T, ext: AudiobookFmt | None = None, ignore_errors: Literal[True] = True
-) -> T | None: ...
+    path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: Literal[True] = True
+) -> Path | None: ...
 
 
-def find_first_audio_file(path: T, ext: AudiobookFmt | None = None, ignore_errors: bool = False) -> T | None:
-    from src.lib.books_tree import BooksTree
+@overload
+def find_first_audio_file(
+    path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: bool = True
+) -> Path | None: ...
+
+
+def find_first_audio_file(path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: bool = False) -> Path | None:
 
     if path.is_file():
         return path
 
-    tree = path if isinstance(path, BooksTree) else BooksTree(path)
+    files = find_files_in_dir(path, resolve=True, only_file_exts=[ext] if ext else AUDIO_EXTS)
 
-    fmt = strip_dot(ext) if ext else None
+    if not files:
+        if not ignore_errors:
+            err = f"No audio files found in '{path}'"
+            if fmt := strip_dot(ext) if ext else None:
+                err += f" with extension '{fmt}'"
+            raise FileNotFoundError(err)
+        return None
 
-    first_file = next(
-        iter(
-            sorted(filter(lambda x: x.path.suffix == fmt or not fmt, tree.files_recursive), key=lambda x: x.path.name)
-        ),
-        None,
-    )
-    if not first_file and not ignore_errors:
-        err = f"No audio files found in '{tree}'"
-        if fmt:
-            err += f" with extension '{fmt}'"
-        raise FileNotFoundError(err)
-    return first_file  # type: ignore
+    return files[0]
 
 
-# def find_next_audio_file(current_file: Path) -> Path | None:
-
-#     # if path is a file, get its parent dir or use the parent dir of the current file
-#     parent = current_file.parent if current_file.is_file() else current_file
-
-#     audio_files = find_files_in_dir(
-#         parent,
-#         resolve=True,
-#         ignore_files=[current_file.name],
-#         only_file_exts=AUDIO_EXTS,
-#     )
-
-#     if not audio_files:
-#         return None
-
-#     return find_first_audio_file(audio_files[0])
+def find_next_audio_file(
+    path: Path, *, first: Path | None, ext: AudiobookFmt | None = None, ignore_errors: bool = False
+) -> Path | None:
+    err = f"No more audio files found in '{path}'"
+    if fmt := strip_dot(ext) if ext else None:
+        err += f" with extension '{fmt}'"
+    if not (first := first or find_first_audio_file(path, ext=ext, ignore_errors=ignore_errors)):
+        if not ignore_errors:
+            raise FileNotFoundError(err)
+        return None
+    files = find_files_in_dir(path, resolve=True, only_file_exts=[ext] if ext else AUDIO_EXTS)
+    try:
+        next_file = next(iter(files[files.index(first) + 1 :]), None)
+        if not next_file and not ignore_errors:
+            raise FileNotFoundError(err)
+        return next_file
+    except IndexError:
+        if not ignore_errors:
+            raise FileNotFoundError(err)
+        return None
 
 
 def find_cover_art_file(path: Path) -> Path | None:

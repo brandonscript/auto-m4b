@@ -1,15 +1,16 @@
-import subprocess
 from pathlib import Path
 from typing import Any, Literal, overload
 
 import cachetools.func
-import ffmpeg
 
-from src.lib.books_tree import BooksTree
 from src.lib.misc import fix_ffprobe
 
 fix_ffprobe()
 
+import ffmpeg
+from ffmpeg import probe as ffprobe
+
+from src.lib.books_tree import BooksTree
 from src.lib.config import AUDIO_EXTS
 from src.lib.formatters import format_duration, get_nearest_standard_bitrate
 from src.lib.fs_utils import only_audio_files
@@ -17,14 +18,9 @@ from src.lib.term import print_error
 from src.lib.typing import DurationFmt, MEMO_TTL
 
 
-def get_file_duration(file_path: Path) -> float:
-    x = f"ffprobe -hide_banner -loglevel 0 -of flat -i {file_path} -show_entries format=duration -of default=noprint_wrappers=1:nokey=1"
-    return float(subprocess.check_output(x, shell=True).decode().strip())
-
-
 def get_file_duration_py(file_path: Path) -> float:
     try:
-        return float(ffmpeg.probe(str(file_path))["format"]["duration"])
+        return float(ffprobe(str(file_path))["format"]["duration"])
     except ffmpeg.Error as e:
         from src.lib.logger import write_err_file
 

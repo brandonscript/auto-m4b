@@ -3,6 +3,7 @@ import functools
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Generator, Iterable, Sequence
 from pathlib import Path, PosixPath
 from typing import Any, cast, overload, TypeVar
@@ -418,6 +419,11 @@ def singleton(class_: type[C]) -> type[C]:
 
 def fix_ffprobe(counter: int = 0):
     from src.lib.term import print_warning
+
+    paths_to_add = ["/opt/homebrew/bin", "/usr/local/bin/"]
+    for path in paths_to_add:
+        if Path(path) not in sys.path and Path(path).exists():
+            sys.path.append(path)
 
     fix_cmd = "pip uninstall ffmpeg-python python-ffmpeg -y && pip install ffmpeg-python"
 

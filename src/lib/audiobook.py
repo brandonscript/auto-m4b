@@ -95,14 +95,17 @@ class Audiobook(BaseModel):
         self.path = path
         self.tree = tree
         self._active_dir = get_dir_name_from_path(path)
-        if f := self.tree.first_audio_file():
-            self.orig_file_type = to_audiobook_fmt(f.path.suffix)
 
     def __str__(self):
         return f"{self.key}"
 
     def __repr__(self):
         return f"{self.key}"
+
+    @property
+    def orig_file_type(self):
+        if f := not self.tree.is_root and self.tree.first_audio_file():
+            return to_audiobook_fmt(f.path.suffix)
 
     def extract_path_info(self, quiet: bool = False):
         return extract_path_info(self, quiet)
@@ -172,13 +175,18 @@ class Audiobook(BaseModel):
         except FileNotFoundError:
             return self.converted_dir / f"{self.basename}.m4b"
 
-    @cached_property
+    @property
     def sample_audio1(self):
-        return self.tree.first_audio_file()
+        from src.lib.fs_utils import find_first_audio_file
 
-    @cached_property
+        return find_first_audio_file(self.path, ignore_errors=False)
+
+    @property
     def sample_audio2(self):
-        return self.tree.next_audio_file(self.sample_audio1, ignore_errors=True)
+
+        from src.lib.fs_utils import find_next_audio_file
+
+        return find_next_audio_file(self.path, first=self.sample_audio1, ignore_errors=True)
 
     def rescan(self):
         self.tree.scan()

@@ -349,65 +349,88 @@ def test_find_cover_art_file_ignores_too_small_files(size: int, expect_size: int
     assert bool(find_cover_art_file(tmp_path)) == is_valid
 
 
-def test_gcs_percent():
+class test_greatest_common_string:
+    def test_gcs_percent(self):
 
-    files = [
-        "i_like_candy_and_chocolate - part_01.txt",
-        "i_like_candy_and_chocolate - part_02.txt",
-        "i_like_candy_and_chocolate - part_03.txt",
-        "i_like_candy_and_chocolate - note.txt",
-    ]
+        files = [
+            "i_like_candy_and_chocolate - part_01.txt",
+            "i_like_candy_and_chocolate - part_02.txt",
+            "i_like_candy_and_chocolate - part_03.txt",
+            "i_like_candy_and_chocolate - note.txt",
+        ]
 
-    gcs = find_greatest_common_string(files)
-    percentage = calculate_gcs_percentage(files)
+        gcs = find_greatest_common_string(files)
+        percentage = calculate_gcs_percentage(files)
 
-    assert gcs == "i_like_candy_and_chocolate - "
-    assert percentage == pytest.approx(0.725, rel=0.01)
+        assert gcs == "i_like_candy_and_chocolate - "
+        assert percentage == pytest.approx(0.725, rel=0.01)
+
+    def test_gcs_percent_with_different_files(self):
+
+        files = [
+            "different_file_01.txt",
+            "another_file_02.txt",
+            "yet_another_file_03.txt",
+            "file_42.txt",
+        ]
+
+        gcs = find_greatest_common_string(files)
+        percentage = calculate_gcs_percentage(files)
+
+        assert gcs == "file_"
+        assert percentage == pytest.approx(0.217, rel=0.01)
+
+    def test_gcs_percent_with_similar_files(self):
+
+        files = [
+            "similar_file_01.txt",
+            "similar_file_02.txt",
+            "similar_file_03.txt",
+            "similar_file_04.txt",
+        ]
+
+        gcs = find_greatest_common_string(files)
+        percentage = calculate_gcs_percentage(files)
+
+        assert gcs == "similar_file_0"
+        assert percentage == pytest.approx(0.737, rel=0.01)
+
+    def test_gcs_percent_with_no_common_string(self):
+
+        files = [
+            "file_one.txt",
+            "fjle_two.txt",
+            "fkle_three.txt",
+            "flle_four.txt",
+        ]
+
+        gcs = find_greatest_common_string(files, min_chars=5)
+        percentage = calculate_gcs_percentage(files, min_chars=5)
+
+        assert gcs == None
+        assert percentage == pytest.approx(0.0, rel=0.01)
 
 
-def test_gcs_percent_with_different_files():
+class test_get_similarity:
 
-    files = [
-        "different_file_01.txt",
-        "another_file_02.txt",
-        "yet_another_file_03.txt",
-        "file_42.txt",
-    ]
+    @pytest.mark.parametrize(
+        "strings, expected",
+        [
+            (["hello", "hello"], 1.0),
+            (["hello", "hello"], 1.0),
+            (["hello", "hello"], 1),
+            (["01 In Ashes Born", "02 To Fire Called", "03 By Darkness Forged"], 0.4),
+            (
+                [
+                    "01 In Ashes Born/Seeker's Tales (Solar Clipper Universe) Book 1 - In Ashes Born.m4a",
+                    "02 To Fire Called A Seekers Tale from the Golden Age of the Solar Clipper, Book 2 (Unabridged)/To Fire Called A Seekers Tale from the Golden Age of the Solar Clipper, Book 2 (Unabridged).m4a",
+                    "03 By Darkness Forged A Seeker's Tale from the Golden Age of the Solar Clipper, Book 3/By Darkness Forged A Seeker's Tale from the Golden Age of the Solar Clipper, Book 3.m4a",
+                ],
+                0.61,
+            ),
+        ],
+    )
+    def test_similarity_of_strings(self, strings: list[str], expected: int | float):
+        from src.lib.fs_utils import get_similarity
 
-    gcs = find_greatest_common_string(files)
-    percentage = calculate_gcs_percentage(files)
-
-    assert gcs == "file_"
-    assert percentage == pytest.approx(0.217, rel=0.01)
-
-
-def test_gcs_percent_with_similar_files():
-
-    files = [
-        "similar_file_01.txt",
-        "similar_file_02.txt",
-        "similar_file_03.txt",
-        "similar_file_04.txt",
-    ]
-
-    gcs = find_greatest_common_string(files)
-    percentage = calculate_gcs_percentage(files)
-
-    assert gcs == "similar_file_0"
-    assert percentage == pytest.approx(0.737, rel=0.01)
-
-
-def test_gcs_percent_with_no_common_string():
-
-    files = [
-        "file_one.txt",
-        "fjle_two.txt",
-        "fkle_three.txt",
-        "flle_four.txt",
-    ]
-
-    gcs = find_greatest_common_string(files, min_chars=5)
-    percentage = calculate_gcs_percentage(files, min_chars=5)
-
-    assert gcs == None
-    assert percentage == pytest.approx(0.0, rel=0.01)
+        assert get_similarity(strings) == pytest.approx(expected, rel=0.01)

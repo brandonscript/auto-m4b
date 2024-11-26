@@ -34,25 +34,6 @@ def filter_matches(func):
         if not match_filter or not paths:
             return paths
 
-        def _get_path(p):
-            return p.path if isinstance(p, BooksTree) else Path(p)
-
-        # if isinstance(paths, dict):
-        #     rel_paths = [
-        #         ({k: v}, try_relative_to(v, root or Path()) if Path(str(v)).is_absolute() else _get_path(v))
-        #         for k, v in paths.items()
-        #     ]
-        # else:
-        #     rel_paths = [(p, try_relative_to(p, root or Path()) if Path(str(p)).is_absolute() else p) for p in paths]
-
-        # rel_paths = cast(
-        #     list[Path | BooksTree] | dict[str, BooksTree],
-        #     (
-        #         {k: try_relative_to(str(p), root or Path()) for k, p in paths.items()}
-        #         if isinstance(paths, dict)
-        #         else ([try_relative_to(str(p), root or Path()) for p in paths])
-        #     ),
-        # )
         rel_match_filter = cast(
             list[Path | BooksTree] | str,
             (
@@ -61,12 +42,6 @@ def filter_matches(func):
                 else match_filter
             ),
         )
-
-        # def _get_rel_path(p, r):
-        #     p = p.path if isinstance(p, BooksTree) else Path(p)
-        #     if not p.is_absolute():
-        #         return p
-        #     return try_relative_to(p, r or Path())
 
         def _is_wanted_path(t: BooksTree | Path | str | None):
             if not (rel_path := try_relative_to(str(t), root or Path())):
@@ -673,7 +648,7 @@ class BooksTree(BaseModel):
         self._last_scan = time.time()
         return self
 
-    def get(self, key: "str | Path | BooksTree"):
+    def get(self, rel: "str | Path | BooksTree"):
         """
         Gets a file or directory from the tree by its relative path (string), Path, or TreePath object.
 
@@ -686,19 +661,19 @@ class BooksTree(BaseModel):
         >>> tree.get("subdir")
         >>> tree.get("subdir/nested/file1.mp3")
         """
-        if not key:
+        if not rel:
             raise ValueError(".get(): Key cannot be empty")
-        if isinstance(key, BooksTree):
-            key = key.path
-        if isinstance(key, str):
-            key = Path(key)
-        if isinstance(key, Path) and key.is_absolute():
-            key = key.relative_to(self.path)
-        if key == Path("."):
+        if isinstance(rel, BooksTree):
+            rel = rel.path
+        if isinstance(rel, str):
+            rel = Path(rel)
+        if isinstance(rel, Path) and rel.is_absolute():
+            rel = rel.relative_to(self.root.path if self.root else self.path)
+        if rel == Path("."):
             return self
 
         # Find the path in self.children_recursive
-        return next((c for c in self.children_recursive if c.key == key), None)
+        return next((c for c in self._children_recursive if c.key == rel or c.rel_path == rel), None)
 
     def get_like(self, key: str, case_sensitive: bool = False):
         """
@@ -707,7 +682,13 @@ class BooksTree(BaseModel):
         if not key:
             raise ValueError(".get_like(): Key cannot be empty")
         exp = re.compile(key, re.I) if not case_sensitive else re.compile(key)
-        return next((c for c in self.children_recursive if exp.search(c.key)), None)
+        return next(
+            (c for c in self._children_recursive if (c.key and exp.search(c.key)) or exp.search(str(c.rel_path))), None
+        )
+
+    @property
+    def rel_path(self):
+        return Path(self.path.relative_to(self.root.path) if self.root else self.path.name)
 
     def count_files(
         self,
@@ -768,9 +749,7 @@ class BooksTree(BaseModel):
 
     @property
     def key(self):
-        return (
-            str(self.path.relative_to(self.root.path)) if self.root and self.is_book_root else self.path.name
-        )  # TODO: We might not want self.path.name here as fallback; was None previously.
+        return str(self.path.relative_to(self.root.path)) if self.root and self.is_book_root else self.path.name
 
     @property
     def date_created(self):
@@ -815,55 +794,66 @@ class BooksTree(BaseModel):
         self, ext: AudiobookFmt | None = None, *, ignore_errors: Literal[True] = True
     ) -> "BooksTree | None": ...
 
-    def first_audio_file(self, ext: AudiobookFmt | None = None, *, ignore_errors: bool = False) -> "BooksTree | None":
+    @overload
+    def first_audio_file(
+        self, ext: AudiobookFmt | None = None, *, ignore_errors: bool = True
+    ) -> "BooksTree | None": ...
+
+    def first_audio_file(self, ext: AudiobookFmt | None = None, *, ignore_errors: bool = False):
         from src.lib.fs_utils import find_first_audio_file
 
-        if self.has_any_structure("container", "_root_", "series_parent", "multi_parent"):
+        if self.has_structure("_root_"):
+            raise ValueError(f"Cannot look for audio files for _root_; did you forget to set the root for '{self}'?")
+
+        if self.has_any_structure("container", "series_parent"):
             return None
 
-        return find_first_audio_file(self, ext=ext, ignore_errors=ignore_errors)  # type: ignore
+        if not (first := find_first_audio_file(self.path, ext=ext, ignore_errors=ignore_errors)):
+            if not ignore_errors:
+                raise FileNotFoundError(f"No audio files found in '{self}'")
+            return None
+
+        return self.get(first)
 
     @overload
     def next_audio_file(
-        self, current_file: "BooksTree | None" = None, ext: str | None = None, *, ignore_errors: Literal[False] = False
+        self,
+        first: "BooksTree | None" = None,
+        ext: AudiobookFmt | None = None,
+        *,
+        ignore_errors: Literal[False] = False,
     ) -> "BooksTree": ...
 
     @overload
     def next_audio_file(
-        self, current_file: "BooksTree | None" = None, ext: str | None = None, *, ignore_errors: Literal[True] = True
+        self, first: "BooksTree | None" = None, ext: AudiobookFmt | None = None, *, ignore_errors: Literal[True] = True
+    ) -> "BooksTree | None": ...
+
+    @overload
+    def next_audio_file(
+        self, first: "BooksTree | None" = None, ext: AudiobookFmt | None = None, *, ignore_errors: bool = True
     ) -> "BooksTree | None": ...
 
     def next_audio_file(
-        self, current_file: "BooksTree | Path | None" = None, ext: str | None = None, *, ignore_errors: bool = False
+        self, first: "BooksTree | None" = None, ext: AudiobookFmt | None = None, *, ignore_errors: bool = False
     ):
+
+        from src.lib.fs_utils import find_next_audio_file
 
         if self.is_file():
             return None
 
-        err = f"No more audio files found in '{self}'"
-        if ext:
-            err += f" with extension '{ext}'"
-        if not current_file:
-            current_file = self.first_audio_file(ext, ignore_errors=ignore_errors)  # type: ignore
-        if not current_file:
+        if not (first := first or self.first_audio_file(ext, ignore_errors=ignore_errors)):
             if not ignore_errors:
-                raise FileNotFoundError(err)
+                raise FileNotFoundError(f"No audio files found in '{self}'")
             return None
-        files = sorted(
-            filter(lambda x: x.path.suffix == ext or not ext, self.files_recursive), key=lambda x: x.path.name
-        )
-        try:
-            # if current file is a Path not a TreePath, convert it to a TreePath
-            if isinstance(current_file, Path):
-                current_file = BooksTree(current_file, root=self.root, scan=False)
-            next_file = next(iter(files[files.index(current_file) + 1 :]), None)
-            if not next_file and not ignore_errors:
-                raise FileNotFoundError(err)
-            return next_file
-        except IndexError:
+
+        if not (next_file := find_next_audio_file(self.path, first=first.path, ext=ext, ignore_errors=ignore_errors)):
             if not ignore_errors:
-                raise FileNotFoundError(err)
+                raise FileNotFoundError(f"No audio files found in '{self}'")
             return None
+
+        return BooksTree.cast(next_file, root=self.root, match_filter=self.match_filter)
 
     @property
     def ni(self):
@@ -1087,9 +1077,9 @@ class BooksTree(BaseModel):
             [f.determine_structure(self) for f in self._files]
             return self.structure
 
-        if not filter_matches(lambda _: [self.path])(self):
-            # Bypass the structure determination if the current path does not match the filter
-            return self.structure
+        # if not filter_matches(lambda _: [self.path])(self):
+        #     # DEBUG only: bypass the structure determination if the current path does not match the filter
+        #     return self.structure
 
         # --- standalone (no parent / parent == root)
         if self.is_file():

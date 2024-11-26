@@ -160,6 +160,9 @@ def test_parse_combo_id3_tags(
     if "title" in test_dict2:
         test_dict2 = {**test_dict2, "title": increment(test_dict2["title"])}
 
+    assert blank_audiobook.sample_audio1
+    assert blank_audiobook.sample_audio2
+
     _got_tags = mock_id3_tags(
         (blank_audiobook.sample_audio1, test_dict1),
         (blank_audiobook.sample_audio2, test_dict2),
