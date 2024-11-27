@@ -20,6 +20,8 @@ rapidfuzz = "*"
 bidict = "*"
 regex = "*"
 mutagen = "*"
+# spacy = { version = "<4", sys_platform = "!='darwin'" }
+spacy = { version = "<4", extras = ["apple"], sys_platform = "=='darwin'" }
 
 [dev-packages]
 ruff = "*"

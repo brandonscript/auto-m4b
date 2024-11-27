@@ -254,6 +254,20 @@ USER ${USERNAME}
 
 USER root
 
+# Install spaCy depending on os (linux, windows, or mac – and handle arm64)
+# arm64: spacy[apple]
+# all others: spacy
+
+# determine platform and if arm64
+RUN echo "---- INSTALL SPACY ----" && \
+    if [ "$(uname -m)" == "aarch64" ]; then \
+    pipenv run pip install "spacy[apple]<4"; \
+    else \
+    pipenv run pip install "spacy<4"; \
+    fi
+
+# Download spaCy model
+RUN pipenv run python -m spacy download en_core_web_sm
 
 # RUN pipenv run pip install ffmpeg-python --force-reinstall
 

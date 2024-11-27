@@ -14,9 +14,17 @@ from src.tests.helpers.pytest_utils import testutils
 from src.tests.test_cleaners import strip_partno_tests
 
 
-def test_extract_path_info(benedict_society__mp3):
+@pytest.mark.parametrize(
+    "expected, prop, indirect_fixture",
+    [
+        ("Trenton Lee Stewart", "fs_author", "benedict_society__mp3"),
+        ("The Mysterious Benedict Society", "fs_title", "benedict_society__mp3"),
+    ],
+    indirect=["indirect_fixture"],
+)
+def test_extract_path_info(expected, prop, indirect_fixture):
 
-    assert extract_path_info(benedict_society__mp3).fs_title == "The Mysterious Benedict Society"
+    assert getattr(extract_path_info(indirect_fixture), prop) == expected
 
 
 def test_bitrate_vbr(bitrate_vbr__mp3: Audiobook):

@@ -7,6 +7,18 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TYPE_CHECKING, TypeVar
 
+import spacy
+from spacy.matcher import Matcher
+from spacy.ml import Doc
+
+nlp = spacy.load("en_core_web_sm")
+matcher = Matcher(nlp.vocab)
+matcher.add("PERSON", [[{"IS_ALPHA": True}]])
+matcher.add("WORK_OF_ART", [[{"IS_ALPHA": True}]])
+matcher.add("PRODUCT", [[{"IS_ALPHA": True}]])
+matcher.add("EVENT", [[{"IS_ALPHA": True}]])
+matcher.add("ORG", [[{"IS_ALPHA": True}]])
+
 import cachetools
 import cachetools.func
 import regex as rex
@@ -111,6 +123,10 @@ def to_words(s: str) -> list[str]:
     return [w.strip() for w in re.split(r"[\s_.]", s) if w.strip()]
 
 
+def strip_leading_nums_and_punct(s: str) -> str:
+    return re.sub(r"^\d+[\W_]*", "", s)
+
+
 def swap_firstname_lastname(name: str) -> str:
     lastname = ""
     firstname = ""
@@ -175,20 +191,32 @@ def startswith_partno(s: str, s2: str | None = None) -> bool:
     return bool(get_start_num(s) >= 0)
 
 
+def nlp_get_names(s: str) -> list[str]:
+    s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
+    doc: Doc = nlp(s)
+    return [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
+
+
+def nlp_get_titles(s: str) -> list[str]:
+    s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
+    doc: Doc = nlp(s)
+    return [ent.text for ent in doc.ents if ent.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG"]]
+
+
 def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     # FIXME: This is completely broken and doesn't work at all, more false positives than negatives.
     # Replace single occurrences of . with spaces
     from src.lib.cleaners import strip_part_number
 
-    dir_author = swap_firstname_lastname(re_group(author_fs_pattern.search(book.basename), "author"))
-
+    dir_author = parse_author(book.basename, "fs")
     dir_title = re_group(book_title_pattern.search(book.basename), "book_title")
+    dir_nlp_names = nlp_get_names(book.basename)
+    dir_nlp_titles = nlp_get_titles(book.basename)
     dir_year = re_group(year_pattern.search(book.basename), "year")
     dir_narrator = parse_narrator(book.basename, "fs")
 
     # remove suffix/extension from files
-    files = [f.stem for f in Path(book.inbox_dir).iterdir() if f.is_file()]
-
+    files = [f.path.stem for f in book.tree.files_recursive]
     # Get filename common text
     orig_file_name = find_greatest_common_string(files)
 
@@ -205,6 +233,8 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
 
     file_author = parse_author(orig_file_name, "fs")
     file_title = re_group(book_title_pattern.search(orig_file_name), "book_title")
+    file_nlp_titles = nlp_get_titles(orig_file_name)
+    file_nlp_names = nlp_get_names(orig_file_name)
     file_year = parse_year(orig_file_name)
 
     meta = {
@@ -214,14 +244,17 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
         "title": dir_title,
     }
 
-    for d, f, o in zip(
-        [dir_author, dir_title, dir_year],
-        [file_author, file_title, file_year],
+    longest_name = max([dir_author, file_author, *dir_nlp_names, *file_nlp_names], key=len)
+    longest_title = max([dir_title, file_title, *dir_nlp_titles, *file_nlp_titles], key=len)
+    longest_year = max([dir_year, file_year], key=len)
+
+    for k, v in zip(
         ["author", "title", "year"],
+        [longest_name, longest_title, longest_year],
     ):
-        if len(f) > len(d):
-            print_debug(f"{o}: file name '{f}' is longer than dir name '{d}', prefer file name")
-            meta[o] = f
+        if v:
+            print_debug(f"parsed {k} from fs: '{v}'")
+            meta[k] = v
 
     book.fs_author = meta["author"]
     book.fs_title = meta["title"]
@@ -310,6 +343,7 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
         fallback = s
     if not s or graphic_audio_pattern.search(s):
         return AuthorNarrator(fallback, fallback)
+    s = strip_leading_nums_and_punct(s)
     author = s
     narrator = s
     if any([w for w in to_words(s)[:6] if "/" in w]):
@@ -338,7 +372,7 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
     author = re_group(author_pattern.search(author), "author", default=fallback).strip()
     narrator = re_group(narrator_pattern.search(narrator), "narrator", default=fallback).strip()
 
-    if not author and not narrator:
+    if not any([author, narrator]):
         return AuthorNarrator(fallback, fallback)
 
     if author != narrator:
@@ -349,6 +383,9 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
 
     author = get_name_from_str(author)
     narrator = get_name_from_str(narrator)
+
+    if author == narrator:
+        narrator = ""
 
     return AuthorNarrator(
         author=swap_firstname_lastname(author),
