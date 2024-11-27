@@ -7,7 +7,7 @@ import pytest
 
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
-from src.lib.misc import flatlist, isorted
+from src.lib.misc import any_matching, flatlist, isorted
 from src.lib.typing import BookStructure2, BookStructureTuple
 from src.tests.helpers.pytest_dumps import MOCKED, TEST_DIRS, TREES
 
@@ -329,8 +329,8 @@ class test_tree_structures:
         assert series_parent.has_only_structure("series_parent"), xt.msg.structure_is(series_parent, "series_parent")
         for c in series_parent.children[:3]:
             assert c.has_only_structures("series_book", "flat"), xt.msg.structure_has(c, ("series_book", "flat"))
-        assert series_parent.children[3].has_only_structures("series_book", "single", "nested"), xt.msg.structure_has(
-            series_parent.children[3], ("series_book", "single", "nested")
+        assert series_parent.children[3].has_only_structures("series_book", "single"), xt.msg.structure_has(
+            series_parent.children[3], ("series_book", "single")
         )
 
         flat_unrelated = container_dir.children[1]
@@ -579,7 +579,7 @@ class test_tree_structures_series:
 
         assert [b.path for b in tree.books] == [a.path for a in Chanur_Series[1:]]
 
-    def test_nested_series_with_standalone_m4as(self, nathan_lowell__nested_series_m4a: list[Audiobook]):
+    def test_complex_container_with_series(self, nathan_lowell__nested_series_m4a: list[Audiobook]):
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^(Nathan Lowell)")
         assert tree.dirs == {"Nathan Lowell": BooksTree(TEST_DIRS.inbox / "Nathan Lowell")}
         container = tree.dirs["Nathan Lowell"]
@@ -606,11 +606,63 @@ class test_tree_structures_series:
             list[BooksTree], list(map(container.get_like, ["Dark Knight Station Origins", "Wizard's Butler"]))
         )
 
+        assert (flat := container.get_like("Ravenwood"))
+        assert flat.has_only_structures("flat", "series_book"), xt.msg.structure_is(flat, ("flat", "series_book"))
+
         for p in series_parents:
             assert p.has_only_structure("series_parent"), xt.msg.structure_is(p, "series_parent")
 
         for f in single_nested:
             assert f.has_only_structures("single", "nested"), xt.msg.structure_is(f, ("single", "nested"))
+
+        series_books = [
+            "01 In Ashes Born",
+            "02 To Fire Called",
+            "03 By Darkness Forged",
+            "01 Quarter Share",
+            "02 Half Share",
+            "03 Full Share",
+            "04 Double Share",
+            "05 Captain's Share",
+            "06 Owner's Share",
+            "01 School Days",
+            "02 Working Class",
+            "01 South Coast",
+            "02 Cape Grace",
+            "03 Finwell Bay",
+            "01 Milk Run",
+            "02 Suicide Run",
+            "03 Home Run",
+            "01 Ravenwood",
+            "02 Zypheria's Call",
+            "03 The Hermit of Lammas Wood",
+        ]
+
+        for c in [c for c in container.children_recursive if any_matching([c.name], series_books)]:
+            assert c.has_structure("series_book")
+            if c.is_file():
+                if c.path.suffix == ".m4a":
+                    assert c.has_structure("single")
+                elif c.path.suffix == ".mp3":
+                    assert c.has_structure("flat")
+
+        assert (zypheria := container.get_like("02 Zypheria's Call"))
+        assert zypheria.has_structure("single")
+        assert zypheria.not_has_structure("nested")
+
+        for c in [
+            c
+            for c in container.children_recursive
+            if c.depth > 2
+            and not any_matching(
+                [c.name],
+                [
+                    "Dark Knight Station Origins",
+                    "Wizard's Butler",
+                ],
+            )
+        ]:
+            assert c.has_structure("series_book"), xt.msg.structure_has(c, "series_book")
 
 
 class test_tree_finding:

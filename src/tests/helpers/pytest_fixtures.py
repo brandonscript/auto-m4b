@@ -417,14 +417,13 @@ def blank_audiobook():
     book = TEST_DIRS.inbox / "blank_audiobook"
     book.mkdir(parents=True, exist_ok=True)
 
-    testutils.set_match_filter("blank_audiobook")
-
     # write a completely valid audiofile that plays a tone A4 for 2 seconds
     with open(book / f"blank_audiobook_01.mp3", "wb") as f:
         f.write(testutils.blank_audiobook_data)
     with open(book / f"blank_audiobook_02.mp3", "wb") as f:
         f.write(testutils.blank_audiobook_data)
 
+    testutils.set_match_filter("blank_audiobook")
     yield Audiobook(book)
     testutils.set_match_filter(None)
     shutil.rmtree(book, ignore_errors=True)
@@ -449,12 +448,12 @@ def mock_id3_tags():
 def corrupt_audiobook():
     """Create a fake mp3 audiobook with a corrupt file."""
     book = TEST_DIRS.inbox / "corrupt_audiobook"
-    testutils.set_match_filter("corrupt_audiobook")
     book.mkdir(parents=True, exist_ok=True)
     with open(book / f"corrupt_audiobook.mp3", "wb") as f:
         f.write(b"\xff\xfb\xd6\x04")
         # write 20kb of random data, but the first 4 bytes are corrupt
         f.write(os.urandom(1024 * 20))
+    testutils.set_match_filter("corrupt_audiobook")
     yield Audiobook(book)
     testutils.set_match_filter(None)
     shutil.rmtree(book, ignore_errors=True)

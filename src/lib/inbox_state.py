@@ -62,6 +62,8 @@ class InboxStateError(Exception):
 @singleton
 class InboxState(Hasher):
 
+    tree: BooksTree = None  # type: ignore
+
     def __init__(self):
         from src.lib.config import cfg
 
@@ -71,7 +73,6 @@ class InboxState(Hasher):
         self.loop_counter = 0
         self.banner_printed = False
         # print_debug("Set banner_printed to False")
-        self.tree = BooksTree(cfg.inbox_dir)
         self._last_scan = 0
         self.scan()
 
@@ -91,7 +92,14 @@ class InboxState(Hasher):
             self._items[item.key].status = status
 
     @requires_scan
-    def get(self, key_path_hash_or_book: str | Path | BooksTree | Audiobook | None) -> InboxItem | None:
+    def get(self, key_path_or_book: str | Path | Audiobook | None) -> InboxItem | None:
+        return self._get(key_path_or_book)
+
+    @requires_scan
+    def get_many(self, keys_paths_or_books: list[str | Path | Audiobook]):
+        return [(k, self._get(k)) for k in keys_paths_or_books]
+
+    def _get(self, key_path_hash_or_book: str | Path | BooksTree | Audiobook | None) -> InboxItem | None:
         if not key_path_hash_or_book:
             return None
 
@@ -187,12 +195,18 @@ class InboxState(Hasher):
 
     @property
     def match_filter(self):
-        from src.lib.config import cfg
+        # from src.lib.config import cfg
+        # from src.lib.misc import parse_none
 
-        if not cfg.MATCH_FILTER and (env := os.getenv("MATCH_FILTER")):
-            self.set_match_filter(env)
-            print_debug(f"Setting match filter from env: {cfg.MATCH_FILTER} (was not previoulsy set in state)")
-        return cfg.MATCH_FILTER
+        # if not cfg.MATCH_FILTER:
+        #     if env := parse_none(os.getenv("MATCH_FILTER")):
+        #         print_debug(f"Setting match filter from env: {cfg.MATCH_FILTER} (was not previoulsy set in state)")
+        #         self.set_match_filter(env)
+        #     elif (mf := self.tree.match_filter) and isinstance(mf, str):
+        #         print_debug(f"Setting match filter from tree: {cfg.MATCH_FILTER} (was not previoulsy set in state)")
+        #         self.set_match_filter(mf)
+        # return cfg.MATCH_FILTER
+        return self.tree.match_filter
 
     def set_match_filter(self, match_filter: str | None):
         from src.lib.config import cfg
@@ -200,15 +214,15 @@ class InboxState(Hasher):
         if match_filter is None:
             os.environ.pop("MATCH_FILTER", None)
             # update all items where filtered was set to ok
-            for d in self.filtered_books:
-                if item := self.get(d):
-                    item.set_ok()
+            # for item in [i for _, i in self.get_many(self.filtered_books.keys()) if i]:
+            #     item.set_ok()
             cfg.MATCH_FILTER = ""
-            return
+        else:
+            os.environ["MATCH_FILTER"] = match_filter
+            cfg.MATCH_FILTER = match_filter
 
-        os.environ["MATCH_FILTER"] = match_filter
-        cfg.MATCH_FILTER = match_filter
-        self.tree.match_filter = match_filter
+        self.tree._match_filter = match_filter
+        self.tree.scan()
 
     def reset_inbox(self, new_match_filter: str | None = None):
 

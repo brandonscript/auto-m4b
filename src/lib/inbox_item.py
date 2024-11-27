@@ -3,8 +3,6 @@ from functools import cached_property
 from pathlib import Path
 from typing import cast, Literal
 
-from cachetools.func import ttl_cache
-
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.formatters import human_elapsed_time, human_size
@@ -12,7 +10,6 @@ from src.lib.fs_utils import (
     get_audio_size,
     hash_path_audio_files,
     last_updated_audio_files_at,
-    name_matches,
 )
 from src.lib.typing import DirName
 
@@ -79,7 +76,6 @@ class InboxItem:
         self._last_updated: float | None = None
         self._curr_hash = hash_path_audio_files(self.tree.path)
         self._hash_changed: float = time.time()
-        self.key = str(self.tree.key)
         self.size = get_audio_size(self.tree.path) if self.tree.path.exists() else 0
         self.status: InboxItemStatus = "new"
         self.failed_reason: str = ""
@@ -103,7 +99,11 @@ class InboxItem:
     def reload(self):
         self = InboxItem(self.path)
 
-    @cached_property
+    @property
+    def key(self) -> str:
+        return self.tree.key
+
+    @property
     def path(self) -> Path:
         from src.lib.config import cfg
 
@@ -187,16 +187,14 @@ class InboxItem:
 
     @property
     def is_filtered(self):
-        from src.lib.config import cfg
-
-        return not name_matches(self.path.relative_to(cfg.inbox_dir), cfg.MATCH_FILTER)
+        return not self.tree.root or not self.tree in self.tree.root.books_and_series
 
     @property
     def is_maybe_series_book(self):
         return self.tree.has_structure("series_book")
         # return len(Path(self.key).parts) > 1
 
-    @cached_property
+    @property
     def is_maybe_series_parent(self):
         return self.tree.has_structure("series_parent")
         # return any(
@@ -206,7 +204,7 @@ class InboxItem:
         #     ]
         # )
 
-    @cached_property
+    @property
     def is_first_book_in_series(self):
         return (
             self.is_maybe_series_book
@@ -215,7 +213,7 @@ class InboxItem:
             and series_books[0] == self
         )
 
-    @cached_property
+    @property
     def is_last_book_in_series(self):
         return (
             self.is_maybe_series_book
@@ -224,7 +222,7 @@ class InboxItem:
             and series_books[-1] == self
         )
 
-    @cached_property
+    @property
     def series_parent(self):
         from src.lib.inbox_state import InboxState
 
@@ -243,7 +241,7 @@ class InboxItem:
 
         return inbox.series_items_for_key(self.key)
 
-    @cached_property
+    @property
     def series_key(self):
         if not self.tree.root or not self.tree.has_structure("series_book"):
             return None
@@ -251,7 +249,7 @@ class InboxItem:
         all_series_parents = list(filter(lambda x: x.has_structure("series_parent"), self.tree.root.books_and_series))
         return next((p.key for p in all_series_parents if self.tree.key.startswith(p.key)), None)
 
-    @cached_property
+    @property
     def series_basename(self):
         from src.lib.config import cfg
 
@@ -259,7 +257,7 @@ class InboxItem:
         return str(d.parent) if len(d.parts) > 1 and d.parts[-1] == self.basename else str(d)
 
     @property
-    @ttl_cache(maxsize=6, ttl=10)
+    # @ttl_cache(maxsize=6, ttl=10)
     def num_books_in_series(self):
         if not self.is_maybe_series_parent:
             return -1

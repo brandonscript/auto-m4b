@@ -1,10 +1,7 @@
-from functools import cached_property
 from math import floor
 from pathlib import Path
 from typing import cast, Literal, overload
 
-import cachetools
-import cachetools.func
 from pydantic import BaseModel
 
 from src.lib.books_tree import BooksTree
@@ -117,7 +114,7 @@ class Audiobook(BaseModel):
         if self.cover_art_file:
             return self.cover_art_file
         try:
-            extract_cover_art(self.sample_audio1.path, save_to_file=True)
+            extract_cover_art(self.sample_audio1, save_to_file=True)
             self._inbox_cover_art_file = cast(Path, find_cover_art_file(self.path))
             cp_file_into_dir(self._inbox_cover_art_file, self.merge_dir)
             return self.cover_art_file
@@ -254,7 +251,6 @@ class Audiobook(BaseModel):
     def series_basename(self):
         return self._inbox_item.series_basename if self._inbox_item else None
 
-    @cachetools.func.ttl_cache(maxsize=6, ttl=20)
     @property
     def num_books_in_series(self):
         return self._inbox_item.num_books_in_series if self._inbox_item else -1
@@ -341,7 +337,7 @@ class Audiobook(BaseModel):
             return f"{int(floor(khz))} kHz"
         return f"{round(khz, 1)} kHz"
 
-    @cached_property
+    @property
     def _inbox_cover_art_file(self):
         return find_cover_art_file(self.path)
 
@@ -354,7 +350,7 @@ class Audiobook(BaseModel):
             cp_file_into_dir(self._inbox_cover_art_file, self.merge_dir)
         return merge_cover
 
-    @cached_property
+    @property
     def id3_cover(self):
         return extract_cover_art(self.sample_audio1, save_to_file=False)
 

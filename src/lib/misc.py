@@ -154,7 +154,7 @@ def isorted(
 
 
 def any_in(l1: Iterable[T], l2: Iterable[T]) -> bool:
-    """Returns True if any item in l1 is in l2.
+    """Returns True if any item in l1 is in l2 or vice versa.
 
     Examples:
     any_in([1, 2, 3], [3, 4, 5]) -> True, because 3 is in both lists.
@@ -162,11 +162,13 @@ def any_in(l1: Iterable[T], l2: Iterable[T]) -> bool:
     """
     if not l1:
         return False
-    return any([i in l2 for i in l1])
+    if any(i in l1 for i in l2):
+        return True
+    return any(j in l2 for j in l1)
 
 
 def any_matching(l1: Iterable[T], l2: Iterable[T], *, case_insensitive=False) -> bool:
-    """Returns True if any item in l1 matches (case-insensitive) any item in l2.
+    """Returns True if any item in l1 matches (case-insensitive) a part of an item in l2.
 
     Examples:
     any_matching(["a", "b", "c"], ["A", "D", "E"]) -> True, because "a" is in both lists.
@@ -176,14 +178,15 @@ def any_matching(l1: Iterable[T], l2: Iterable[T], *, case_insensitive=False) ->
     if not l1:
         return False
 
-    if case_insensitive:
-        # if not all elements are strings, can't use case-insensitive comparison
-        if not all([isinstance(i, str) for i in l1 + l2]):
-            raise ValueError("Can't use case-insensitive comparison on non-string elements.")
-        l1 = [i.lower() for i in l1]  # type: ignore
-        l2 = [i.lower() for i in l2]  # type: ignore
+    l1_zip = lambda: zip([str(i).lower() for i in l1] if case_insensitive else [str(i) for i in l1], l1)
+    l2_zip = lambda: zip([str(i).lower() for i in l2] if case_insensitive else [str(i) for i in l2], l2)
 
-    return any([i in j for i in l2 for j in l1])
+    if any_in(l1, l2):
+        return True
+
+    if any((any((str_i in str_j, str_j in str_i, i == j)) for (str_i, i) in l2_zip() for (str_j, j) in l1_zip())):
+        return True
+    return any((any((str_i in str_j, str_j in str_i, i == j)) for (str_i, i) in l1_zip() for (str_j, j) in l2_zip()))
 
 
 def all_in(l1: Iterable[T], l2: Iterable[T]) -> bool:

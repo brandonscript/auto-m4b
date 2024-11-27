@@ -23,12 +23,12 @@ def filter_matches(func):
         paths = func(self, *args, **kwargs)
         if not paths:
             return paths
-        return match_filter(paths, self.match_filter, root=self.root or self)
+        return _match_filter(paths, self.match_filter, root=self.root or self)
 
     return wrapper
 
 
-def match_filter(
+def _match_filter(
     paths: "list[Path | BooksTree] | dict[str, BooksTree]",
     match_filter: list[Path] | str | None,
     *,
@@ -118,9 +118,11 @@ class TreeNumInfo:
 
     @property
     def is_likely_series(self) -> bool:
-        _is_likely_series = [self.curr.is_likely, self.children.are_likely, self.siblings.are_likely].count(
-            "series"
-        ) >= 2
+        _is_likely_series = [
+            self.curr.is_likely("series"),
+            self.children.are_likely("series"),
+            self.siblings.are_likely("series"),
+        ].count(True) >= 2
         if (
             _is_likely_series
             and self._tree.is_file()
@@ -132,9 +134,9 @@ class TreeNumInfo:
             sibling_files_similarity = parent.ni.children.similarity
 
             parent_siblings_likely_series = bool(
-                (parent := self._tree.parent) and parent.depth > 1 and parent.ni.siblings.are_likely == "series"
+                (parent := self._tree.parent) and parent.depth > 1 and parent.ni.siblings.are_likely("series")
             )
-            sibling_files_likely_series = False  # bool(self.siblings.are_likely == "series")
+            sibling_files_likely_series = False
 
             _is_likely_series = (
                 self._tree.is_file()
@@ -168,11 +170,19 @@ class TreeNumInfo:
 
     @property
     def is_likely_multi_disc(self):
-        return [self.curr.is_likely, self.children.are_likely, self.siblings.are_likely].count("multi_disc") >= 2
+        return [
+            self.curr.is_likely("multi_disc"),
+            self.children.are_likely("multi_disc"),
+            self.siblings.are_likely("multi_disc"),
+        ].count(True) >= 2
 
     @property
     def is_likely_multi_part(self):
-        return [self.curr.is_likely, self.children.are_likely, self.siblings.are_likely].count("multi_part") >= 2
+        return [
+            self.curr.is_likely("multi_part"),
+            self.children.are_likely("multi_part"),
+            self.siblings.are_likely("multi_part"),
+        ].count(True) >= 2
 
     class NumDict:
         disc_num: int = -1
@@ -210,15 +220,18 @@ class TreeNumInfo:
         def best_num(self):
             return next((n for n in [self.disc_num, self.part_num, self.series_num, self.start_num] if n > -1), -1)
 
-        @property
-        def is_likely(self) -> Literal["multi_disc", "multi_part", "series", "unknown"]:
-            if self.has_disc_num:
-                return "multi_disc"
-            if self.has_part_num:
-                return "multi_part"
-            if self.has_series_num or self.has_start_num:
-                return "series"
-            return "unknown"
+        def is_likely(self, structure: Literal["multi_disc", "multi_part", "series", "unknown"]) -> bool:
+            match structure:
+                case "multi_disc":
+                    return self.has_disc_num
+                case "multi_part":
+                    return self.has_part_num
+                case "series":
+                    return self.has_series_num or self.has_start_num
+                case "unknown":
+                    return not any(
+                        (self.is_likely("multi_disc"), self.is_likely("multi_part"), self.is_likely("series"))
+                    )
 
         @property
         def has_disc_num(self):
@@ -325,15 +338,18 @@ class TreeNumInfo:
         def have_any_nums(self):
             return any([bool(x) for x in self.all_nums])
 
-        @property
-        def are_likely(self) -> Literal["multi_disc", "multi_part", "series", "unknown"]:
-            if self.have_disc_nums and self.maybe_multi_disc > 0:
-                return "multi_disc"
-            if self.have_part_nums and self.maybe_multi_part > 0:
-                return "multi_part"
-            if (self.have_series_nums or self.have_start_nums) and self.maybe_series > 0:
-                return "series"
-            return "unknown"
+        def are_likely(self, structure: Literal["multi_disc", "multi_part", "series", "unknown"]) -> bool:
+            match structure:
+                case "multi_disc":
+                    return self.have_disc_nums and self.maybe_multi_disc > 0
+                case "multi_part":
+                    return self.have_part_nums and self.maybe_multi_part > 0
+                case "series":
+                    return (self.have_series_nums or self.have_start_nums) and self.maybe_series > 0
+                case "unknown":
+                    return not any(
+                        (self.are_likely("multi_disc"), self.are_likely("multi_part"), self.are_likely("series"))
+                    )
 
         @property
         def maybe_multi_disc(self):
@@ -487,7 +503,7 @@ class BooksTree(BaseModel):
     maxdepth: int | None = None
     structure: tuple[BookStructure2, ...] = Field(default_factory=tuple)
     root: "BooksTree | None" = None
-    match_filter: list[Path] | str | None = None
+    _match_filter: list[Path] | str | None = None
     _last_scan: float | None = None
 
     model_config = {
@@ -526,7 +542,7 @@ class BooksTree(BaseModel):
         #     self.files = [BooksTree(f, root=self.root, scan=False) for f in files]
         # if dirs:
         #     self.dirs = {k: BooksTree(v, root=self.root, scan=False) for k, v in dirs.items()}
-        self.match_filter = match_filter or cfg.MATCH_FILTER
+        self._match_filter = match_filter or cfg.MATCH_FILTER
         if scan:
             self.scan(
                 mindepth=mindepth,
@@ -690,6 +706,12 @@ class BooksTree(BaseModel):
         )
 
     @property
+    def match_filter(self):
+        from src.lib.config import cfg
+
+        return self._match_filter or (self.root.match_filter if self.root else cfg.MATCH_FILTER)
+
+    @property
     def rel_path(self):
         return Path(self.path.relative_to(self.root.path) if self.root else self.path.name)
 
@@ -703,48 +725,18 @@ class BooksTree(BaseModel):
         Count the number of audio files in a directory and its subdirectories.
 
         Parameters:
-        mindepth (int | None, optional): The minimum depth of directories to search. This is 0-based, so a mindepth of 0 includes files directly in the base directory. Defaults to None, which includes all depths.
-        maxdepth (int | None, optional): The maximum depth of directories to search. This is 0-based, so a maxdepth of 0 includes only files directly in the base directory. Defaults to None, which includes all depths.
+        mindepth (int | None, optional): The minimum depth of directories to search. This is 0-based,
+                                         so a mindepth of 0 includes files directly in the base directory.
+                                         Defaults to None, which includes all depths.
+        maxdepth (int | None, optional): The maximum depth of directories to search. This is 0-based,
+                                         so a maxdepth of 0 includes only files directly in the base directory.
+                                         Defaults to None, which includes all depths.
 
         Returns:
         int: The number of audio files found.
         """
 
         return len(self.__class__(self.path, root=self.root, mindepth=mindepth, maxdepth=maxdepth)._files_recursive)
-
-    # def set_match_filter(self, paths: list[Path] | str | None):
-    #     from src.lib.fs_utils import try_relative_to
-
-    # If matching_paths is set, delete keys if curr_path is not relative to any of the paths
-    # if paths or self.match_filter:
-    #     self.match_filter = paths or self.match_filter or []
-    #     if isinstance(self.match_filter, str):
-    #         self.files = [f for f in self.files if re.search(self.match_filter, str(f.path), re.I)]
-    #         self.dirs = {
-    #             d.path.name: d for d in self.dirs.values() if re.search(self.match_filter, str(d.path), re.I)
-    #         }
-    #     else:
-    #         matching_file_paths = [f for f in self.match_filter if f.is_file() or f.suffix]
-    #         matching_dir_paths = [d for d in self.match_filter if d.is_dir() or not d.suffix]
-
-    #         self.files = (
-    #             []
-    #             if not matching_file_paths
-    #             else [
-    #                 f
-    #                 for f in self.files
-    #                 if f in matching_file_paths or any((try_relative_to(f.path, m) for m in matching_file_paths))
-    #             ]
-    #         )
-    #         self.dirs = (
-    #             {}
-    #             if not matching_dir_paths
-    #             else {
-    #                 d.path.name: d
-    #                 for d in self.dirs.values()
-    #                 if d.path in matching_dir_paths or any((try_relative_to(d.path, m) for m in matching_dir_paths))
-    #             }
-    #         )
 
     @property
     def name(self):
@@ -1077,9 +1069,12 @@ class BooksTree(BaseModel):
             [f.determine_structure(self) for f in self._files]
             return self.structure
 
-        if not match_filter([self.path], self.match_filter, root=root):
+        if not _match_filter([self.path], self.match_filter, root=root):
             # DEBUG only: bypass the structure determination if the current path does not match the filter
             return self.structure
+
+        # if "breakpoint-book-name" in self.name.lower():
+        #     ...
 
         # --- standalone (no parent / parent == root)
         if self.is_file():
@@ -1099,7 +1094,11 @@ class BooksTree(BaseModel):
                     and not parent.has_structures_like("multi_", "series_", "flat")
                 ):
                     self.add_structures("single")
-                    if parent.has_any_structure("single", "container") and depth > 2:
+                    if (
+                        parent.has_any_structure("single", "container")
+                        and depth > 2
+                        and not self.ni.siblings.are_likely("series")
+                    ):
                         self.add_structures("nested")
                 elif parent.has_structure("mixed"):
                     self.add_structures("mixed")
@@ -1136,10 +1135,6 @@ class BooksTree(BaseModel):
             parent.structure = cast(tuple[BookStructure2, ...], parent.structure)
 
         has_one_file_and_no_dirs = bool(len(self._files) == 1 and not self._dirs)
-
-        parent_is_maybe_multi_or_series = (
-            parent._dirs and not parent.is_root and not parent.has_any_structure("container")
-        )
 
         if depth < 2 and len(self._files_recursive) == 1:
             self.set_structures("single", recursive=True)
@@ -1233,7 +1228,7 @@ class BooksTree(BaseModel):
                     )
                     children_ok = (
                         not self.ni.children.have_series_nums or self.ni.children.series_nums_match_curr
-                    ) and (not self.ni.children.have_start_nums or self.ni.children.start_nums_match_curr)
+                    ) and (not self.ni.children.have_start_nums or self.ni.children.start_nums_are_sequential)
                     siblings_seq = (
                         self.ni.siblings.have_series_nums and self.ni.siblings.series_nums_are_sequential
                     ) or (self.ni.siblings.have_start_nums and self.ni.siblings.start_nums_are_sequential)

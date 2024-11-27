@@ -384,9 +384,6 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
     author = get_name_from_str(author)
     narrator = get_name_from_str(narrator)
 
-    if author == narrator:
-        narrator = ""
-
     return AuthorNarrator(
         author=swap_firstname_lastname(author),
         # narrator=swap_firstname_lastname(narrator),
