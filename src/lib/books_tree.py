@@ -19,54 +19,57 @@ from src.lib.typing import AudiobookFmt, BookStructure2
 
 
 def filter_matches(func):
-
-    def _match_filter(
-        paths: "list[Path | BooksTree] | dict[str, BooksTree]",
-        match_filter: list[Path] | str | None,
-        *,
-        root: "BooksTree | Path | None" = None,
-    ):
-        from src.lib.config import cfg
-        from src.lib.fs_utils import try_relative_to
-
-        match_filter = match_filter or cfg.MATCH_FILTER
-
-        if not match_filter or not paths:
-            return paths
-
-        rel_match_filter = cast(
-            list[Path | BooksTree] | str,
-            (
-                [try_relative_to(str(p), root or Path()) for p in match_filter]
-                if isinstance(match_filter, list)
-                else match_filter
-            ),
-        )
-
-        def _is_wanted_path(t: BooksTree | Path | str | None):
-            if not (rel_path := try_relative_to(str(t), root or Path())):
-                return False
-            if isinstance(rel_match_filter, str):
-                return bool(re.search(rel_match_filter, str(rel_path), re.I))
-            while (p := rel_path) and p.parent != p:
-                if p in rel_match_filter:
-                    return True
-                rel_path = p.parent
-            return False
-
-        return (
-            {k: v for k, v in paths.items() if _is_wanted_path(v)}
-            if isinstance(paths, dict)
-            else [p for p in paths if _is_wanted_path(p)]
-        )
-
     def wrapper(self, *args, **kwargs):
         paths = func(self, *args, **kwargs)
         if not paths:
             return paths
-        return _match_filter(paths, self.match_filter, root=self.root or self)
+        return match_filter(paths, self.match_filter, root=self.root or self)
 
     return wrapper
+
+
+def match_filter(
+    paths: "list[Path | BooksTree] | dict[str, BooksTree]",
+    match_filter: list[Path] | str | None,
+    *,
+    root: "BooksTree | Path",
+):
+    from src.lib.config import cfg
+    from src.lib.fs_utils import try_relative_to
+
+    match_filter = match_filter or cfg.MATCH_FILTER
+
+    if not match_filter or not paths:
+        return paths
+
+    if root is None:
+        raise ValueError("match_filter: root should never be None")
+
+    rel_match_filter = cast(
+        list[Path | BooksTree] | str,
+        (
+            [try_relative_to(str(p), root or Path()) for p in match_filter]
+            if isinstance(match_filter, list)
+            else match_filter
+        ),
+    )
+
+    def _is_wanted_path(t: BooksTree | Path | str | None):
+        if not (rel_path := try_relative_to(str(t), root or Path())):
+            return False
+        if isinstance(rel_match_filter, str):
+            return bool(re.search(rel_match_filter, str(rel_path), re.I))
+        while (p := rel_path) and p.parent != p:
+            if p in rel_match_filter:
+                return True
+            rel_path = p.parent
+        return False
+
+    return (
+        {k: v for k, v in paths.items() if _is_wanted_path(v)}
+        if isinstance(paths, dict)
+        else [p for p in paths if _is_wanted_path(p)]
+    )
 
 
 NumDictType = TypeVar("NumDictType", bound="TreeNumInfo.NumDict")
@@ -1041,9 +1044,6 @@ class BooksTree(BaseModel):
     def get_files_in_dirs(self):
         return [f for d in self._dirs.values() for f in d.files]
 
-    def get_children_sorted(self) -> list["BooksTree"]:
-        return list(sorted([*self._files, *self._dirs.values()], key=lambda x: x.path.name))
-
     @property
     def type(self):
         return "dir" if self.is_dir() else "file" if self.is_file() else "unknown"
@@ -1077,9 +1077,9 @@ class BooksTree(BaseModel):
             [f.determine_structure(self) for f in self._files]
             return self.structure
 
-        # if not filter_matches(lambda _: [self.path])(self):
-        #     # DEBUG only: bypass the structure determination if the current path does not match the filter
-        #     return self.structure
+        if not match_filter([self.path], self.match_filter, root=root):
+            # DEBUG only: bypass the structure determination if the current path does not match the filter
+            return self.structure
 
         # --- standalone (no parent / parent == root)
         if self.is_file():
@@ -1146,7 +1146,7 @@ class BooksTree(BaseModel):
         elif has_one_file_and_no_dirs and not self.has_structure_like("multi_"):
             self.add_structures("single")
         elif self.has_multiple_files_and_no_dirs:
-            self.set_structures("flat")
+            self.set_structures("flat", recursive=True)
             if parent.has_any_structure("nested", "container"):
                 self.add_structures("nested")
         elif self.has_files_and_dirs:
@@ -1155,9 +1155,19 @@ class BooksTree(BaseModel):
             self.set_structures("empty")
             return self.structure
 
-        if len(self._files_recursive) == 1 and len(self._dirs) == 1:
+        if len(self._dirs) == 1 and len(self._files_recursive) == 1:
             nested_dir = self._dirs[next(iter(self._dirs.keys()))]
             nested_dir.add_structures("single", "nested", recursive=True)
+
+        # recursively check to see if there is only one nested dir in each dir
+        if (
+            self._dirs
+            and not self._files
+            and parent.has_any_structure("_root_", "container")
+            and len(self._files_recursive) > 1
+            and not any((len(self._dirs) > 1, *[len(d._dirs) > 1 for d in self._dirs_recursive]))
+        ):
+            self.add_structures("flat", "nested", recursive=True)
 
         # if multi_disc_parent:
         if not parent.is_root:

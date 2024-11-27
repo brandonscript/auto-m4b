@@ -49,6 +49,7 @@ _container_dir_files = [
     _container_dir_others[1] / "mock_book_d3_it_takes_two-02.mp3",
     _container_dir_others[2],
 ]
+_multi_nested_dir = TEST_DIRS.inbox / "mock_book_multi_nested"
 
 
 @dataclass
@@ -74,7 +75,7 @@ class MOCKED:
     multi_disc_dir = TEST_DIRS.inbox / "mock_book_multi_disc"
     multi_disc_dir_with_extras = TEST_DIRS.inbox / "mock_book_multi_disc_dir_with_extras"
     multi_part_dir = TEST_DIRS.inbox / "mock_book_multi_part"
-    multi_nested_dir = TEST_DIRS.inbox / "mock_book_multi_nested"
+    multi_nested_dir = _multi_nested_dir
 
     single_dir_mp3 = TEST_DIRS.inbox / "mock_book_single_mp3"
     single_nested_dir_mp3 = TEST_DIRS.inbox / "mock_book_single_nested_mp3"
@@ -88,8 +89,10 @@ class MOCKED:
         multi_nested_dir,
         multi_part_dir,
     ]
+    multi_nested_dirs = [multi_nested_dir / "nested_1", multi_nested_dir / "nested_2"]
     single_dirs = [single_dir_mp3, single_nested_dir_mp3, single_dir_m4b]
     series_dirs = [series_parent_dir, *series_books]
+    container_root_dir = _container_dir
     container_dirs = [
         _container_dir,
         _container_dir_series_parent,
@@ -111,11 +114,36 @@ class MOCKED:
         standalone_m4b,
         standalone_mp3_1,
         standalone_mp3_2,
+        _container_dir_series_books[3],
     ]
+    standalone_files_d1 = deepcopy(standalone_files[:3])
 
     empty = TEST_DIRS.inbox / "mock_book_empty"
 
     all_ = all_dirs + single_dirs + container_dirs + [empty] + standalone_files
+
+    all_books_and_series = isorted(
+        list(
+            set(
+                flat_dirs
+                + _container_dir_others
+                + _container_dir_series_books
+                + series_books
+                + single_dirs
+                + standalone_files
+                + multi_nested_dirs
+                + [
+                    _container_dir_series_parent,
+                    flat_nested_dir,
+                    mixed_dir,
+                    multi_disc_dir,
+                    multi_disc_dir_with_extras,
+                    multi_part_dir,
+                    series_parent_dir,
+                ]
+            )
+        )
+    )
 
 
 mock_books_flat_full = {
@@ -280,13 +308,13 @@ mock_book_container_2_3["mock_book_container"]["_dirs"]["mock_book_container_ser
 # fmt: off
 TREES = {
     "None, None": 
-        {"_files": [f.name for f in MOCKED.standalone_files], "_dirs": {
+        {"_files": [f.name for f in MOCKED.standalone_files_d1], "_dirs": {
             **mock_books_flat_full, 
             **mock_book_container_full, "mock_book_flat_nested": {"_files": [], "_dirs": {"inner_dir": {"_files": ["mock_book_flat_nested - part_1.mp3", "mock_book_flat_nested - part_2.mp3", "mock_book_flat_nested - part_3.mp3"], "_dirs": {}}}}, **mock_book_mixed_full, "mock_book_series_parent": {"_files": [], "_dirs": {"Dawn - Book 1": {"_files": ["mock_book_series - ch. 1.mp3", "mock_book_series - ch. 2.mp3"], "_dirs": {}}, "Dusk - Book 3": {"_files": ["mock_book_series - ch. 1.mp3", "mock_book_series - ch. 2.mp3", "mock_book_series - ch. 3.mp3", "mock_book_series - ch. 4.mp3"], "_dirs": {}}, "High Noon - Book 2": {"_files": ["mock_book_series - ch. 1.mp3", "mock_book_series - ch. 2.mp3", "mock_book_series - ch. 3.mp3"], "_dirs": {}}}}, "mock_book_multi_disc": {"_files": [], "_dirs": {"Disc 1 of 4": {"_files": ["mock_book_multi_disc1 - ch_1.mp3", "mock_book_multi_disc1 - ch_2.mp3"], "_dirs": {}}, "Disc 2 of 4": {"_files": ["mock_book_multi_disc2 - ch_3.mp3", "mock_book_multi_disc2 - ch_4.mp3"], "_dirs": {}}, "Disc 3 of 4": {"_files": ["mock_book_multi_disc3 - ch_5.mp3", "mock_book_multi_disc3 - ch_6.mp3"], "_dirs": {}}, "Disc 4 of 4": {"_files": ["mock_book_multi_disc4 - ch_7.mp3", "mock_book_multi_disc4 - ch_8.mp3"], "_dirs": {}}}}, "mock_book_multi_disc_dir_with_extras": {"_files": [], "_dirs": {"Disc 1 of 4": {"_files": ["mock_book_multi_disc_dir_with_extras - part_1.mp3", "mock_book_multi_disc_dir_with_extras - part_2.mp3"], "_dirs": {}}, "Disc 2 of 4": {"_files": ["mock_book_multi_disc_dir_with_extras - part_3.mp3", "mock_book_multi_disc_dir_with_extras - part_4.mp3"], "_dirs": {}}, "Disc 3 of 4": {"_files": ["mock_book_multi_disc_dir_with_extras - part_5.mp3", "mock_book_multi_disc_dir_with_extras - part_6.mp3"], "_dirs": {}}, "Disc 4 of 4": {"_files": ["mock_book_multi_disc_dir_with_extras - part_7.mp3", "mock_book_multi_disc_dir_with_extras - part_8.mp3"], "_dirs": {}}}}, "mock_book_multi_nested": {"_files": [], "_dirs": {"nested_1": {"_files": ["mock_book_multi_nested - 01.mp3", "mock_book_multi_nested - 02.mp3"], "_dirs": {}}, "nested_2": {"_files": ["mock_book_multi_nested - 01.mp3", "mock_book_multi_nested - 02.mp3"], "_dirs": {}}}}, "mock_book_multi_part": {"_files": [], "_dirs": {"Part 01 - I": {"_files": ["mock_book_multi_part - pt.01 - I - ch_1.mp3", "mock_book_multi_part - pt.01 - I - ch_2.mp3"], "_dirs": {}}, "Part 02 - II": {"_files": ["mock_book_multi_part - pt.02 - II - ch_1.mp3", "mock_book_multi_part - pt.02 - II - ch_2.mp3"], "_dirs": {}}, "Part 03 - III": {"_files": ["mock_book_multi_part - pt.03 - III - ch_1.mp3", "mock_book_multi_part - pt.03 - III - ch_2.mp3"], "_dirs": {}}, "Part 04 - IV": {"_files": ["mock_book_multi_part - pt.04 - IV - ch_1.mp3", "mock_book_multi_part - pt.04 - IV - ch_2.mp3"], "_dirs": {}}}}, "mock_book_single_m4b": {"_files": ["mock_book_single_m4b.m4b"], "_dirs": {}}, "mock_book_single_mp3": {"_files": ["mock_book_single_mp3.mp3"], "_dirs": {}}, "mock_book_single_nested_mp3": {"_files": [], "_dirs": {"nested_single_mp3": {"_files": ["mock_book_single_mp3.mp3"], "_dirs": {}}}}}},   
     "None, 0": 
-        {"_files": ["mock_book_standalone_file.m4b", "mock_book_standalone_file_a.mp3", "mock_book_standalone_file_b.mp3"], "_dirs": {}},
+        {"_files": [f.name for f in MOCKED.standalone_files_d1], "_dirs": {}},
     "0, 1": 
-        {"_files": ["mock_book_standalone_file.m4b", "mock_book_standalone_file_a.mp3", "mock_book_standalone_file_b.mp3"], "_dirs": {
+        {"_files": [f.name for f in MOCKED.standalone_files_d1], "_dirs": {
             **mock_books_flat_full,
             **mock_book_container_0_1,
             **mock_book_mixed_0_1, "mock_book_single_m4b": {"_files": ["mock_book_single_m4b.m4b"], "_dirs": {}}, "mock_book_single_mp3": {"_files": ["mock_book_single_mp3.mp3"], "_dirs": {}}}},
