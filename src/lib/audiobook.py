@@ -48,7 +48,7 @@ class Audiobook(BaseModel):
     fs_narrator: str = ""
     dir_extra_junk: str = ""
     file_extra_junk: str = ""
-    orig_file_type: AudiobookFmt = ""  # type: ignore
+    # orig_file_type: AudiobookFmt = ""  # type: ignore
     orig_file_name: str = ""
     title: str = ""
     artist: str = ""
@@ -103,8 +103,8 @@ class Audiobook(BaseModel):
         return f"{self.key}"
 
     @property
-    def orig_file_type(self):
-        if f := not self.tree.is_root and self.tree.first_audio_file():
+    def orig_file_type(self) -> AudiobookFmt | None:
+        if f := self.tree.first_audio_file() if not self.tree.is_root else None:
             return to_audiobook_fmt(f.path.suffix)
 
     def extract_path_info(self, quiet: bool = False):

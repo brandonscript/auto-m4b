@@ -18,6 +18,7 @@ def enable_or_disable_multi(request: pytest.FixtureRequest):
         testutils.disable_multidisc()
 
 
+@pytest.mark.skip(reason="No beta features to test at the moment")
 @pytest.mark.parametrize(
     "enable_or_disable_multi, features, nots",
     [

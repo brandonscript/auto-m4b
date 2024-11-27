@@ -12,7 +12,7 @@ from src.lib.formatters import friendly_short_date
 from src.lib.fs_utils import find_root_from_path, try_relative_to
 from src.lib.hasher import Hasher
 from src.lib.inbox_item import get_item, get_key, InboxItem, InboxItemStatus
-from src.lib.misc import singleton
+from src.lib.misc import any_in, singleton
 from src.lib.strings import en
 from src.lib.term import print_debug, print_notice
 
@@ -97,7 +97,7 @@ class InboxState(Hasher):
 
         if not self._items:
             return None
-        # key = get_key(key_path_hash_or_book)
+        hsh = str(key_path_hash_or_book)
         path = (
             Path(key_path_hash_or_book)
             if isinstance(key_path_hash_or_book, (str, Path))
@@ -105,28 +105,16 @@ class InboxState(Hasher):
         )
         root = find_root_from_path(path)
         rel_from_root = None if not root or not (rel := try_relative_to(path, root)) else rel
-        key: Path = rel_from_root or path
+        key: Path = (rel_from_root.path if isinstance(rel_from_root, BooksTree) else rel_from_root) or path
         while len(key.parts) >= 1:
             simple = self._items.get(str(key), None)
             if simple:
                 return simple
             key = key.parent
-        # if isinstance(key_path_hash_or_book, BooksTree):
-        #     path = key_path_hash_or_book.path
-        # elif isinstance(key_path_hash_or_book, Audiobook):
-        #     path = key_path_hash_or_book.path
-        # else:
-        #     path = Path(key_path_hash_or_book)
-        if path.is_absolute():
-            return next(
-                (item for item in self._items.values() if item.path == path),
-                None,
-            )
-        else:
-            return next(
-                (item for item in self._items.values() if key in [item.key, item.hash, item.path]),
-                None,
-            )
+        return next(
+            (item for item in self._items.values() if any_in([key, path, hsh], [item.key, item.hash, item.path])),
+            None,
+        )
 
     def rm(self, key_path_book_or_hash: str | Path | Audiobook):
         key = get_key(key_path_book_or_hash)

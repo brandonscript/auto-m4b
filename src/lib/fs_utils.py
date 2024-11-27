@@ -99,7 +99,7 @@ def find_files_in_dir(  # type: ignore
     """
 
     if d.is_file():
-        raise NotADirectoryError(f"Error: {d} is not a directory")
+        raise NotADirectoryError(f"'find_files_in_dir': {d} is a file, not a directory")
 
     def depth(p: Path) -> int:
         return len(p.parts) - len(d.parts)
@@ -918,6 +918,8 @@ def find_first_audio_file(path: Path, *, ext: AudiobookFmt | None = None, ignore
 def find_next_audio_file(
     path: Path, *, first: Path | None, ext: AudiobookFmt | None = None, ignore_errors: bool = False
 ) -> Path | None:
+    if path.is_file():
+        return None
     err = f"No more audio files found in '{path}'"
     if fmt := strip_dot(ext) if ext else None:
         err += f" with extension '{fmt}'"

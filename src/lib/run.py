@@ -5,8 +5,6 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-import cachetools
-import cachetools.func
 from tinta import Tinta
 
 from src.lib.audiobook import Audiobook
@@ -49,7 +47,6 @@ from src.lib.term import (
     tint_warning,
     wrap_brackets,
 )
-from src.lib.typing import SCAN_TTL
 
 # glasses 1: ⌐◒-◒
 # glasses 2: ᒡ◯ᴖ◯ᒢ
@@ -200,7 +197,7 @@ def print_footer(b: int):
         print_dark_grey(CATS_ASCII)
 
 
-@cachetools.func.ttl_cache(maxsize=1, ttl=SCAN_TTL)
+# @cachetools.func.ttl_cache(maxsize=1, ttl=SCAN_TTL)
 def audio_files_found():
     return InboxState().num_audio_files_deep > 0
 

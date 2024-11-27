@@ -710,7 +710,7 @@ class BooksTree(BaseModel):
         int: The number of audio files found.
         """
 
-        return len(self.__class__(self.path, root=self.root, mindepth=mindepth, maxdepth=maxdepth).files_recursive)
+        return len(self.__class__(self.path, root=self.root, mindepth=mindepth, maxdepth=maxdepth)._files_recursive)
 
     # def set_match_filter(self, paths: list[Path] | str | None):
     #     from src.lib.fs_utils import try_relative_to
