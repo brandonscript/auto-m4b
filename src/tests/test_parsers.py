@@ -391,19 +391,28 @@ def test_contains_partno_or_ch(s1, s2, expected):
 @pytest.mark.parametrize(
     "input, expected",
     [
-        ("Alexandre Dumas", ("Alexandre Dumas",)),
-        ("Matthew Nicol", ("Matthew Nicol",)),
-        ("Andrea Camilleri", ("Andrea Camilleri",)),
-        ("John S. Marr", ("John S. Marr",)),
-        ("Read by Leonard Porter", ("Leonard Porter",)),
-        ("Read by J. Scott", ("J. Scott",)),
-        ("Franklin W Dixon", ("Franklin W Dixon",)),
-        ("Franklin W. Dixon", ("Franklin W. Dixon",)),
-        ("Alexandre Dumas The Count of Monte Cristo", ("Alexandre Dumas", "Monte Cristo")),
+        # fmt: off
+        ("Alexandre Dumas", [("Alexandre Dumas", 1.0)]),
+        ("Matthew Nicol", [("Matthew Nicol", 1.0)]),
+        ("Andrea Camilleri", [("Andrea Camilleri", 1.0)]),
+        ("Camilleri, Andrea", [("Andrea Camilleri", 1.0)]),
+        ("John S. Marr", [("John S. Marr", 1.0)]),
+        ("Marr, John S.", [("John S. Marr", 1.0)]),
+        ("Read by Leonard Porter", [("Leonard Porter", 1.0)]),
+        ("Read by J. Scott", [("J. Scott", 1.0)]),
+        ("Franklin W Dixon", [("Franklin W Dixon", 1.0)]),
+        ("Franklin W. Dixon", [("Franklin W. Dixon", 1.0)]),
+        ("Colette Cœtre-Conté", [("Colette Cœtre-Conté", 1.0)]),
+        ("Alexandre Dumas The Count of Monte Cristo", [("Alexandre Dumas", 1.0), ("Monte Cristo", 0.5)]),
+        ("0100 _ Books on Tape _ The Count of Monte Cristo _ Alexandre Dumas", [("Alexandre Dumas", 1.0), ("Monte Cristo", 0.5)]),
+        ("The Lord of the Rings - J.R.R. Tolkien", [("J.R.R. Tolkien", 1.0)]),
+        ("Old Man's War Series/Old Man's War - John Scalzi", [("John Scalzi", 1.0), ("Old Man", 0.0)]),
+        ("Aleron Kong - The Land Alliances (Chaos Seeds #3)", [("Aleron Kong", 1.0), ("Chaos Seeds", 0.0)]),
+        # fmt: on
     ],
 )
 def test_get_nltk_names(input, expected):
 
     from src.lib.parsers import get_nltk_names
 
-    assert get_nltk_names(input) == [("PERSON", x) for x in expected]
+    assert get_nltk_names(input) == expected

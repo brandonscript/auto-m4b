@@ -26,7 +26,6 @@ from src.lib.parsers import (
     common_str_pattern,
     contains_partno_or_ch,
     find_greatest_common_string,
-    get_nltk_names,
     get_title_partno_score,
     get_year_from_date,
     has_graphic_audio,
@@ -1397,8 +1396,6 @@ class MetadataScore:
         self.narrator.composer_is_narrator = composer_is_narrator
 
         self._narrator = parse_narrator(self.narrator._value or fallback, "generic")
-        # use nltk to determine if the narrator is a person
-        names = get_nltk_names(self._narrator)
         return self._narrator
 
     def determine_albumartist(self, *, force: bool = False):

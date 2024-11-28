@@ -7,9 +7,15 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TYPE_CHECKING, TypeVar
 
+import nltk
 import spacy
+from nltk import pos_tag, word_tokenize
+from nltk.corpus import words
 from spacy.matcher import Matcher
 from spacy.ml import Doc
+
+nltk.download("words")
+english_words = set(words.words())
 
 nlp = spacy.load("en_core_web_sm")
 matcher = Matcher(nlp.vocab)
@@ -19,11 +25,16 @@ matcher.add("PRODUCT", [[{"IS_ALPHA": True}]])
 matcher.add("EVENT", [[{"IS_ALPHA": True}]])
 matcher.add("ORG", [[{"IS_ALPHA": True}]])
 
+import inflect as _inflect
+
+inflect = _inflect.engine()
+
 import cachetools
 import cachetools.func
 import regex as rex
 
 from src.lib.misc import (
+    any_in,
     get_numbers_in_string,
     isorted,
     re_group,
@@ -73,6 +84,9 @@ startswith_num_pattern = re.compile(r"(?P<num>^\d+)")
 multi_disc_pattern = re.compile(r"(?:^|(?<=[\W_-]))(dis[ck]|cd)(\b|\s|[_.-])*#?(\b|\s|[_.-])*(?:\b|[\W_-])*(?P<num>\d+)", re.I)
 book_series_pattern = re.compile(r"(^\d+|(?:^|(?<=[\W_-]))(bo{0,2}k|vol(?:ume)?|#)(?:\b|[\W_-])*(?P<num>\d+)|(?<=[\W_-])Series.*/.+)", re.I)
 multi_part_pattern = re.compile(r"(?:^|(?<=[\W_-]))(pa?r?t|ch(?:\.|apter))(?:\b|[\W_-])*(\d+)", re.I)
+
+only_non_alphanum_pattern = rex.compile(r"^[^\p{L}]+$")
+abbreviated_names_pattern = re.compile(r"^(?:[A-Z]\.?){1,3}$")
 # fmt: on
 
 S = TypeVar("S", bound=str | Path)
@@ -205,10 +219,10 @@ def startswith_partno(s: str, s2: str | None = None) -> bool:
     return bool(get_start_num(s) >= 0)
 
 
-def nlp_get_names(s: str) -> list[str]:
-    s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
-    doc: Doc = nlp(s)
-    return [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
+# def nlp_get_names(s: str) -> list[str]:
+#     s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
+#     doc: Doc = nlp(s)
+#     return [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
 
 
 def nlp_get_titles(s: str) -> list[str]:
@@ -218,19 +232,11 @@ def nlp_get_titles(s: str) -> list[str]:
 
 
 def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
-    # FIXME: This is completely broken and doesn't work at all, more false positives than negatives.
-    # Replace single occurrences of . with spaces
     from src.lib.cleaners import strip_part_number
-
-    if (
-        parse_author(book.basename, "fs", fallback="") == "Matthew"
-        or parse_author(book.basename, "fs", fallback="") == "Alexandre"
-    ):
-        ...
 
     dir_title = re_group(book_title_pattern.search(book.basename), "book_title")
     dir_author = parse_author(book.basename, "fs", fallback="")
-    dir_nlp_names = nlp_get_names(book.basename)
+    # dir_nlp_names = nlp_get_names(book.basename)
     dir_nlp_titles = nlp_get_titles(book.basename)
     dir_year = re_group(year_pattern.search(book.basename), "year")
     dir_narrator = parse_narrator(book.basename, "fs", fallback="")
@@ -241,8 +247,6 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     orig_file_name = find_greatest_common_string(files)
 
     orig_file_name = strip_part_number(orig_file_name)
-    # TODO: dupe? Probably remove
-    # orig_file_name = re.sub(r"(part|chapter|ch\.)\s*$", "", orig_file_name, flags=re.I)
     orig_file_name = orig_file_name.rstrip().rstrip(string.punctuation)
 
     # strip underscores
@@ -254,28 +258,39 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     file_title = re_group(book_title_pattern.search(orig_file_name), "book_title")
     file_author = parse_author(orig_file_name, "fs", fallback="")
     file_nlp_titles = nlp_get_titles(orig_file_name)
-    file_nlp_names = nlp_get_names(orig_file_name)
+    # file_nlp_names = nlp_get_names(orig_file_name)
     file_year = parse_year(orig_file_name)
 
+    author_candidates: list[tuple[str, float]] = []
+    if dir_author and (n := get_nltk_names(dir_author)):
+        author_candidates.extend(n)
+    if file_author and (n := get_nltk_names(file_author)):
+        author_candidates.extend(n)
+    author_candidates = sorted(author_candidates, key=lambda x: x[1], reverse=True)
+    best_author = next(iter(author_candidates), ("", 0))[0]
+
+    narrator_candidates: list[tuple[str, float]] = n if dir_narrator and (n := get_nltk_names(dir_narrator)) else []
+    narrator_candidates = sorted(narrator_candidates, key=lambda x: x[1], reverse=True)
+    best_narrator = next(iter(narrator_candidates), ("", 0))[0]
+
+    longest_title = max([dir_title, file_title, *dir_nlp_titles, *file_nlp_titles], key=len)
+    longest_year = max([dir_year, file_year], key=len)
+
     meta = {
-        "author": dir_author,
-        "narrator": dir_narrator,
+        "author": best_author,
+        "narrator": best_narrator,
         "year": dir_year,
         "title": dir_title,
     }
 
-    longest_author = max([dir_author, file_author, *dir_nlp_names, *file_nlp_names], key=len)
-    longest_title = max([dir_title, file_title, *dir_nlp_titles, *file_nlp_titles], key=len)
-    longest_year = max([dir_year, file_year], key=len)
-
-    if longest_author in longest_title:
-        longest_author = ""
+    if best_author in longest_title:
+        best_author = ""
     if meta["narrator"] in longest_title:
         meta["narrator"] = ""
 
     for k, v in zip(
         ["author", "title", "year"],
-        [longest_author, longest_title, longest_year],
+        [best_author, longest_title, longest_year],
     ):
         if v:
             print_debug(f"parsed {k} from fs: '{v}'")
@@ -409,45 +424,127 @@ def get_name_from_str(s: str, max_words=6) -> str:
     return s.strip()
 
 
-def get_nltk_names(s: str) -> list[tuple[str, str]]:
+def is_generic_word(word):
+    # Load English words from nltk corpus
+    return word.lower() in english_words
+
+
+def get_singular(word):
+    return word if not inflect.singular_noun(word) else inflect.singular_noun(word)
+
+
+# Basic name scoring fallback
+def heuristic_score(name: str) -> float:
+    tokens = word_tokenize(name)
+
+    if not tokens:
+        return 0.0
+
+    tags = pos_tag(tokens)
+
+    # Score based on heuristics
+    score = 0
+
+    # Create an increment based on the number of words
+    incr = max(0.1, 1.0 / len(tokens))
+
+    score += sum(incr for _, tag in tags if tag == "NNP")  # Reward proper nouns
+    # score += sum(1 for token in tokens if token.lower() in COMMON_NAMES)  # Reward known names
+    score -= sum(incr for token in tokens if is_generic_word(get_singular(token)))  # Penalize generic words
+    score -= abs(len(tokens) - 2) * incr  # Penalize names that aren't 2-3 tokens long
+    return min(9.0, max(0.0, score))  # Ensure score is non-negative, capped at 9.0
+
+
+def score_name_candidates(candidates: list[tuple[str, str]]) -> dict[str, float]:
+    scores = {}
+    for _label, name in candidates:
+        doc = nlp(name)
+
+        # Check if spaCy detects it as a PERSON entity
+        entity_score = 0
+        for ent in doc.ents:
+            if ent.label_ == "PERSON" and ent.text == name:
+                entity_score = 1.0  # High confidence if spaCy recognizes it
+
+        # Fall back on heuristics if no entity detected
+        if entity_score == 0:
+            entity_score = heuristic_score(name)
+
+        scores[name] = entity_score
+    return dict(sorted(scores.items(), key=lambda item: item[1], reverse=True))
+
+
+def get_nltk_names(s: str) -> list[tuple[str, float]]:
     from nltk import ne_chunk, pos_tag, word_tokenize
     from nltk.tree import Tree
 
     # Tokenize and process with NLTK
     tokens = word_tokenize(s)
     nltk_results = ne_chunk(pos_tag(tokens))
-    names = []
+    names = [("PERSON", x[0]) for x in get_nltk_names(swap_firstname_lastname(s).replace(",", " "))] if "," in s else []
     current_name = []
     num_person_chunks = len([r for r in nltk_results if isinstance(r, Tree) and r.label() == "PERSON"])
     last_was_person = False
 
+    def _end_name():
+        nonlocal current_name, names, last_was_person
+        if current_name:
+            names.append(("PERSON", " ".join(current_name)))
+            current_name = []
+        last_was_person = False
+
+    skip = False
     for i, nltk_result in enumerate(nltk_results):
+        if skip:
+            skip = False
+            continue
         label = nltk_result.label() if isinstance(nltk_result, Tree) else None
-        if isinstance(nltk_result, Tree) and label in ["PERSON", "ORGANIZATION", "NOUN"]:
+        has_prev = i > 0
+        has_next = has_prev and i < len(nltk_results) - 1
+        prev_tree = p if has_prev and (p := nltk_results[i - 1]) and isinstance(p, Tree) else None
+        nltk_tree = cast(Tree, nltk_result) if isinstance(nltk_result, Tree) else None
+        next_tree = n if has_next and (n := nltk_results[i + 1]) and isinstance(n, Tree) else None
+        (match, catg) = cast(tuple[str, str], nltk_result) if isinstance(nltk_result, tuple) else (None, None)
+        (next_match, _) = (
+            cast(tuple[str, str], n)
+            if has_next and (n := nltk_results[i + 1]) and isinstance(n, tuple)
+            else (None, None)
+        )
+        catg = (
+            catg
+            if catg
+            else ("NNP" if nltk_tree and any_in([leaf[1] for leaf in nltk_tree.leaves()], ["NNP", "NN"]) else None)
+        )
+        last_was_person_tree = bool(prev_tree and prev_tree.label() == "PERSON")
+        next_is_person_tree = bool(next_tree and next_tree.label() == "PERSON")
+        curr_label_is_maybe_person = bool(
+            label and label in ["PERSON", "ORGANIZATION", "NOUN"] or (label != "PERSON" and last_was_person_tree)
+        )
+        curr_is_abbr_letters = bool(match and abbreviated_names_pattern.match(match))
+        if _match_is_only_nonalpha := bool(match and only_non_alphanum_pattern.match(match)):
+            _end_name()
+            continue
+
+        curr_is_noun = bool(catg and catg in ["NNP", "NN"] and match)
+        if nltk_tree and curr_label_is_maybe_person:
             # Collect tokens that are part of a PERSON entity
             if label == "PERSON" or (label != "PERSON" and last_was_person):
-                current_name.append(" ".join(leaf[0] for leaf in nltk_result.leaves()))
+                current_name.append(" ".join(leaf[0] for leaf in nltk_tree.leaves()))
             last_was_person: bool = label == "PERSON"
-        elif last_was_person and isinstance(nltk_result, tuple) and nltk_result[1] in ["NNP", "NN"]:
-            # Append the last collected name if we hit a non-PERSON chunk
-            current_name.append(nltk_result[0])
         elif (
-            # fmt: off
-            i > 0 and i < len(nltk_results) - 1 and
-            isinstance(nltk_results[i - 1], Tree) and nltk_results[i - 1].label() == "PERSON" and
-            isinstance(nltk_results[i + 1], Tree) and nltk_results[i + 1].label() == "PERSON" and
-            nltk_result[1] in ["NNP", "NN"] and (s := str(nltk_result[0])) and (s.endswith(".") or (len(s) == 1 and re.match(r'[A-Z]', s)))
-            # fmt: on
+            (last_was_person_tree and next_is_person_tree) or (last_was_person and curr_is_noun) or curr_is_abbr_letters
         ):
-            # Treat abbreviations as part of the current name
-            current_name.append(nltk_result[0])
+            # Abbreviations are part of the current name, or
+            # if prev and next are both PERSON, or
+            # if the current token is a noun and the last token was a PERSON
+            if curr_is_abbr_letters and next_match == ".":
+                match = f"{match}."
+                skip = True
+            current_name.append(match)
             last_was_person: bool = True
         else:
             # Append completed name if we hit a non-PERSON chunk
-            if current_name:
-                names.append(("PERSON", " ".join(current_name)))
-                current_name = []
-            last_was_person = False
+            _end_name()
 
     # Append the last collected name (if any)
     if num_person_chunks > 0 and current_name:
@@ -455,9 +552,19 @@ def get_nltk_names(s: str) -> list[tuple[str, str]]:
 
     # Handle short string edge case
     if len(tokens) <= 3 and not names:  # Assume short strings might be a name
-        return [("PERSON", " ".join(tokens))]
+        names = [("PERSON", " ".join(tokens))]
 
-    return names
+    # If we have multiple PERSON entities, score them and return the highest-scoring one
+    results = [(k, v) for k, v in score_name_candidates(names).items()]
+    if len(names) > 1:
+
+        # Remove any results from the names list that are a subset of another result
+        # e.g., if we get ("Andrea Smith", "Andrea") and ("Andrea Smith", "Smith"), we only want to keep the former
+        return list(
+            filter(lambda x: not any(x[0] in n[0] for n in results if x != n), results),
+        )
+
+    return results
 
 
 def percent_human_name_chars_in_str(s: str) -> float:
@@ -506,45 +613,42 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
     author = re_group(author_pattern.search(author), "author", default=fallback).strip()
     narrator = re_group(narrator_pattern.search(narrator), "narrator", default=fallback).strip()
 
-    author_ok = percent_human_name_chars_in_str(author) > 0.7
-    narrator_ok = percent_human_name_chars_in_str(narrator) > 0.7
+    # author_ok = percent_human_name_chars_in_str(author) > 0.7
+    # narrator_ok = percent_human_name_chars_in_str(narrator) > 0.7
 
-    author = " ".join(to_words(strip_symbols_and_nums(author), sep=r"\s+")[:6])
-    narrator = " ".join(to_words(strip_symbols_and_nums(narrator), sep=r"\s+")[:6])
+    # author = " ".join(to_words(strip_symbols_and_nums(author), sep=r"\s+")[:6])
+    # narrator = " ".join(to_words(strip_symbols_and_nums(narrator), sep=r"\s+")[:6])
 
-    if not any([author, narrator]):
-        return AuthorNarrator(fallback, fallback)
+    # if not any([author, narrator]):
+    #     return AuthorNarrator(fallback, fallback)
 
     if author != narrator:
         _author = author
         _narrator = narrator
-        if author_ok and author and (author in narrator):
+        if author and (author in narrator):
             _narrator = re.sub(author, "", narrator)
-        if narrator_ok and narrator and (narrator in author):
+        if narrator and (narrator in author):
             _author = re.sub(narrator, "", author)
         author = _author
         narrator = _narrator
 
-    # use nltk to look for names
-    if author_nltk := get_nltk_names(author):
-        author = max(author_nltk, key=lambda x: len(x[1]))[1]
-        author_ok = True
-    else:
-        author_ok = False
-    if narrator_nltk := get_nltk_names(narrator):
-        narrator = max(narrator_nltk, key=lambda x: len(x[1]))[1]
-        narrator_ok = True
-    else:
-        narrator_ok = False
+    nltk_s = next((n for (n, score) in get_nltk_names(s) if score > 0), None)
+    nltk_author = None if not author else next((n for (n, score) in get_nltk_names(author) if score > 0.7), None)
+    nltk_narrator = None if not narrator else next((n for (n, score) in get_nltk_names(narrator) if score > 0.7), None)
 
-    author = get_name_from_str(author) if author_ok else fallback
-    narrator = get_name_from_str(narrator) if narrator_ok else fallback
+    if nltk_s and (not fallback or len(nltk_s) > len(fallback)):
+        fallback = nltk_s
 
-    return AuthorNarrator(
-        author=swap_firstname_lastname(author),
-        # narrator=swap_firstname_lastname(narrator),
-        narrator=narrator,
-    )
+    author = nltk_author if nltk_author else (get_name_from_str(author) or fallback)
+    narrator = nltk_narrator if nltk_narrator else (get_name_from_str(narrator) or fallback)
+
+    if all((is_generic_word(a) for a in to_words(author))):
+        author = fallback
+
+    if all((is_generic_word(n) for n in to_words(narrator))):
+        narrator = fallback
+
+    return AuthorNarrator(author=author, narrator=narrator)
 
 
 def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = None) -> str:
