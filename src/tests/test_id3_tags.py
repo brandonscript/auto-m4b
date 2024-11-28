@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 
 import pytest
@@ -6,6 +7,7 @@ from mutagen.mp3 import HeaderNotFoundError
 
 from src.lib.audiobook import Audiobook
 from src.lib.id3_utils import extract_id3_tags, map_kid3_keys, write_id3_tags_mutagen
+from src.lib.inbox_state import InboxState
 from src.lib.misc import increment
 from src.lib.parsers import (
     has_graphic_audio,
@@ -333,6 +335,14 @@ def test_parse_id3_date(
                 "narrator": "Richard Matthews",
             },
         ),
+        (
+            "house_on_the_cliff__flat_mp3",
+            {
+                "title": "The House on the Cliff, Version 3",
+                "author": "Franklin W. Dixon",
+                "narrator": "",
+            },
+        ),
     ],
     indirect=["indirect_fixture"],
 )
@@ -350,6 +360,60 @@ def test_parse_tags_from_fixtures(
         assert (
             getattr(book, key) == expected_dict[key]
         ), f"Expected {key} '{expected_dict[key]}', got '{getattr(book, key)}'"
+
+
+@pytest.mark.parametrize(
+    "indirect_fixture, expected_dict",
+    [
+        (
+            "touch_of_frost__flat_mp3",
+            {"title": "TouchofFrost", "author": "", "narrator": ""},
+        ),
+        (
+            "count_of_monte_cristo__flat_mp3",
+            {
+                "title": "The Count of Monte Cristo",
+                "author": "Alexandre Dumas",
+                "narrator": "Richard Matthews",
+            },
+        ),
+        (
+            "house_on_the_cliff__flat_mp3",
+            {
+                "title": "The House on the Cliff, Version 3",
+                "author": "Franklin W. Dixon",
+                "narrator": "",
+            },
+        ),
+    ],
+    indirect=["indirect_fixture"],
+)
+def test_verify_tags_after_convert(
+    indirect_fixture: Audiobook,
+    expected_dict: dict[str, str],
+):
+
+    from src.auto_m4b import app
+
+    book = indirect_fixture
+    _orig_match_filter = InboxState().match_filter
+    testutils.set_match_filter(re.escape(book.path.stem))
+
+    app(max_loops=1)
+
+    book.extract_metadata()
+    tags1 = extract_id3_tags(book.sample_audio1)
+    tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
+    converted = Audiobook(book.converted_file).extract_metadata()
+    converted_tags = extract_id3_tags(book.converted_file)
+
+    # Ensure converted file has the same tags as the expected
+    for key in expected_dict.keys():
+        assert (
+            getattr(converted, key) == expected_dict[key]
+        ), f"Expected {key} '{expected_dict[key]}', got '{getattr(converted, key)}'"
+
+    testutils.set_match_filter(_orig_match_filter)
 
 
 @pytest.mark.parametrize(

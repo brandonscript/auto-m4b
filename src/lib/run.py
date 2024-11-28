@@ -406,8 +406,9 @@ def books_to_process() -> tuple[int, Callable[[], None]]:
     if inbox.match_filter and inbox.matched_ok_books:
         ignoring = f"ignoring {inbox.num_filtered}" if inbox.num_filtered else ""
         note = wrap_brackets(ignoring, skipping, sep=", ")
+        unescaped_match_filter = re.sub(r"\\ ", " ", str(inbox.match_filter))
         return inbox.num_matched_ok, lambda: smart_print(
-            f"Found {pluralize_with_count(inbox.num_matched, 'book')} in the inbox matching [[{inbox.match_filter}]]{note}\n",
+            f"Found {pluralize_with_count(inbox.num_matched, 'book')} in the inbox matching [[{unescaped_match_filter}]]{note}\n",
             highlight_color=AMBER_COLOR,
         )
     elif inbox.failed_books:

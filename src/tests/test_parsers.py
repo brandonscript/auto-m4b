@@ -386,3 +386,24 @@ def test_contains_partno_or_ch(s1, s2, expected):
     from src.lib.parsers import contains_partno_or_ch
 
     assert contains_partno_or_ch(s1, s2) == expected
+
+
+@pytest.mark.parametrize(
+    "input, expected",
+    [
+        ("Alexandre Dumas", ("Alexandre Dumas",)),
+        ("Matthew Nicol", ("Matthew Nicol",)),
+        ("Andrea Camilleri", ("Andrea Camilleri",)),
+        ("John S. Marr", ("John S. Marr",)),
+        ("Read by Leonard Porter", ("Leonard Porter",)),
+        ("Read by J. Scott", ("J. Scott",)),
+        ("Franklin W Dixon", ("Franklin W Dixon",)),
+        ("Franklin W. Dixon", ("Franklin W. Dixon",)),
+        ("Alexandre Dumas The Count of Monte Cristo", ("Alexandre Dumas", "Monte Cristo")),
+    ],
+)
+def test_get_nltk_names(input, expected):
+
+    from src.lib.parsers import get_nltk_names
+
+    assert get_nltk_names(input) == [("PERSON", x) for x in expected]

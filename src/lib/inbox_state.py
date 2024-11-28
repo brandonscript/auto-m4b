@@ -336,7 +336,7 @@ class InboxState(Hasher):
 
     @property
     def matched_ok_books(self):
-        return {k: v for k, v in self.ok_books.items() if k in self.matched_books}
+        return {k: v for k, v in self.matched_books.items() if v.status in ["ok", "new", "needs_retry"]}
 
     @property
     def num_matched_ok(self):

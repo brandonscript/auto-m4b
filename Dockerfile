@@ -267,7 +267,22 @@ RUN echo "---- INSTALL SPACY ----" && \
     fi
 
 # Download spaCy model
-RUN pipenv run python -m spacy download en_core_web_sm
+RUN echo "---- DOWNLOAD SPACY MODEL ----" && \
+    pipenv run python -m spacy download en_core_web_sm
+
+RUN echo "---- INSTALL NLTK ----" && \
+    pipenv run pip install nltk
+
+RUN echo "---- DOWNLOAD NLTK DATA ----" && \
+    pipenv run python -m nltk.downloader \
+    punkt \
+    punkt_tab \
+    averaged_perceptron_tagger \
+    averaged_perceptron_tagger_eng \
+    maxent_ne_chunker \
+    maxent_ne_chunker_tab \
+    words \
+    stopwords
 
 # RUN pipenv run pip install ffmpeg-python --force-reinstall
 

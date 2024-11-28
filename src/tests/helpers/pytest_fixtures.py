@@ -79,6 +79,16 @@ def rm_from_inbox(*names: str):
         testutils.print(f"Cleaning up {inbox}")
 
 
+def rm_from_converted(*names: str):
+    for name in names:
+        converted = TEST_DIRS.converted / name
+        if converted.is_dir():
+            shutil.rmtree(converted, ignore_errors=True)
+        elif converted.is_file():
+            converted.unlink(missing_ok=True)
+        testutils.print(f"Cleaning up {converted}")
+
+
 def load_test_fixture(
     name: str,
     *,
@@ -125,7 +135,7 @@ def load_test_fixture(
 
     converted = TEST_DIRS.converted / (override_name or name)
     converted_dir = converted.with_suffix("")
-    converted.unlink(missing_ok=True)
+    rm_from_converted(override_name or name)
     shutil.rmtree(converted_dir, ignore_errors=True)
 
     yield Audiobook(dst)
