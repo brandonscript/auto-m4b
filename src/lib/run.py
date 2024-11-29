@@ -427,35 +427,27 @@ def can_process_multi_dir(book: Audiobook):
         if book.tree.has_structure_like("series"):
             inbox.set_ok(book)
         elif book.tree.has_structure("multi_disc"):
-            if cfg.FLATTEN_MULTI_DISC_BOOKS:
-                smart_print(
-                    "\nThis folder appears to be a multi-disc book, attempting to flatten it...",
-                    end="",
+            smart_print(
+                "\nThis folder appears to be a multi-disc book, attempting to flatten it...",
+                end="",
+            )
+            if flattening_files_in_dir_affects_order(book.inbox_dir):
+                nl(2)
+                print_error("Flattening this book would affect the file order, cannot proceed")
+                smart_print(f"{help_msg}\n")
+                fail_book(
+                    book,
+                    "This book appears to be a multi-disc book, but flattening it would affect the file order - it will need to be fixed manually by renaming the files so they sort alphabetically in the correct order",
                 )
-                if flattening_files_in_dir_affects_order(book.inbox_dir):
-                    nl(2)
-                    print_error("Flattening this book would affect the file order, cannot proceed")
-                    smart_print(f"{help_msg}\n")
-                    fail_book(
-                        book,
-                        "This book appears to be a multi-disc book, but flattening it would affect the file order - it will need to be fixed manually by renaming the files so they sort alphabetically in the correct order",
-                    )
-                    return False
-                else:
-                    flatten_files_in_dir(book.inbox_dir)
-                    book.rescan()
-                    # book = Audiobook(book.inbox_dir)
-                    print_mint(" ✓\n")
-                    # files = "\n".join([str(f) for f in book.inbox_dir.glob("*")])
-                    # print_debug(f"New file structure:\n{files}")
-                    inbox.set_ok(book)
-            else:
-                print_error(f"{en.MULTI_ERR}, maybe this is a multi-disc book?")
-                smart_print(
-                    f"{help_msg}, or set FLATTEN_MULTI_DISC_BOOKS=Y to have auto-m4b flatten\nmulti-disc books automatically\n"
-                )
-                fail_book(book, f"{en.MULTI_ERR} (multi-disc book) - {help_msg}")
                 return False
+            else:
+                flatten_files_in_dir(book.inbox_dir)
+                book.rescan()
+                # book = Audiobook(book.inbox_dir)
+                print_mint(" ✓\n")
+                # files = "\n".join([str(f) for f in book.inbox_dir.glob("*")])
+                # print_debug(f"New file structure:\n{files}")
+                inbox.set_ok(book)
         elif book.tree.has_structure("multi_part"):
             print_error(f"{en.MULTI_ERR}, maybe this is a multi-part book or a series?")
             smart_print(f"{help_msg}\n")

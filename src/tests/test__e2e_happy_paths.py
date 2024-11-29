@@ -137,7 +137,6 @@ class test_happy_paths:
     def test_flatten_multidisc_mp3(
         self,
         old_mill__multidisc_mp3: Audiobook,
-        enable_multidisc,
         capfd: CaptureFixture[str],
     ):
 
@@ -238,7 +237,6 @@ class test_happy_paths:
         self,
         partial_flatten_backup_dirs: list[str],
         the_hobbit__multidisc_mp3: Audiobook,
-        enable_multidisc,
         enable_backups,
         capfd: CaptureFixture[str],
     ):

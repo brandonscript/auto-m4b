@@ -32,7 +32,6 @@ from src.lib.misc import (
     singleton,
     to_json,
 )
-from src.lib.strings import en
 from src.lib.term import nl, print_amber, print_banana, print_debug, print_error
 from src.lib.typing import OverwriteMode
 
@@ -298,10 +297,10 @@ class Config:
                         print_dark_grey(env_msg)
 
                     beta_features = [
-                        (
-                            en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
-                            self.FLATTEN_MULTI_DISC_BOOKS,
-                        ),
+                        # (
+                        #     en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
+                        #     self.FLATTEN_MULTI_DISC_BOOKS,
+                        # ),
                     ]
 
                     if test_debug_msg := (
@@ -428,11 +427,6 @@ class Config:
     def _BACKUP(self): ...
 
     BACKUP = _BACKUP
-
-    @env_property(typ=bool, default=False)
-    def _FLATTEN_MULTI_DISC_BOOKS(self): ...
-
-    FLATTEN_MULTI_DISC_BOOKS = _FLATTEN_MULTI_DISC_BOOKS
 
     @property
     def MAX_LOOPS(self):

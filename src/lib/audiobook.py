@@ -16,6 +16,7 @@ from src.lib.formatters import human_bitrate, to_audiobook_fmt
 from src.lib.fs_utils import (
     cp_file_into_dir,
     find_cover_art_file,
+    find_first_audio_file,
     get_size,
     hash_path_audio_files,
     last_updated_at,
@@ -23,6 +24,7 @@ from src.lib.fs_utils import (
 from src.lib.id3_utils import extract_cover_art, extract_metadata
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info
+from src.lib.term import print_warning
 from src.lib.typing import AudiobookFmt, BookStructure2, DirName, SizeFmt
 
 
@@ -45,7 +47,7 @@ class Audiobook(BaseModel):
     fs_narrator: str = ""
     dir_extra_junk: str = ""
     file_extra_junk: str = ""
-    # orig_file_type: AudiobookFmt = ""  # type: ignore
+    orig_file_type: AudiobookFmt = "mp3"
     orig_file_name: str = ""
     title: str = ""
     artist: str = ""
@@ -62,47 +64,53 @@ class Audiobook(BaseModel):
     m4b_num_parts: int = 1
     _active_dir: DirName | None = None
 
+    class Config:
+        arbitrary_types_allowed = True
+
     def __init__(self, path_or_tree: Path | BooksTree):
 
         path: Path = Path(path_or_tree) if isinstance(path_or_tree, (str, Path)) else path_or_tree.path
-        tree = path_or_tree if isinstance(path_or_tree, BooksTree) else None
-        if not tree:
+        if not (tree := (path_or_tree if isinstance(path_or_tree, BooksTree) else None)):
             from src.lib.inbox_state import InboxState
 
             inbox_state = InboxState()
             if from_state := inbox_state.get(path):
                 tree = from_state.tree
-            else:
+            elif inbox_state.ready:
                 # from src.lib.inbox_state import InboxStateError
                 if inbox_state.is_empty():
                     inbox_state.scan()
 
-                if not inbox_state.is_empty():
-                    x = inbox_state.get(path)
-                else:
-                    inbox_state.scan()
+                # if not inbox_state.is_empty():
+                #     x = inbox_state.get(path)
+                # else:
+                #     inbox_state.scan()
 
                 # raise InboxStateError(
                 #     f"Book not found in inbox state, cannot attach tree to Audiobook instance: {path}"
                 # )
-                tree = BooksTree(path_or_tree)
-
         super().__init__(path=path, tree=tree)
 
+        self.tree = tree or BooksTree(path_or_tree)
         self.path = path
-        self.tree = tree
+
         self._active_dir = get_dir_name_from_path(path)
+
+        if not (
+            orig_file_type := (
+                to_audiobook_fmt(f.suffix)
+                if not self.tree.is_root and (f := find_first_audio_file(path, ignore_errors=True))
+                else None
+            )
+        ):
+            print_warning(f"Could not determine file type for {path}, there are no audio files in the directory")
+        self.orig_file_type = orig_file_type or "mp3"
 
     def __str__(self):
         return f"{self.key}"
 
     def __repr__(self):
         return f"{self.key}"
-
-    @property
-    def orig_file_type(self) -> AudiobookFmt | None:
-        if f := self.tree.first_audio_file() if not self.tree.is_root else None:
-            return to_audiobook_fmt(f.path.suffix)
 
     def extract_path_info(self, quiet: bool = False):
         return extract_path_info(self, quiet)
@@ -342,13 +350,27 @@ class Audiobook(BaseModel):
         return find_cover_art_file(self.path)
 
     @property
+    def _converted_cover_art_file(self):
+        return find_cover_art_file(self.converted_dir)
+
+    @property
+    def _merge_cover_art_file(self):
+        return find_cover_art_file(self.merge_dir)
+
+    @property
     def cover_art_file(self):
-        if not self._inbox_cover_art_file:
-            return None
-        merge_cover = self.merge_dir / self._inbox_cover_art_file.relative_to(self.inbox_dir)
-        if not merge_cover.exists():
-            cp_file_into_dir(self._inbox_cover_art_file, self.merge_dir)
-        return merge_cover
+
+        if inbox_cover := self._inbox_cover_art_file:
+            if self.merge_dir.exists():
+                cp_file_into_dir(inbox_cover, self.merge_dir)
+        return next(
+            (
+                f
+                for f in iter((self._inbox_cover_art_file, self._converted_cover_art_file, self._merge_cover_art_file))
+                if f
+            ),
+            None,
+        )
 
     @property
     def id3_cover(self):

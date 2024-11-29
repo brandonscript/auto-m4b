@@ -55,8 +55,8 @@ def find_files_in_dir(
     d: Path,
     *,
     resolve: Literal[True] = True,
-    ignore_files: list[str] = [],
-    only_file_exts: list[str] = [],
+    ignore_files: list[str] | None = None,
+    only_file_exts: list[str] | None = None,
     mindepth: int | None = None,
     maxdepth: int | None = None,
 ) -> list[Path]: ...
@@ -67,8 +67,8 @@ def find_files_in_dir(
     d: Path,
     *,
     resolve: Literal[False] = False,
-    ignore_files: list[str] = [],
-    only_file_exts: list[str] = [],
+    ignore_files: list[str] | None = None,
+    only_file_exts: list[str] | None = None,
     mindepth: int | None = None,
     maxdepth: int | None = None,
 ) -> list[str | Path]: ...
@@ -78,8 +78,8 @@ def find_files_in_dir(  # type: ignore
     d: Path,
     *,
     resolve: bool | None = None,
-    ignore_files: list = [],
-    only_file_exts: list[str] = [],
+    ignore_files: list | None = None,
+    only_file_exts: list[str] | None = None,
     mindepth: int | None = None,
     maxdepth: int | None = None,
 ) -> list[str | Path]:
@@ -97,6 +97,9 @@ def find_files_in_dir(  # type: ignore
     Returns:
     list[str | Path]: A list of file names (str) or Path objects (if absolute=True)
     """
+
+    ignore_files = ignore_files or []
+    only_file_exts = only_file_exts or []
 
     if d.is_file():
         raise NotADirectoryError(f"'find_files_in_dir': {d} is a file, not a directory")
@@ -902,6 +905,11 @@ def find_first_audio_file(path: Path, *, ext: AudiobookFmt | None = None, ignore
     if path.is_file():
         return path
 
+    if not path.exists():
+        if not ignore_errors:
+            raise FileNotFoundError(f"Directory '{path}' does not exist")
+        return None
+
     files = find_files_in_dir(path, resolve=True, only_file_exts=[ext] if ext else AUDIO_EXTS)
 
     if not files:
@@ -920,6 +928,12 @@ def find_next_audio_file(
 ) -> Path | None:
     if path.is_file():
         return None
+
+    if not path.exists():
+        if not ignore_errors:
+            raise FileNotFoundError(f"Directory '{path}' does not exist")
+        return None
+
     err = f"No more audio files found in '{path}'"
     if fmt := strip_dot(ext) if ext else None:
         err += f" with extension '{fmt}'"

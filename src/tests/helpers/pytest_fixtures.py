@@ -661,20 +661,6 @@ def reset_all(reset_match_filter, reset_failed):
 
 
 @pytest.fixture(scope="function", autouse=False)
-def enable_multidisc():
-    testutils.enable_multidisc()
-    yield
-    testutils.disable_multidisc()
-
-
-@pytest.fixture(scope="function", autouse=False)
-def disable_multidisc():
-    testutils.disable_multidisc()
-    yield
-    testutils.enable_multidisc()
-
-
-@pytest.fixture(scope="function", autouse=False)
 def enable_backups():
     testutils.enable_backups()
     yield

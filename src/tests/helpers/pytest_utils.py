@@ -248,19 +248,6 @@ class testutils:
             time.sleep(wait_time)
 
     @classmethod
-    def enable_multidisc(cls, delay: int = 0):
-
-        time.sleep(delay)
-        cls.print("Enabling multidisc")
-        cfg.FLATTEN_MULTI_DISC_BOOKS = True
-
-    @classmethod
-    def disable_multidisc(cls, delay: int = 0):
-
-        time.sleep(delay)
-        cls.print("Disabling multidisc")
-
-    @classmethod
     def enable_backups(cls, delay: int = 0):
 
         time.sleep(delay)
