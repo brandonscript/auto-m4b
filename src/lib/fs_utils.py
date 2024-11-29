@@ -513,11 +513,14 @@ def mv_file_into_dir(
     check_src_dst(source_file, "file", dst_dir, "dir", overwrite_mode)
 
     dst_file = dst_dir / source_file.name if new_filename is None else dst_dir / new_filename
+    str_overwrite_mode = str(overwrite_mode)
 
     if dst_file.exists():
-        if overwrite_mode == "skip":
-            raise FileExistsError(f"Destination file '{dst_file}' already exists and overwrite mode is 'skip'")
-        elif overwrite_mode != "overwrite-silent":
+        if "skip" in str_overwrite_mode:
+            if not "silent" in str_overwrite_mode:
+                raise FileExistsError(f"Destination file '{dst_file}' already exists and overwrite mode is 'skip'")
+            return
+        elif not "silent" in str_overwrite_mode:
             print_warning(f"Warning: '{dst_file}' already exists and will be overwritten")
         dst_file.unlink(missing_ok=True)
 
@@ -535,11 +538,15 @@ def cp_file_into_dir(
     check_src_dst(source_file, "file", dst_dir, "dir", overwrite_mode)
 
     dst_file = dst_dir / new_filename if new_filename else dst_dir / source_file.name
+    str_overwrite_mode = str(overwrite_mode)
 
-    if dst_file.is_file() and overwrite_mode == "skip":
-        raise FileExistsError(f"Destination file {dst_file} already exists and overwrite mode is 'skip'")
-    if dst_file.is_file() and overwrite_mode != "overwrite-silent":
-        print_warning(f"Warning: {dst_file} already exists and will be overwritten")
+    if dst_file.is_file():
+        if "skip" in str_overwrite_mode:
+            if not "silent" in str_overwrite_mode:
+                raise FileExistsError(f"Destination file {dst_file} already exists and overwrite mode is 'skip'")
+            return
+        elif not "silent" in str_overwrite_mode:
+            print_warning(f"Warning: {dst_file} already exists and will be overwritten")
 
     # Copy the file
     shutil.copy2(source_file, dst_dir)

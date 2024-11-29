@@ -88,9 +88,11 @@ class Audiobook(BaseModel):
                 # raise InboxStateError(
                 #     f"Book not found in inbox state, cannot attach tree to Audiobook instance: {path}"
                 # )
+        tree = tree or BooksTree(path_or_tree)
+
         super().__init__(path=path, tree=tree)
 
-        self.tree = tree or BooksTree(path_or_tree)
+        self.tree = tree
         self.path = path
 
         self._active_dir = get_dir_name_from_path(path)
@@ -361,7 +363,7 @@ class Audiobook(BaseModel):
 
         if inbox_cover := self._inbox_cover_art_file:
             if self.merge_dir.exists():
-                cp_file_into_dir(inbox_cover, self.merge_dir)
+                cp_file_into_dir(inbox_cover, self.merge_dir, overwrite_mode="skip-silent")
         return next(
             (
                 f

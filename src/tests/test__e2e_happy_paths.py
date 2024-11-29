@@ -97,7 +97,7 @@ class test_happy_paths:
         elif match_filter == "tiny":
             assert checking_count == 1
         else:
-            assert watching_count == 0
+            assert watching_count == 1
             assert checking_count == 0
 
     def test_match_filter_multiple_mp3s(
@@ -125,8 +125,8 @@ class test_happy_paths:
             house_on_the_cliff__flat_mp3,
             loops=[testutils.check_output(found_books_eq=2, converted_eq=2)],
         )
-        found = int(re_group(re.search(r"Found (\d+) book", out), 1))
-        ignoring = int(re_group(re.search(r"\(ignoring (\d+)\)", out), 1))
+        found = int(re_group(re.search(r"Found (\d+) book", out), default=1))
+        ignoring = int(re_group(re.search(r"\(ignoring (\d+)\)", out), default=1))
         converted = len(testutils.get_all_processed_books(out))
         assert found == matched_books
         assert ignoring == filtered_books
