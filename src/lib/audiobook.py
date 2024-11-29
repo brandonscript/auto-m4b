@@ -2,7 +2,7 @@ from math import floor
 from pathlib import Path
 from typing import cast, Literal, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from src.lib.books_tree import BooksTree
 from src.lib.config import cfg
@@ -64,8 +64,7 @@ class Audiobook(BaseModel):
     m4b_num_parts: int = 1
     _active_dir: DirName | None = None
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(self, path_or_tree: Path | BooksTree):
 
