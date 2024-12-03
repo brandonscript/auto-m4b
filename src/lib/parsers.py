@@ -575,6 +575,7 @@ def percent_human_name_chars_in_str(s: str) -> float:
     return human_name_chars / len(s)
 
 
+@cachetools.func.ttl_cache(maxsize=128, ttl=MEMO_TTL)
 def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None) -> AuthorNarrator:
     if fallback is None:
         fallback = s

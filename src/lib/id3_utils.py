@@ -3,6 +3,7 @@ import functools
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
@@ -1454,6 +1455,7 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
             highlight_color=PATH_COLOR,
         )
 
+    t1 = time.time()
     li = print_list_item if not quiet else lambda *_: None
 
     # read id3 tags of audio file
@@ -1461,6 +1463,8 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     sample_audio2_tags = extract_id3_tags(
         book.sample_audio2 or book.sample_audio1  # if only one audio file, fall back to the same file
     )
+
+    t2 = time.time()
 
     for tag, value in sample_audio1_tags.items():
         if hasattr(book, f"id3_{tag}"):
@@ -1472,6 +1476,7 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
 
     id3_score = MetadataScore(book, sample_audio2_tags)
 
+    t3 = time.time()
     book.title = id3_score.determine_title(book.fs_title)
     book.album = book.title
     book.sortalbum = strip_leading_articles(book.title)
@@ -1479,6 +1484,8 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     book.artist = id3_score.determine_author(book.fs_author)
     book.narrator = id3_score.determine_narrator(book.fs_narrator)
     book.albumartist = id3_score.determine_albumartist()
+
+    t4 = time.time()
 
     li(f"Title: {book.title}")
     li(f"Author: {book.author}")
@@ -1506,6 +1513,16 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     li(f"Duration: {book.duration('inbox', 'human')}")
     if not book.has_id3_cover:
         li(f"No cover art")
+
+    t5 = time.time()
+
+    _all_times = {
+        "get_files_and_extract_id3_tags": t2 - t1,
+        "metadata_score": t3 - t2,
+        "author_narrator": t4 - t3,
+        "end": t5 - t4,
+        "total": t5 - t1,
+    }
 
     return book
 

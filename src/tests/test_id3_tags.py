@@ -353,8 +353,8 @@ def test_parse_tags_from_fixtures(
 
     book = indirect_fixture
     book.extract_metadata()
-    tags1 = extract_id3_tags(book.sample_audio1)
-    tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
+    _tags1 = extract_id3_tags(book.sample_audio1)
+    _tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
 
     for key in expected_dict.keys():
         assert (
@@ -402,10 +402,10 @@ def test_verify_tags_after_convert(
     app(max_loops=1)
 
     book.extract_metadata()
-    tags1 = extract_id3_tags(book.sample_audio1)
-    tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
+    _tags1 = extract_id3_tags(book.sample_audio1)
+    _tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
     converted = Audiobook(book.converted_file).extract_metadata()
-    converted_tags = extract_id3_tags(book.converted_file)
+    _converted_tags = extract_id3_tags(book.converted_file)
 
     # Ensure converted file has the same tags as the expected
     for key in expected_dict.keys():

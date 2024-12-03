@@ -1,6 +1,6 @@
 from math import floor
 from pathlib import Path
-from typing import cast, Literal, overload
+from typing import Literal, overload
 
 from pydantic import BaseModel, ConfigDict
 
@@ -16,7 +16,6 @@ from src.lib.formatters import human_bitrate, to_audiobook_fmt
 from src.lib.fs_utils import (
     cp_file_into_dir,
     find_cover_art_file,
-    find_first_audio_file,
     get_size,
     hash_path_audio_files,
     last_updated_at,
@@ -24,7 +23,6 @@ from src.lib.fs_utils import (
 from src.lib.id3_utils import extract_cover_art, extract_metadata
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info
-from src.lib.term import print_warning
 from src.lib.typing import AudiobookFmt, BookStructure2, DirName, SizeFmt
 
 
@@ -47,7 +45,7 @@ class Audiobook(BaseModel):
     fs_narrator: str = ""
     dir_extra_junk: str = ""
     file_extra_junk: str = ""
-    orig_file_type: AudiobookFmt = "mp3"
+    _orig_file_type: AudiobookFmt = None  # type: ignore
     orig_file_name: str = ""
     title: str = ""
     artist: str = ""
@@ -96,16 +94,7 @@ class Audiobook(BaseModel):
         self.path = path
 
         self._active_dir = get_dir_name_from_path(path)
-
-        if not (
-            orig_file_type := (
-                to_audiobook_fmt(f.suffix)
-                if not self.tree.is_root and (f := find_first_audio_file(path, ignore_errors=True))
-                else None
-            )
-        ):
-            print_warning(f"Could not determine file type for {path}, there are no audio files in the directory")
-        self.orig_file_type = orig_file_type or "mp3"
+        self.orig_file_type
 
     def __str__(self):
         return f"{self.key}"
@@ -124,12 +113,29 @@ class Audiobook(BaseModel):
             return self.cover_art_file
         try:
             extract_cover_art(self.sample_audio1, save_to_file=True)
-            self._inbox_cover_art_file = cast(Path, find_cover_art_file(self.path))
-            cp_file_into_dir(self._inbox_cover_art_file, self.merge_dir)
+            if art := self._inbox_cover_art_file:
+                cp_file_into_dir(art, self.merge_dir)
             return self.cover_art_file
         except Exception:
             # no cover art found, probably
             return None
+
+    @property
+    def orig_file_type(self):
+        from src.lib.fs_utils import find_first_audio_file
+
+        if self._orig_file_type is not None:
+            return self._orig_file_type
+        if not (
+            orig_file_type := (
+                to_audiobook_fmt(f.suffix)
+                if not self.tree.is_root and (f := find_first_audio_file(self.path, ignore_errors=True))
+                else None
+            )
+        ):
+            return "mp3"
+        self._orig_file_type = orig_file_type
+        return self._orig_file_type
 
     @property
     def inbox_dir(self):
@@ -195,7 +201,7 @@ class Audiobook(BaseModel):
         return find_next_audio_file(self.path, first=self.sample_audio1, ignore_errors=True)
 
     def rescan(self):
-        self.tree.scan()
+        self.tree.scan(allow_non_root=True)
         for attr in ["sample_audio1", "sample_audio2"]:
             try:
                 delattr(self, attr)

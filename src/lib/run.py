@@ -118,16 +118,21 @@ def print_banner(after: Callable[..., Any] | None = None):
     # print_debug(f"Maybe printing banner, loop {InboxState().loop_counter}")
     inbox = InboxState()
 
-    skip = found_banner_in_print_log() and any([inbox.loop_counter > 1 and not inbox.stale, inbox.banner_printed])
+    skip = found_banner_in_print_log() and any((inbox.loop_counter > 1 and inbox.stale, inbox.banner_printed))
 
     current_local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     dash = "-" * 25
 
+    if skip:
+        ...
+    else:
+        ...
+
     if not skip:
         print_mint(f"{dash}  ⌐◒-◒  auto-m4b • {current_local_time}  {dash}")
 
-    msg = "Checking for" if inbox.matched_ok_books and inbox.loop_counter > 1 else "Watching for"
+    msg = "Checking for" if inbox.ok_books and inbox.loop_counter > 1 else "Watching for"
     if not skip:
         print_grey(f"{msg} books in [[{cfg.inbox_dir}]] ꨄ︎")
 
@@ -397,14 +402,14 @@ def books_to_process() -> tuple[int, Callable[[], None]]:
 
     if inbox.match_filter and (inbox.all_books_failed):
         s = f"all {pluralize_with_count(inbox.num_matched, 'book')}" if inbox.num_matched > 1 else "1 book"
-        note = wrap_brackets(f"ignoring {inbox.num_filtered}" if inbox.num_filtered else "")
+        note = wrap_brackets(f"ignoring {inbox.num_ignored_books}" if inbox.num_ignored_books else "")
         return 0, lambda: smart_print(
             f"Failed to convert {s} in the inbox matching [[{inbox.match_filter}]]{note}",
             highlight_color=AMBER_COLOR,
         )
 
     if inbox.match_filter and inbox.matched_ok_books:
-        ignoring = f"ignoring {inbox.num_filtered}" if inbox.num_filtered else ""
+        ignoring = f"ignoring {inbox.num_ignored_books}" if inbox.num_ignored_books else ""
         note = wrap_brackets(ignoring, skipping, sep=", ")
         unescaped_match_filter = re.sub(r"\\ ", " ", str(inbox.match_filter))
         return inbox.num_matched_ok, lambda: smart_print(

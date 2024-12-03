@@ -492,10 +492,10 @@ class testutils:
         return True
 
     @classmethod
-    def assert_banner_starts_each_loop(cls, out_lines: list[str]):
+    def assert_banner_starts_each_loop(cls, out_lines: list[str], *, starting_loop: int = 0):
         _out_lines = cls.strip_startup_lines(*cls.strip_test_debug_lines(*out_lines))
         all_runs = cls.get_loops_from_out_lines(*_out_lines)
-        for i, run in enumerate(all_runs):
+        for i, run in enumerate(all_runs[starting_loop:]):
             if run:
                 assert cls.is_banner(*run[:4]), f"Expected a banner to print at the start of run {i + 1}"
         return True
@@ -534,6 +534,7 @@ class testutils:
         out: str | CaptureFixture[str],
         *exp_books: str | Path | Audiobook,
         loops: list[check_output] | None = None,
+        starting_loop: int = 0,
     ) -> bool:
 
         if isinstance(out, CaptureFixture):
@@ -700,7 +701,7 @@ class testutils:
                 assert_converted(i, len(outs), ch, o)
 
         cls.assert_no_double_dividers(out_lines)
-        cls.assert_banner_starts_each_loop(out_lines)
+        cls.assert_banner_starts_each_loop(out_lines, starting_loop=starting_loop)
         cls.assert_no_duplicate_banners(out_lines)
         cls.assert_not_ends_with_banner(out_lines)
 

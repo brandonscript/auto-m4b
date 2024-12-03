@@ -15,7 +15,6 @@ from multiprocessing import cpu_count
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TypeVar
 
-from src.lib.formatters import listify
 from src.lib.misc import (
     get_git_root,
     is_boolish,
@@ -32,7 +31,7 @@ from src.lib.misc import (
     singleton,
     to_json,
 )
-from src.lib.term import nl, print_amber, print_banana, print_debug, print_error
+from src.lib.term import nl, print_amber, print_debug, print_error
 from src.lib.typing import OverwriteMode
 
 DEFAULT_SLEEP_TIME: float = 10
@@ -290,18 +289,18 @@ class Config:
                 if self.SLEEP_TIME and not "pytest" in sys.modules:
                     time.sleep(min(2, self.SLEEP_TIME / 2))
 
-                if not pid_exists and not InboxState().loop_counter > 1:
+                if not pid_exists and not InboxState().loop_counter:
                     print_mint("\nStarting auto-m4b...")
                     print_grey(self.info_str)
                     if env_msg:
                         print_dark_grey(env_msg)
 
-                    beta_features = [
-                        # (
-                        #     en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
-                        #     self.FLATTEN_MULTI_DISC_BOOKS,
-                        # ),
-                    ]
+                    # beta_features = [
+                    # (
+                    #     en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
+                    #     self.FLATTEN_MULTI_DISC_BOOKS,
+                    # ),
+                    # ]
 
                     if test_debug_msg := (
                         "TEST + DEBUG modes on"
@@ -310,12 +309,12 @@ class Config:
                     ):
                         print_amber(test_debug_msg)
 
-                    if beta_msg := (
-                        f"[Beta] features are enabled:\n{listify([f for f, b in beta_features if b])}\n"
-                        if any(b for _f, b in beta_features)
-                        else ""
-                    ):
-                        print_banana(beta_msg)
+                    # if beta_msg := (
+                    #     f"[Beta] features are enabled:\n{listify([f for f, b in beta_features if b])}\n"
+                    #     if any(b for _f, b in beta_features)
+                    #     else ""
+                    # ):
+                    #     print_banana(beta_msg)
 
         nl()
 
@@ -563,7 +562,7 @@ class Config:
         return pid_file
 
     @cached_property
-    def FATAL_FILE(self):
+    def FATAL_FILE(self) -> Path:
         fatal_file = self.tmp_dir / "fatal.log"
         return fatal_file
 

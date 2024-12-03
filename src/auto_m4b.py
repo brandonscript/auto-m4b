@@ -42,14 +42,14 @@ def app(**kwargs):
         args = AutoM4bArgs(**kwargs)
         infinite_loop = args.max_loops == -1
         inbox = InboxState()
-        inbox.loop_counter += 1
         cfg.startup(args)
-        while infinite_loop or inbox.loop_counter <= args.max_loops:
+        while infinite_loop or inbox.loop_counter < args.max_loops:
             try:
+                inbox.loop_counter += 1
                 run.process_inbox()
             finally:
-                inbox.loop_counter += 1
-                if infinite_loop or inbox.loop_counter <= args.max_loops:
+                # inbox.loop_counter += 1
+                if infinite_loop or inbox.loop_counter < args.max_loops:
                     time.sleep(cfg.SLEEP_TIME)
 
         if not was_prev_line_empty():

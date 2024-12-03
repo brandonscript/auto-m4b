@@ -62,8 +62,6 @@ class InboxStateError(Exception):
 @singleton
 class InboxState(Hasher):
 
-    tree: BooksTree = None  # type: ignore
-
     def __init__(self):
         from src.lib.config import cfg
 
@@ -74,6 +72,7 @@ class InboxState(Hasher):
         self.banner_printed = False
         # print_debug("Set banner_printed to False")
         self._last_scan = 0
+        self.tree: BooksTree = None  # type: ignore
         self.scan()
 
     def set(
@@ -153,11 +152,10 @@ class InboxState(Hasher):
 
         if not self.tree:
             self.tree = BooksTree(cfg.inbox_dir)
-        else:
-            self.tree.scan()
+        self.tree.scan()
         # self._tree.scan()
 
-        new_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}
+        found_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}
 
         # smart_print(f"scan calls: {SCAN_CALLS}", SCAN_CALLS)
         # try:
@@ -167,8 +165,8 @@ class InboxState(Hasher):
         # except:
         #     pass
 
-        gone_keys = set(self._items.keys()) - set(new_items.keys())
-        for k, v in new_items.items():
+        gone_keys = set(self._items.keys()) - set(found_items.keys())
+        for k, v in found_items.items():
             if k not in self._items:
                 self._items[k] = v
             elif recheck_failed and (item := self._items[k]):
@@ -222,7 +220,7 @@ class InboxState(Hasher):
             cfg.MATCH_FILTER = match_filter
 
         self.tree._match_filter = match_filter
-        self.tree.scan()
+        # self.tree.scan()
 
     def reset_inbox(self, new_match_filter: str | None = None):
 
@@ -279,19 +277,23 @@ class InboxState(Hasher):
 
     @property
     def standalone_books(self):
-        return {k: v for k, v in self._items.items() if v.is_file and v.status in ("ok", "new", "needs_retry")}
+        return {
+            k: v
+            for k, v in self._items.items()
+            if v.tree.has_structure("standalone_file") and v.status in ("ok", "new", "needs_retry")
+        }
 
     @property
     def num_standalone_books(self):
         return len(self.standalone_books)
 
     @property
-    def book_dirs(self):
-        return list(filter(lambda x: x.is_dir(), self.tree.books_and_series))
+    def books_and_series(self):
+        return self.tree.books_and_series
 
     @property
     def series_parents(self):
-        return list(filter(lambda x: x.has_structure("series_parent"), self.tree.books_and_series))
+        return self.tree.series_parents
 
     def series_items_for_key(self, key: str):
         return [
@@ -302,33 +304,37 @@ class InboxState(Hasher):
 
     @property
     def num_books(self):
-        return len(self.book_dirs) - len(self.series_parents)
+        return len(self.tree.books)
 
     @property
     def num_series(self):
         return len(self.series_parents)
 
     @property
-    def filtered_books(self):
+    def ignored_books(self):
         return {k: v for k, v in self._items.items() if v.is_filtered}
 
     @property
-    def num_filtered(self):
-        return len(self.filtered_books)
+    def num_ignored_books(self):
+        return len(self.tree.books) - self.num_matched
 
     @property
     def matched_books(self):
-        return filter_series_parents(
-            {k: v for k, v in self._items.items() if not v.is_filtered and not v.status in ["gone"]}
-        )
+        return {
+            k: v
+            for k, v in self._items.items()
+            if v.tree.is_book_root and not v.is_filtered and not v.status in ["gone"]
+        }
 
     @property
     def num_matched(self):
-        return len(self.matched_books)
+        return len(self.tree.books_f)
 
     @property
     def ok_books(self):
-        return filter_series_parents({k: v for k, v in self._items.items() if v.status in ["ok", "new", "needs_retry"]})
+        return {
+            k: v for k, v in self._items.items() if v.tree.is_book_root and v.status in ["ok", "new", "needs_retry"]
+        }
 
     @property
     def num_ok(self):

@@ -10,17 +10,17 @@ class TestInboxState:
 
     @pytest.fixture(scope="function", autouse=True)
     def destroy_inbox_state(self):
-        InboxState._instance = None
+        InboxState._instance = None  # type: ignore
         yield
-        InboxState._instance = None
+        InboxState._instance = None  # type: ignore
 
-    def test_book_dirs(
+    def test_books(
         self,
         Chanur_Series: list[Audiobook],
         reset_inbox_state: InboxState,
     ):
-        assert reset_inbox_state.book_dirs
-        assert [isinstance(d, BooksTree) for d in reset_inbox_state.book_dirs]
+        assert reset_inbox_state.books_and_series
+        assert [isinstance(d, BooksTree) for d in reset_inbox_state.books_and_series]
 
     def test_get_item_by_key(
         self,
@@ -57,4 +57,5 @@ class TestInboxState:
         series = Chanur_Series[0]
         # books = Chanur_Series[1:]
         key1 = "Chanur Series/01 - Pride Of Chanur"
-        assert reset_inbox_state.get(key1).series_parent == series._inbox_item
+        assert (item := reset_inbox_state.get(key1))
+        assert item.series_parent == series._inbox_item

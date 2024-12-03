@@ -1,9 +1,9 @@
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import cached_property
 from pathlib import Path
-from typing import cast, Literal, overload, Self, TypeVar
+from typing import Any, cast, Literal, overload, Self, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +15,7 @@ from src.lib.misc import (
     percent_truthy_in_list,
 )
 from src.lib.term import print_debug, print_warning
-from src.lib.typing import AudiobookFmt, BookStructure2
+from src.lib.typing import AudiobookFmt, BookStructure2, copy_kwargs
 
 
 def filter_matches(func):
@@ -23,12 +23,12 @@ def filter_matches(func):
         paths = func(self, *args, **kwargs)
         if not paths:
             return paths
-        return _match_filter(paths, self.match_filter, root=self.root or self)
+        return _match_filter_func(paths, self.match_filter, root=self.root or self)
 
     return wrapper
 
 
-def _match_filter(
+def _match_filter_func(
     paths: "list[Path | BooksTree] | dict[str, BooksTree]",
     match_filter: list[Path] | str | None,
     *,
@@ -493,14 +493,38 @@ class TreeNumInfo:
             return get_similarity([*curr, *self._paths])
 
 
+F = TypeVar("F", bound="Callable[..., Any]")
+
+
+def requires_scan(func: F) -> F:
+    def wrapper(self: "BooksTree", *args, **kwargs):
+        if (root := self if self.is_root else self.root) and root and not root._last_scan:
+            raise ValueError(f"Cannot call 'BooksTree.{func.__name__}' without first scanning the tree")
+
+        return func(self, *args, **kwargs)
+
+    return cast(F, wrapper)
+
+
+def requires_structure(func: F) -> F:
+    def wrapper(self: "BooksTree", *args, **kwargs):
+        if not self.structure:
+            raise ValueError(f"Cannot call 'BooksTree.{func.__name__}' without first determining this node's structure")
+
+        return func(self, *args, **kwargs)
+
+    return cast(F, wrapper)
+
+
 class BooksTree(BaseModel):
     _is_file: bool | None = None
     _is_dir: bool | None = None
+    _is_book_root: bool | None = None
     path: Path = Field(default_factory=Path)
     parent: "BooksTree | None" = None
     size: int = 0
-    mindepth: int | None = None
-    maxdepth: int | None = None
+    # mindepth: int | None = None
+    # maxdepth: int | None = None
     structure: tuple[BookStructure2, ...] = Field(default_factory=tuple)
     root: "BooksTree | None" = None
     _match_filter: list[Path] | str | None = None
@@ -534,7 +558,11 @@ class BooksTree(BaseModel):
         from src.lib.config import cfg
 
         self.path = Path(path)
-        self.root = BooksTree(root, scan=False, match_filter=match_filter) if root is not None else None
+        self.root = (
+            root
+            if isinstance(root, BooksTree)
+            else BooksTree(root, scan=False, match_filter=match_filter) if root is not None else None
+        )
         self._files: list["BooksTree"] = []
         self._dirs: dict[str, "BooksTree"] = {}
 
@@ -560,57 +588,37 @@ class BooksTree(BaseModel):
     def __str__(self):
         return str(self.path)
 
+    # Pydantic built-ins/overrides
+    def model_post_init(self, __context):
+        self.root = None if self.root is None else BooksTree(self.root, scan=False)
+
     @classmethod
     def cast(
         cls,
-        path: "Path | BooksTree | str" = ".",
+        path: "Path | BooksTree | str",
         *,
-        root: "Path | BooksTree | None" = None,
+        root: "Path | BooksTree | None",
         match_filter: list[Path] | str | None = None,
     ):
         """Casts a path to a TreePath without scanning it"""
         return BooksTree(path, root=root, scan=False, match_filter=match_filter)
 
-    def scan(
+    def _scan(
         self,
         *,
         mindepth: int | None = None,
         maxdepth: int | None = None,
         allow_file_root: bool = False,
+        allow_non_root: bool = False,
         determine_structure: bool = True,
-    ) -> "BooksTree":
-        """Given a path, returns a TreePath of all directories containing audio files, and their subdirectories, and the audio files within them.
-        E.g., if the directory is:
-        /path/to/dir
-
-        it could return:
-
-        {
-            files: [
-                "/path/to/dir/file1.mp3",
-                "/path/to/dir/file2.mp3"
-            ],
-            dirs: {
-                    "subdir1": {
-                        files: [
-                            "/path/to/dir/subdir1/file3.mp3",
-                            "/path/to/dir/subdir1/file4.mp3"
-                        ]
-                    },
-                    "subdir2": {
-                        files: [
-                            "/path/to/dir/subdir2/file5.mp3",
-                            "/path/to/dir/subdir2/file6.mp3"
-                        ]
-                    }
-                }
-            }
-        }
-        """
+    ):
 
         from src.lib.fs_utils import filter_depth, filter_ignored, only_audio_files
 
-        root = self if self.is_root or not self.root else self.root
+        root: Self | BooksTree = self if self.is_root or not self.root else self.root
+
+        if not self.is_root and not allow_non_root:
+            raise RuntimeError("scan() should only be called on the root of the tree")
 
         if not root.exists():
             return self
@@ -662,8 +670,43 @@ class BooksTree(BaseModel):
             ]
         )
 
+        self._last_scan = time.time()
         if determine_structure:
             self.determine_structure()
+        return self
+
+    @copy_kwargs(_scan)
+    def scan(self, *args, **kwargs) -> "BooksTree":
+        """Given a path, returns a TreePath of all directories containing audio files, and their subdirectories, and the audio files within them.
+        E.g., if the directory is:
+        /path/to/dir
+
+        it could return:
+
+        {
+            files: [
+                "/path/to/dir/file1.mp3",
+                "/path/to/dir/file2.mp3"
+            ],
+            dirs: {
+                    "subdir1": {
+                        files: [
+                            "/path/to/dir/subdir1/file3.mp3",
+                            "/path/to/dir/subdir1/file4.mp3"
+                        ]
+                    },
+                    "subdir2": {
+                        files: [
+                            "/path/to/dir/subdir2/file5.mp3",
+                            "/path/to/dir/subdir2/file6.mp3"
+                        ]
+                    }
+                }
+            }
+        }
+        """
+
+        self._scan(*args, **kwargs)
         self._last_scan = time.time()
         return self
 
@@ -692,7 +735,7 @@ class BooksTree(BaseModel):
             return self
 
         # Find the path in self.children_recursive
-        return next((c for c in self._children_recursive if c.key == rel or c.rel_path == rel), None)
+        return next((c for c in self.children_recursive if c.key == rel or c.rel_path == rel), None)
 
     def get_like(self, key: str, case_sensitive: bool = False):
         """
@@ -702,11 +745,11 @@ class BooksTree(BaseModel):
             raise ValueError(".get_like(): Key cannot be empty")
         exp = re.compile(key, re.I) if not case_sensitive else re.compile(key)
         return next(
-            (c for c in self._children_recursive if (c.key and exp.search(c.key)) or exp.search(str(c.rel_path))), None
+            (c for c in self.children_recursive if (c.key and exp.search(c.key)) or exp.search(str(c.rel_path))), None
         )
 
     @property
-    def match_filter(self):
+    def match_filter(self) -> list[Path] | str | None:
         from src.lib.config import cfg
 
         return self._match_filter or (self.root.match_filter if self.root else cfg.MATCH_FILTER)
@@ -736,7 +779,7 @@ class BooksTree(BaseModel):
         int: The number of audio files found.
         """
 
-        return len(self.__class__(self.path, root=self.root, mindepth=mindepth, maxdepth=maxdepth)._files_recursive)
+        return len(self.__class__(self.path, root=self.root, mindepth=mindepth, maxdepth=maxdepth).files_recursive)
 
     @property
     def name(self):
@@ -771,12 +814,12 @@ class BooksTree(BaseModel):
     def container_root(self):
         """The root dir that contains the path, i.e. depth 1 parent."""
 
-        if not self.root:
+        if not self.root or self.is_root:
             return None
         # Get the first child off the root that's in the current path's parents, and is relative to the root.
-        parent = self.parent
-        while parent and parent.depth > 1:
-            parent = parent.parent
+        parent = self
+        while parent and (p_up := parent.parent) and p_up.depth > 0 and not p_up.is_root:
+            parent = p_up
         return parent
 
     @overload
@@ -876,75 +919,87 @@ class BooksTree(BaseModel):
 
     @property
     @filter_matches
-    def files(self):
-        return self._files
+    def dirs_f(self):
+        return self._dirs
 
     @property
-    @filter_matches
     def dirs(self):
         return self._dirs
 
     @property
     @filter_matches
-    def files_recursive(self):
-        return self._files_recursive
+    def dirs_recursive_f(self) -> list["BooksTree"]:
+        return self.dirs_recursive
 
     @property
-    def _files_recursive(self) -> list["BooksTree"]:
-        # Recursively walks the tree to return a flat list of all files
-        return isorted((*self._files, *sum([d._files_recursive for d in self._dirs.values()], [])))
-
-    def _files_of_type(self, fmt: AudiobookFmt) -> list["BooksTree"]:
-        from src.lib.formatters import ensure_dot
-
-        return [f for f in self.files_recursive if f.path.suffix == ensure_dot(fmt)]
-
-    @filter_matches
-    def files_of_type(self, fmt: AudiobookFmt) -> list["BooksTree"]:
-        return self._files_of_type(fmt)
-
-    @property
-    @filter_matches
     def dirs_recursive(self) -> list["BooksTree"]:
-        return self._dirs_recursive
-
-    @property
-    def _dirs_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all directories, excluding the root
         return isorted(
             d
             for d in (
                 *self._dirs.values(),
-                *sum([d._dirs_recursive for d in self._dirs.values()], []),
+                *sum([d.dirs_recursive for d in self._dirs.values()], []),
             )
             if not d.is_root
         )
 
     @property
     @filter_matches
-    def children(self) -> list["BooksTree"]:
-        return self._children
+    def files_f(self):
+        return self._files
 
     @property
-    def _children(self) -> list["BooksTree"]:
+    def files(self):
+        return self._files
+
+    @property
+    @filter_matches
+    def files_recursive_f(self):
+        return self.files_recursive
+
+    @property
+    def files_recursive(self) -> list["BooksTree"]:
+        # Recursively walks the tree to return a flat list of all files
+        return isorted((*self._files, *sum([d.files_recursive for d in self._dirs.values()], [])))
+
+    @filter_matches
+    def files_of_type_f(self, fmt: AudiobookFmt) -> list["BooksTree"]:
+        return self.files_of_type(fmt)
+
+    def files_of_type(self, fmt: AudiobookFmt) -> list["BooksTree"]:
+        from src.lib.formatters import ensure_dot
+
+        return [f for f in self.files_recursive if f.path.suffix == ensure_dot(fmt)]
+
+    @property
+    @filter_matches
+    def children_f(self) -> list["BooksTree"]:
+        return self.children
+
+    @property
+    def children(self) -> list["BooksTree"]:
         return isorted((*self._files, *self._dirs.values()))
 
     @property
     @filter_matches
-    def children_recursive(self) -> list["BooksTree"]:
-        return self._children_recursive
+    def children_recursive_f(self) -> list["BooksTree"]:
+        return self.children_recursive
 
     @property
-    def _children_recursive(self) -> list["BooksTree"]:
+    def children_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all paths
         return isorted(
             flatlist(
-                [*self._files, *self._dirs.values(), *sum([d._children_recursive for d in self._dirs.values()], [])]
+                [*self._files, *self._dirs.values(), *sum([d.children_recursive for d in self._dirs.values()], [])]
             )
         )
 
     @property
     @filter_matches
+    def siblings_f(self):
+        return self.siblings
+
+    @property
     def siblings(self):
         if not self.parent or self.is_root:
             return None
@@ -952,26 +1007,54 @@ class BooksTree(BaseModel):
 
     @property
     @filter_matches
-    def books(self):
+    def books_f(self):
         """
         Returns all dirs and files that are books. If any of the children are
         containers, it will return the children of those containers as well.
         """
 
+        return self.books
+
+    @property
+    def books(self):
         return list(filter(lambda x: not x.has_structure("series_parent"), self.books_and_series))
 
     @property
     @filter_matches
+    def books_and_series_f(self) -> list["BooksTree"]:
+        """
+        Returns all dirs and files that are books or series parents. If any of the children are
+        containers, it will return the children of those containers as well.
+        """
+        return self.books_and_series
+
+    @property
     def books_and_series(self) -> list["BooksTree"]:
         return list(filter(lambda x: x.is_book_root or x.has_structure("series_parent"), self.children_recursive))
 
     @property
     @filter_matches
+    def series_parents_f(self) -> list["BooksTree"]:
+        """
+        Returns all dirs that series parents.
+        """
+        return self.series_parents
+
+    @property
+    def series_parents(self) -> list["BooksTree"]:
+        return list(filter(lambda x: x.has_structure("series_parent"), self.children_recursive))
+
+    @property
+    @filter_matches
+    def standalone_files_f(self):
+        """
+        Returns all standalone files in the root (files with no parent).
+        """
+        return self.standalone_files
+
+    @property
     def standalone_files(self):
         return list(filter(lambda x: x.has_structure("standalone_file"), self.children_recursive))
-
-    def model_post_init(self, __context):
-        self.root = None if self.root is None else BooksTree(self.root, scan=False)
 
     @property
     def is_root(self):
@@ -994,26 +1077,29 @@ class BooksTree(BaseModel):
     def exists(self):
         return self.path.exists()
 
-    @property
-    def is_book_root(self):
-        """
-        Returns True if the current path is a whole book, i.e., it is a
-        standalone file or itself contains all files for a single title.
-        """
+    @requires_structure
+    @requires_scan
+    def determine_if_book_root(self):
+
         if self.is_root or self.has_only_structure("container"):
-            return False
+            self._is_book_root = False
+            return self._is_book_root
 
         if self.has_any_structure("standalone_file", "multi_parent"):
-            return True
+            self._is_book_root = True
+            return self._is_book_root
 
         if self.has_structure("single") and self.parent and self.parent.not_has_structure("single"):
-            return True
+            self._is_book_root = True
+            return self._is_book_root
 
         if self.depth == 1 and self.has_any_structure("flat", "mixed", "nested"):
-            return True
+            self._is_book_root = True
+            return self._is_book_root
 
         if self.parent and self.parent.has_structure("series_parent"):
-            return True
+            self._is_book_root = True
+            return self._is_book_root
 
         is_flat_with_unrelated_siblings = (
             self.parent
@@ -1028,13 +1114,25 @@ class BooksTree(BaseModel):
         )
 
         if is_flat_with_unrelated_siblings or is_container_with_single_child:
-            return True
+            self._is_book_root = True
+            return self._is_book_root
 
-        return False
+        self._is_book_root = False
+        return self._is_book_root
+
+    @property
+    @requires_scan
+    def is_book_root(self):
+        """
+        Returns True if the current path is a whole book, i.e., it is a
+        standalone file or itself contains all files for a single title.
+        """
+        return self._is_book_root
 
     # TODO: Duplicate method for flat_files
+
     def get_files_in_dirs(self):
-        return [f for d in self._dirs.values() for f in d.files]
+        return [f for d in self._dirs.values() for f in d._files]
 
     @property
     def type(self):
@@ -1067,11 +1165,15 @@ class BooksTree(BaseModel):
             self.set_structures("_root_")
             [d.determine_structure(self) for d in self._dirs.values()]
             [f.determine_structure(self) for f in self._files]
+            for c in self.children_recursive:
+                # Disable this assertion when debugging with _match_filter_func()
+                assert c.structure, f"Expected structure to be determined for {c}\nRoot: {self}"
+            [c.determine_if_book_root() for c in self.children_recursive]
             return self.structure
 
-        if not _match_filter([self.path], self.match_filter, root=root):
-            # DEBUG only: bypass the structure determination if the current path does not match the filter
-            return self.structure
+        # DEBUG only: bypass the structure determination if the current path does not match the filter
+        # if not _match_filter_func([self.path], self.match_filter, root=root):
+        #     return self.structure
 
         # if "breakpoint-book-name" in self.name.lower():
         #     ...
@@ -1136,7 +1238,7 @@ class BooksTree(BaseModel):
 
         has_one_file_and_no_dirs = bool(len(self._files) == 1 and not self._dirs)
 
-        if depth < 2 and len(self._files_recursive) == 1:
+        if depth < 2 and len(self.files_recursive) == 1:
             self.set_structures("single", recursive=True)
         elif has_one_file_and_no_dirs and not self.has_structure_like("multi_"):
             self.add_structures("single")
@@ -1150,7 +1252,7 @@ class BooksTree(BaseModel):
             self.set_structures("empty")
             return self.structure
 
-        if len(self._dirs) == 1 and len(self._files_recursive) == 1:
+        if len(self._dirs) == 1 and len(self.files_recursive) == 1:
             nested_dir = self._dirs[next(iter(self._dirs.keys()))]
             nested_dir.add_structures("single", "nested", recursive=True)
 
@@ -1159,8 +1261,8 @@ class BooksTree(BaseModel):
             self._dirs
             and not self._files
             and parent.has_any_structure("_root_", "container")
-            and len(self._files_recursive) > 1
-            and not any((len(self._dirs) > 1, *[len(d._dirs) > 1 for d in self._dirs_recursive]))
+            and len(self.files_recursive) > 1
+            and not any((len(self._dirs) > 1, *[len(d._dirs) > 1 for d in self.dirs_recursive]))
         ):
             self.add_structures("flat", "nested", recursive=True)
 
@@ -1175,7 +1277,7 @@ class BooksTree(BaseModel):
             if parent.has_structure("series_parent"):
                 self.add_structures("series_book")
 
-            if self.has_no_structure():
+            if not self.structure:
                 self.set_structures("unknown")
 
             if (
@@ -1411,6 +1513,8 @@ class BooksTree(BaseModel):
         # if any([b.has_structure("series_book") for b in self.children_recursive]):
         #     self.add_structures("series_parent")
 
+        assert self.structure, f"Expected structure to be determined for {self}\nRoot: {self.root}"
+
         return self.structure
 
     def has_structure(self, structure: BookStructure2):
@@ -1440,14 +1544,15 @@ class BooksTree(BaseModel):
     def has_only_structures(self, *structure: BookStructure2):
         return len(self.structure) == len(structure) and all([s in self.structure for s in structure])
 
-    def has_no_structure(self):
-        return not self.structure
-
     def add_structures(
         self,
         *structure: BookStructure2,
         recursive: bool | Literal["files", "dirs", "all", "none"] = False,
     ):
+
+        if self.has_any_structure("series_parent"):
+            ...
+
         if not structure:
             raise ValueError(
                 "No structure provided when trying to add structures. Did you mean to call remove_structures() or clear_structure()?"
@@ -1535,6 +1640,8 @@ class BooksTree(BaseModel):
         #     structures = *structure[0]
         # else:
         #     self.structure = cast("tuple[BookStructure2, ...]", structure)
+        if self.has_structure("series_parent") and not "series_parent" in structure:
+            raise ValueError(f"Tried to set {structure} to {self.path} which has {self.structure}")
         self.clear_structure(recursive=recursive)
         self.add_structures(*structure, recursive=recursive)
         return self.structure

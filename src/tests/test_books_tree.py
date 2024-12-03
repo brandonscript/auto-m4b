@@ -195,17 +195,61 @@ class test_tree_scanning:
     def test_tree_root_is_populated(self, mock_inbox, setup_teardown):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=MOCKED.all_book_dirs)
         test_book = tree._dirs[MOCKED.flat_dirs[0].name]
-        assert len(test_book.files) == 3
+        assert len(test_book._files) == 3
         assert tree.is_root
         assert test_book.root and test_book.root == tree
         assert test_book.root.dirs
+
+    def test_container_root_is_never_root(self, nathan_lowell__nested_series_m4a: Audiobook):
+        tree = BooksTree(TEST_DIRS.inbox)
+        container = next(iter(tree.dirs.values()))
+        assert not container.is_root
+        assert container.container_root == container
+        for c in container.children_recursive_f:
+            assert not c.is_root
+            assert c.container_root == container
 
     @pytest.mark.parametrize(
         "indirect_fixtures, matching_paths, expected_fixture_count_sets",
         [
             # fmt: off
-            (("Chanur_Series"), "chanur", ((5, 6, 1, 6, 0, 10, 1, 16), (5, 5, 5, 5, 0, 10, 5, 15))),
-            (("all_hardy_boys"), "(house|missing|old_mill|tower)", ((4, 4, 4, 9, 0, 14, 4, 23), (0, 0, 0, 0, 2, 2, 2, 2), (0, 0, 2, 2, 2, 5, 4, 7))),
+            (("Chanur_Series"), "chanur", 
+             ((5, 6, 1, 6, 0, 10, 1, 16), (5, 5, 5, 5, 0, 10, 5, 15))),
+            (("all_hardy_boys"), "(house|missing|old_mill|tower)", 
+             ((4, 4, 4, 9, 0, 14, 4, 23), (0, 0, 0, 0, 2, 2, 2, 2), (0, 0, 2, 2, 2, 5, 4, 7))),
+            (("nathan_lowell__nested_series_m4a",), "^(Nathan Lowell)", 
+             (
+                 (22, 28, 1, 28, 0, 28, 1, 56), 
+                 (22, 28, 8, 27, 0, 28, 8, 55), 
+                 (3, 3, 3, 3, 0, 3, 3, 6), 
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (6, 6, 6, 6, 0, 6, 6, 12), 
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (2, 2, 2, 2, 0, 2, 2, 4),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (3, 3, 3, 3, 0, 3, 3, 6),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (3, 3, 3, 3, 0, 3, 3, 6),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (3, 3, 2, 2, 1, 9, 3, 11),
+                 (0, 0, 0, 0, 7, 7, 7, 7),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+                 (0, 0, 0, 0, 1, 1, 1, 1),
+             )),
             # fmt: on
         ],
         indirect=["indirect_fixtures"],
@@ -218,68 +262,116 @@ class test_tree_scanning:
         capfd: pytest.CaptureFixture[str],
     ):
 
-        def _assert_count(t: BooksTree, expected: tuple[int, ...], expected_children: tuple[tuple[int, ...], ...] = ()):
-            assert len(t.books) == expected[0]
-            assert len(t.books_and_series) == expected[1]
-            assert len(t.dirs) == expected[2]
-            assert len(t.dirs_recursive) == expected[3]
-            assert len(t.files) == expected[4]
-            assert len(t.files_recursive) == expected[5]
-            assert len(t.children) == expected[6]
-            assert len(t.children_recursive) == expected[7]
+        def _assert_count(t: BooksTree, *expecteds: tuple[int, ...]):
+            if not expecteds:
+                return
 
-            for i, c in enumerate(t.children):
-                if len(expected_children) <= i:
-                    break
-                _assert_count(c, expected_children[i])
+            expected = expecteds[0]
+            expected_children = expecteds[1:]
+            assert len(t.books_f) == expected[0], f"Expected '{t.key}' to have {expected[0]} books, got {len(t.books)}"
+            assert (
+                len(t.books_and_series_f) == expected[1]
+            ), f"Expected '{t.key}' to have {expected[1]} books_and_series, got {len(t.books_and_series_f)}"
+            assert len(t.dirs_f) == expected[2], f"Expected '{t.key}' to have {expected[2]} dirs, got {len(t.dirs_f)}"
+            assert (
+                len(t.dirs_recursive_f) == expected[3]
+            ), f"Expected '{t.key}' to have {expected[3]} dirs_recursive, got {len(t.dirs_recursive_f)}"
+            assert (
+                len(t.files_f) == expected[4]
+            ), f"Expected '{t.key}' to have {expected[4]} files, got {len(t.files_f)}"
+            assert (
+                len(t.files_recursive_f) == expected[5]
+            ), f"Expected '{t.key}' to have {expected[5]} files_recursive, got {len(t.files_recursive_f)}"
+            assert (
+                len(t.children_f) == expected[6]
+            ), f"Expected '{t.key}' to have {expected[6]} children, got {len(t.children_f)}"
+            assert (
+                len(t.children_recursive_f) == expected[7]
+            ), f"Expected '{t.key}' to have {expected[7]} children_recursive, got {len(t.children_recursive_f)}"
+
+            if t.is_root:
+                for i, c in enumerate(t.dirs_recursive_f):
+                    if len(expected_children) <= i:
+                        break
+
+                    _assert_count(c, *expected_children[i:])
 
         tree = BooksTree(TEST_DIRS.inbox, match_filter=matching_paths)
 
-        if "chanur" in indirect_fixtures[0].key:
-            if chanur_series := tree.get_like("chaxnur"):
-                assert chanur_series.has_only_structure("series_parent"), xt.msg.structure_is(
-                    chanur_series, "series_parent"
+        def _check():
+            if "chanur" in indirect_fixtures[0].key.lower():
+                assert next(
+                    (
+                        b
+                        for b in tree.books_and_series
+                        if b.name == "Chanur Series" and b.has_only_structure("series_parent")
+                    ),
+                    None,
                 )
-                xt.is_book_root(chanur_series)
-            else:
-                pytest.fail("Chanur Series not found in tree")
+                if chanur_series := tree.get_like("chanur"):
+                    assert chanur_series.has_only_structure("series_parent"), xt.msg.structure_is(
+                        chanur_series, "series_parent"
+                    )
+                    xt.is_not_book_root(chanur_series)
+                    assert indirect_fixtures[0].key == chanur_series.key
+                    for c in indirect_fixtures[1:]:
+                        bk = chanur_series.get(c.key)
+                        assert bk
+                        assert bk.has_structure("series_book"), xt.msg.structure_has(bk, "series_book")
+                        xt.is_book_root(bk)
+                else:
+                    pytest.fail("Chanur Series not found in tree")
 
-        if re.search(r"(house|missing|old_mill|tower)", indirect_fixtures[0].key):
+            if re.search(r"(house|missing|old_mill|tower)", indirect_fixtures[0].key):
 
-            if cliff := tree.get_like("house"):
-                assert cliff.has_only_structure("flat"), xt.msg.structure_is(cliff, "flat")
-                xt.is_book_root(cliff)
-            else:
-                pytest.fail("Cliff House not found in tree")
+                if cliff := tree.get_like("house"):
+                    assert cliff.has_only_structure("flat"), xt.msg.structure_is(cliff, "flat")
+                    xt.is_book_root(cliff)
+                else:
+                    pytest.fail("Cliff House not found in tree")
 
-            if chums := tree.get_like("missing"):
-                assert chums.has_only_structure("mixed"), xt.msg.structure_is(chums, "mixed")
-                xt.is_book_root(chums)
-            else:
-                pytest.fail("Missing Chums not found in tree")
+                if chums := tree.get_like("missing"):
+                    assert chums.has_only_structure("mixed"), xt.msg.structure_is(chums, "mixed")
+                    xt.is_book_root(chums)
+                else:
+                    pytest.fail("Missing Chums not found in tree")
 
-            if old_mill := tree.get_like("old_mill"):
-                assert old_mill.has_only_structures("multi_parent", "multi_disc"), xt.msg.structure_is(
-                    old_mill, ("multi_parent", "multi_disc")
+                if old_mill := tree.get_like("old_mill"):
+                    assert old_mill.has_only_structures("multi_parent", "multi_disc"), xt.msg.structure_is(
+                        old_mill, ("multi_parent", "multi_disc")
+                    )
+                    xt.is_book_root(old_mill)
+                else:
+                    pytest.fail("Old Mill not found in tree")
+
+                if tower := tree.get_like("tower"):
+                    assert tower.has_only_structure("flat"), xt.msg.structure_is(tower, "flat")
+                    xt.is_book_root(tower)
+                else:
+                    pytest.fail("Tower not found in tree")
+
+            if re.search(r"Nathan Lowell", indirect_fixtures[0].key):
+
+                # assert there is at least one series_parent
+                assert next(
+                    (b for b in tree.books_and_series if b.has_structure("series_parent")),
+                    None,
                 )
-                xt.is_book_root(old_mill)
-            else:
-                pytest.fail("Old Mill not found in tree")
 
-            if tower := tree.get_like("tower"):
-                assert tower.has_only_structure("flat"), xt.msg.structure_is(tower, "flat")
-                xt.is_book_root(tower)
-            else:
-                pytest.fail("Tower not found in tree")
+                assert len(tree.children_recursive_f) == 56
+                assert len([c for c in tree.children_recursive_f if c.has_structure("series_parent")]) == 6
+                assert len([c for c in tree.children_recursive_f if c.has_structure("series_book")]) == 45
 
-        tree_counts = expected_fixture_count_sets[0]
-        children_counts = expected_fixture_count_sets[1:]
+        # tree_counts = expected_fixture_count_sets[0]
+        # children_counts = expected_fixture_count_sets[1:]
 
-        _assert_count(tree, tree_counts, children_counts)
+        _assert_count(tree, *expected_fixture_count_sets)
+        _check()
 
         tree.scan()
 
-        _assert_count(tree, tree_counts, children_counts)
+        _assert_count(tree, *expected_fixture_count_sets)
+        _check()
 
 
 @pytest.mark.usefixtures("mock_inbox", "setup_teardown")
@@ -307,12 +399,12 @@ class test_tree_structures:
     def test_flat_dirs(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=MOCKED.flat_dirs)
         flat_dir_names = [d.name for d in MOCKED.flat_dirs]
-        flat_dirs = [d for name, d in tree._dirs.items() if name in flat_dir_names]
-        flat_files = flatlist([d.files for d in flat_dirs])
+        flat_dirs = [d for name, d in tree.dirs.items() if name in flat_dir_names]
+        flat_files = flatlist([d._files for d in flat_dirs])
         flat_all = [*flat_dirs, *flat_files]
         for d in flat_all:
             assert d.has_only_structure("flat"), xt.msg.structure_is(d, "flat")
-        for c in tree.children:
+        for c in tree.children_f:
             xt.is_book_root(c)
 
     def test_container_dir(self):
@@ -337,7 +429,7 @@ class test_tree_structures:
         assert flat_unrelated.has_only_structures("flat", "nested"), xt.msg.structure_has(
             flat_unrelated, ("flat", "nested")
         )
-        for c in flat_unrelated.children_recursive:
+        for c in flat_unrelated.children_recursive_f:
             assert c.has_only_structures("flat", "nested"), xt.msg.structure_has(c, ("flat", "nested"))
         single_mp3 = container_dir.children[2]
         assert single_mp3.has_only_structure("single"), xt.msg.structure_is(single_mp3, "single")
@@ -356,7 +448,7 @@ class test_tree_structures:
         xt.is_root(flat_nested_dir.parent)
         xt.is_not_root(flat_nested_dir)
         xt.is_book_root(flat_nested_dir)
-        for c in flat_nested_dir.children_recursive:
+        for c in flat_nested_dir.children_recursive_f:
             assert c.has_only_structures("flat", "nested"), xt.msg.structure_is(c, ("flat", "nested"))
             xt.is_not_book_root(c)
 
@@ -384,7 +476,7 @@ class test_tree_structures:
         assert mixed_chums.has_only_structure("mixed"), xt.msg.structure_is(mixed_chums, "mixed")
         xt.is_book_root(mixed_chums)
 
-        for c in mixed_chums.children_recursive[:1]:
+        for c in mixed_chums.children_recursive_f[:1]:
             assert c.has_only_structure("mixed"), xt.msg.structure_is(c, "mixed")
             xt.is_not_book_root(c)
 
@@ -431,7 +523,7 @@ class test_tree_structures:
 
         assert multi_disc_parent.is_book_root
         assert not (
-            any((c.is_book_root for c in multi_disc_parent.children_recursive))
+            any((c.is_book_root for c in multi_disc_parent.children_recursive_f))
         ), f"Expected all children to not be book roots"
 
     def test_multi_part(self):
@@ -467,7 +559,7 @@ class test_tree_structures:
         ), f"Expected all files to have only 'multi_part' structure, got {first_not_only_multi_part_file}"
 
         assert not any(
-            (c.is_book_root for c in multi_part_parent.children_recursive)
+            (c.is_book_root for c in multi_part_parent.children_recursive_f)
         ), f"Expected all children to not be book roots"
 
     def test_series(self):
@@ -478,10 +570,12 @@ class test_tree_structures:
         xt.is_not_book_root(series_parent)
         assert series_parent.has_only_structure("series_parent")
 
-        assert all((c.has_all_structures("series_book", "flat") for c in series_parent.children_recursive))
-        assert not any((c.has_structure("nested") for c in series_parent.children_recursive))
+        assert all((c.has_all_structures("series_book", "flat") for c in series_parent.children_recursive_f))
+        assert not any((c.has_structure("nested") for c in series_parent.children_recursive_f))
         assert all((c.is_book_root for c in series_parent.dirs.values()))
-        assert not any((c.is_book_root for c in flatlist([d.children_recursive for d in series_parent.dirs.values()])))
+        assert not any(
+            (c.is_book_root for c in flatlist([d.children_recursive_f for d in series_parent.dirs.values()]))
+        )
 
     def test_series_chanur(self, Chanur_Series: list[Audiobook]):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[Chanur_Series[0].path])
@@ -491,23 +585,23 @@ class test_tree_structures:
         assert series_parent.has_only_structure("series_parent")
 
         first_not_flat_series_book = next(
-            (c for c in series_parent.children_recursive if not c.has_all_structures("series_book", "flat")),
-            series_parent.children_recursive[0],
+            (c for c in series_parent.children_recursive_f if not c.has_all_structures("series_book", "flat")),
+            series_parent.children_recursive_f[0],
         )
         assert all(
-            (c.has_all_structures("series_book", "flat") for c in series_parent.children_recursive)
+            (c.has_all_structures("series_book", "flat") for c in series_parent.children_recursive_f)
         ), f"Expected all paths to have ('series_book', 'flat'), got {first_not_flat_series_book.structure}"
         assert not any(
-            (c.has_structure("nested") for c in series_parent.children_recursive)
-        ), f"Expected no paths to have 'nested', got {series_parent.children_recursive[0].structure}"
+            (c.has_structure("nested") for c in series_parent.children_recursive_f)
+        ), f"Expected no paths to have 'nested', got {series_parent.children_recursive_f[0].structure}"
         assert all((c.is_book_root for c in series_parent.dirs.values())), f"Expected all dirs to be book roots"
         assert not any(
-            (c.is_book_root for c in flatlist([d.children_recursive for d in series_parent.dirs.values()]))
+            (c.is_book_root for c in flatlist([d.children_recursive_f for d in series_parent.dirs.values()]))
         ), f"Expected no children to be book roots"
 
     def test_multi_nested(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.multi_nested_dir])
-        multi_nested = tree._dirs[MOCKED.multi_nested_dir.name]
+        multi_nested = tree.dirs[MOCKED.multi_nested_dir.name]
         xt.is_not_book_root(multi_nested)
         assert multi_nested.has_only_structure("container"), xt.msg.structure_is(multi_nested, "container")
         for d in multi_nested.dirs.values():
@@ -528,11 +622,11 @@ class test_tree_structures:
         xt.is_book_root(single_mp3)
         xt.is_book_root(single_m4b)
 
-        for f in single_mp3.files:
+        for f in single_mp3._files:
             assert f.has_only_structure("single"), xt.msg.structure_is(f, "single")
-        for f in single_m4b.files:
+        for f in single_m4b._files:
             assert f.has_only_structure("single"), xt.msg.structure_is(f, "single")
-        for c in flatlist([single_mp3.children_recursive, single_m4b.children_recursive]):
+        for c in flatlist([single_mp3.children_recursive_f, single_m4b.children_recursive_f]):
             xt.is_not_book_root(c)
 
     def test_single_nested(self):
@@ -541,7 +635,7 @@ class test_tree_structures:
         assert single_nested.has_only_structure("single"), xt.msg.structure_has(single_nested, "single")
         xt.is_book_root(single_nested)
 
-        for c in single_nested.children_recursive:
+        for c in single_nested.children_recursive_f:
             assert c.has_only_structures("single", "nested"), xt.msg.structure_is(c, ("single", "nested"))
             xt.is_not_book_root(c)
 
@@ -550,15 +644,15 @@ class test_tree_structures_series:
 
     def test_books_and_series(self, Chanur_Series: list[Audiobook]):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[Chanur_Series[0].path])
-        series_parent = tree._dirs[Chanur_Series[0].path.name]
-        found_paths = list(isorted([b.path for b in tree.books_and_series]))
+        series_parent = tree.dirs[Chanur_Series[0].path.name]
+        found_paths = list(isorted([b.path for b in tree.books_and_series_f]))
         assert not tree.is_book_root
         assert not series_parent.is_book_root
-        assert len(tree.books_and_series) == len(
+        assert len(tree.books_and_series_f) == len(
             found_paths
-        ), f"Expected {len(tree.books_and_series)} books and series, found {len(found_paths)}"
-        assert len(tree.books_and_series) == len(Chanur_Series)
-        assert len(tree.books) == len(Chanur_Series) - 1
+        ), f"Expected {len(tree.books_and_series_f)} books and series, found {len(found_paths)}"
+        assert len(tree.books_and_series_f) == len(Chanur_Series)
+        assert len(tree.books_f) == len(Chanur_Series) - 1
         assert all((f.is_book_root for f in tree.books)), "All books and series should be book roots"
         assert found_paths == [b.path for b in Chanur_Series]
 
@@ -569,19 +663,21 @@ class test_tree_structures_series:
         assert not series_parent.is_book_root
         assert series_parent.has_only_structure("series_parent")
 
-        assert all((c.has_all_structures("series_book", "flat") for c in series_parent.children_recursive))
-        assert not any((c.has_structure("nested") for c in series_parent.children_recursive))
+        assert all((c.has_all_structures("series_book", "flat") for c in series_parent.children_recursive_f))
+        assert not any((c.has_structure("nested") for c in series_parent.children_recursive_f))
         assert all((c.is_book_root for c in series_parent.dirs.values()))
-        assert not any((c.is_book_root for c in flatlist([d.children_recursive for d in series_parent.dirs.values()])))
+        assert not any(
+            (c.is_book_root for c in flatlist([d.children_recursive_f for d in series_parent.dirs.values()]))
+        )
 
     def test_series_books_are_book_roots(self, Chanur_Series: list[Audiobook]):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[Chanur_Series[0].path])
 
-        assert [b.path for b in tree.books] == [a.path for a in Chanur_Series[1:]]
+        assert [b.path for b in tree.books_f] == [a.path for a in Chanur_Series[1:]]
 
     def test_complex_container_with_series(self, nathan_lowell__nested_series_m4a: list[Audiobook]):
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^(Nathan Lowell)")
-        assert tree.dirs == {"Nathan Lowell": BooksTree(TEST_DIRS.inbox / "Nathan Lowell")}
+        assert tree.dirs_f == {"Nathan Lowell": BooksTree(TEST_DIRS.inbox / "Nathan Lowell")}
         container = tree.dirs["Nathan Lowell"]
         assert container.has_only_structure("container"), f"Expected ('container'), got {container.structure}"
 
@@ -638,7 +734,7 @@ class test_tree_structures_series:
             "03 The Hermit of Lammas Wood",
         ]
 
-        for c in [c for c in container.children_recursive if any_matching([c.name], series_books)]:
+        for c in [c for c in container.children_recursive_f if any_matching([c.name], series_books)]:
             assert c.has_structure("series_book")
             if c.is_file():
                 if c.path.suffix == ".m4a":
@@ -652,7 +748,7 @@ class test_tree_structures_series:
 
         for c in [
             c
-            for c in container.children_recursive
+            for c in container.children_recursive_f
             if c.depth > 2
             and not any_matching(
                 [c.name],

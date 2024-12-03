@@ -105,9 +105,7 @@ class InboxItem:
 
     @property
     def path(self) -> Path:
-        from src.lib.config import cfg
-
-        return cfg.inbox_dir / self.key
+        return self.tree.path
 
     @cached_property
     def basename(self):
@@ -187,7 +185,7 @@ class InboxItem:
 
     @property
     def is_filtered(self):
-        return not self.tree.root or not self.tree in self.tree.root.books_and_series
+        return not self.tree.root or not self.tree in self.tree.root.books_and_series_f
 
     @property
     def is_maybe_series_book(self):

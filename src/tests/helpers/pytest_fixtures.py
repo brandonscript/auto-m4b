@@ -69,7 +69,12 @@ def indirect_fixture(request: pytest.FixtureRequest):
 
 @pytest.fixture(scope="function", params=[("fixture_names")])
 def indirect_fixtures(request: pytest.FixtureRequest):
-    return request.getfixturevalue(request.param)
+    if isinstance(request.param, str):
+        return request.getfixturevalue(request.param)
+    fixtures = (
+        request.param if any((isinstance(request.param, list), isinstance(request.param, tuple))) else [request.param]
+    )
+    return tuple(request.getfixturevalue(f) for f in fixtures)
 
 
 def rm_from_inbox(*names: str):
@@ -638,8 +643,8 @@ def reset_all(reset_match_filter, reset_failed):
 
     from src.lib.config import cfg
 
+    InboxState().destroy()  # type: ignore
     inbox = InboxState()
-    inbox.destroy()  # type: ignore
     clean_dirs([TEST_DIRS.archive, TEST_DIRS.converted, TEST_DIRS.working])
     cfg.SLEEP_TIME = 0.1
     cfg.WAIT_TIME = 0.5
@@ -658,6 +663,7 @@ def reset_all(reset_match_filter, reset_failed):
     clean_dirs([TEST_DIRS.archive, TEST_DIRS.converted, TEST_DIRS.working])
     inbox.destroy()  # type: ignore
     cfg.PID_FILE.unlink(missing_ok=True)
+    inbox = InboxState()
 
 
 @pytest.fixture(scope="function", autouse=False)
@@ -704,11 +710,12 @@ def disable_archiving():
 
 @pytest.fixture(scope="function", autouse=False)
 def reset_inbox_state():
+    InboxState().destroy()  # type: ignore
     inbox = InboxState()
-    inbox.destroy()  # type: ignore
     inbox.scan()
     yield inbox
     inbox.destroy()  # type: ignore
+    inbox = InboxState()
 
 
 @pytest.fixture(scope="function", autouse=False)
