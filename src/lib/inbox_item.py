@@ -188,12 +188,12 @@ class InboxItem:
         return not self.tree.root or not self.tree in self.tree.root.books_and_series_f
 
     @property
-    def is_maybe_series_book(self):
+    def is_series_book(self):
         return self.tree.has_structure("series_book")
         # return len(Path(self.key).parts) > 1
 
     @property
-    def is_maybe_series_parent(self):
+    def is_series_parent(self):
         return self.tree.has_structure("series_parent")
         # return any(
         #     [
@@ -205,7 +205,7 @@ class InboxItem:
     @property
     def is_first_book_in_series(self):
         return (
-            self.is_maybe_series_book
+            self.is_series_book
             and (parent := self.series_parent)
             and (series_books := parent.series_books)
             and series_books[0] == self
@@ -214,7 +214,7 @@ class InboxItem:
     @property
     def is_last_book_in_series(self):
         return (
-            self.is_maybe_series_book
+            self.is_series_book
             and (parent := self.series_parent)
             and (series_books := parent.series_books)
             and series_books[-1] == self
@@ -225,7 +225,7 @@ class InboxItem:
         from src.lib.inbox_state import InboxState
 
         inbox = InboxState()
-        if not self.is_maybe_series_book:
+        if not self.is_series_book:
             return None
         return inbox.get(self.series_key)
 
@@ -234,13 +234,13 @@ class InboxItem:
         from src.lib.inbox_state import InboxState
 
         inbox = InboxState()
-        if not self.is_maybe_series_parent:
+        if not self.is_series_parent:
             return []
 
         return inbox.series_items_for_key(self.key)
 
     @property
-    def series_key(self):
+    def series_key(self) -> None | str:
         if not self.tree.root or not self.tree.has_structure("series_book"):
             return None
 
@@ -257,7 +257,7 @@ class InboxItem:
     @property
     # @ttl_cache(maxsize=6, ttl=10)
     def num_books_in_series(self):
-        if not self.is_maybe_series_parent:
+        if not self.is_series_parent:
             return -1
         return len(self.series_books)
 

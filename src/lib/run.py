@@ -124,11 +124,6 @@ def print_banner(after: Callable[..., Any] | None = None):
 
     dash = "-" * 25
 
-    if skip:
-        ...
-    else:
-        ...
-
     if not skip:
         print_mint(f"{dash}  ⌐◒-◒  auto-m4b • {current_local_time}  {dash}")
 
@@ -156,9 +151,9 @@ def print_banner(after: Callable[..., Any] | None = None):
 def print_book_series_header(book: InboxItem | None, progress: bool = True, done: bool = False):
     if not book:
         return
-    if book.is_maybe_series_parent:
+    if book.is_series_parent:
         parent = book
-    elif not ((parent := book.series_parent) and parent.is_maybe_series_parent):
+    elif not ((parent := book.series_parent) and parent.is_series_parent):
         return
 
     indicator = Tinta()
@@ -176,7 +171,7 @@ def print_book_series_header(book: InboxItem | None, progress: bool = True, done
 
 def print_book_header(book: InboxItem | None):
 
-    if not book or book.is_maybe_series_parent:
+    if not book or book.is_series_parent:
         return
     print_book_series_header(book)
     box(book.basename, color="mint")
@@ -704,7 +699,7 @@ def move_converted_book_and_extras(book: Audiobook):
 
 
 def cleanup_series_dir(parent: InboxItem | None):
-    if not parent or not parent.is_maybe_series_parent:
+    if not parent or not parent.is_series_parent:
         print_debug(f"{parent} is not a series parent, can't move series extras or clean up")
         return
 
@@ -912,7 +907,7 @@ def process_inbox():
         b = process_book(b, item)
         divider("\n", "\n")
 
-        if item.is_maybe_series_book and item.is_last_book_in_series:
+        if item.is_series_book and item.is_last_book_in_series:
             cleanup_series_dir(item.series_parent)
 
     print_footer(b)

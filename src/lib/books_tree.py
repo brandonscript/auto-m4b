@@ -787,7 +787,17 @@ class BooksTree(BaseModel):
 
     @property
     def key(self):
-        return str(self.path.relative_to(self.root.path)) if self.root and self.is_book_root else self.path.name
+        if not (root := self.root):
+            print_debug(f"No root found for '{self.name}' when accessing `key` prop")
+            return self.name
+
+        from src.lib.fs_utils import try_relative_to
+
+        return (
+            str(self.path.relative_to(root.path))
+            if self.is_book_root or self.has_structure("series_parent")
+            else str(try_relative_to(self.path.name, root.path))
+        )
 
     @property
     def date_created(self):

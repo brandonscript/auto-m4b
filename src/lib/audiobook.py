@@ -240,11 +240,11 @@ class Audiobook(BaseModel):
     @property
     def is_maybe_series_book(self):
         # return self.structure == "multi_book_series"
-        return self._inbox_item.is_maybe_series_book if self._inbox_item else False
+        return self._inbox_item.is_series_book if self._inbox_item else False
 
     @property
     def is_maybe_series_parent(self):
-        return self._inbox_item.is_maybe_series_parent if self._inbox_item else False
+        return self._inbox_item.is_series_parent if self._inbox_item else False
 
     @property
     def is_first_book_in_series(self):

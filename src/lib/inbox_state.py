@@ -20,7 +20,7 @@ SCAN_CALLS = 0
 
 
 def filter_series_parents(d: dict[str, "InboxItem"]):
-    return {k: v for k, v in d.items() if not v.is_maybe_series_parent}
+    return {k: v for k, v in d.items() if not v.is_series_parent}
 
 
 def scanner(func: Callable[..., Any]):
@@ -299,7 +299,7 @@ class InboxState(Hasher):
         return [
             v
             for _k, v in self._items.items()
-            if v.series_key == key or Path(v.key).parts[0] == key and v.is_maybe_series_book
+            if v.series_key == key or Path(v.key).parts[0] == key and v.is_series_book
         ]
 
     @property
