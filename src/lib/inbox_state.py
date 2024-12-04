@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from collections.abc import Callable
 from functools import wraps
@@ -11,7 +12,7 @@ from src.lib.books_tree import BooksTree
 from src.lib.formatters import friendly_short_date
 from src.lib.fs_utils import find_root_from_path, try_relative_to
 from src.lib.hasher import Hasher
-from src.lib.inbox_item import get_item, get_key, InboxItem, InboxItemStatus
+from src.lib.inbox_item import get_key, InboxItem, InboxItemStatus
 from src.lib.misc import any_in, singleton
 from src.lib.strings import en
 from src.lib.term import print_debug, print_notice
@@ -95,7 +96,13 @@ class InboxState(Hasher):
         return self._get(key_path_or_book)
 
     @requires_scan
+    def get_like(self, key_or_expr: str | Path | BooksTree | Audiobook):
+        return [v for k, v in self._items.items() if re.search(str(key_or_expr), k, re.I)]
+
+    @requires_scan
     def get_many(self, keys_paths_or_books: list[str | Path | Audiobook]):
+        if not isinstance(keys_paths_or_books, list):
+            raise ValueError("You must pass a list of keys to .get_many()")
         return [(k, self._get(k)) for k in keys_paths_or_books]
 
     def _get(self, key_path_hash_or_book: str | Path | BooksTree | Audiobook | None) -> InboxItem | None:

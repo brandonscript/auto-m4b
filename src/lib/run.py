@@ -53,14 +53,14 @@ from src.lib.term import (
 
 
 def move_standalone_into_dir(book: Audiobook, item: InboxItem):
-    if not book.is_not_a("standalone_file", "m4b"):
+    if not book.tree.has_any_structure("single", "standalone_file") or not book.tree.is_file():
         return book, item
 
     ext = ensure_dot(book.orig_file_type)
 
     folder_name = item.path.stem
-    smart_print(f"\nMoving standalone {ext} into its own folder → ./{folder_name}/")
-    new_folder = cfg.inbox_dir / folder_name
+    smart_print(f"\nMoving single/standalone {ext} into its own folder → ./{folder_name}/")
+    new_folder = item.path.parent / folder_name
     new_folder.mkdir(exist_ok=True)
     mv_file_into_dir(item.path, new_folder, overwrite_mode="overwrite-silent")
 
@@ -69,8 +69,7 @@ def move_standalone_into_dir(book: Audiobook, item: InboxItem):
         mv_file_into_dir(f, new_folder)
 
     # update item
-    item = InboxItem(new_folder / new_folder)
-    item.reload()
+    item.update_path(new_folder)
     return item.to_audiobook(), item
 
 
@@ -478,8 +477,10 @@ def can_process_roman_numeral_book(book: Audiobook):
 
 
 def has_audio_files(book: Audiobook):
+    if book.inbox_dir.is_file():
+        raise FileNotFoundError(f"has_audio_files: '{book.inbox_dir}' is a file, not a folder")
     if not book.num_files("inbox"):
-        print_notice(f"{book.inbox_dir} does not contain any known audio files, skipping")
+        print_notice(f"'{book.inbox_dir}' does not contain any known audio files, skipping")
         fail_book(book, "No audio files found in this folder")
         return False
     return True
@@ -805,12 +806,13 @@ def process_book(b: int, item: InboxItem):
     # can't modify the inbox dir until we check whether it was modified recently
     book.log_file.unlink(missing_ok=True)
 
-    if book.is_a(("single", "standalone_file"), "m4b"):
-        b += process_already_m4b(book, item)
-        if item.is_gone:
-            return b
-    elif book.is_a("standalone_file", but_not="m4b"):
-        book, item = move_standalone_into_dir(book, item)
+    if book.tree.has_any_structure("single", "standalone_file"):
+        if book.orig_file_type == "m4b":
+            b += process_already_m4b(book, item)
+            if item.is_gone:
+                return b
+        elif book.tree.is_file():
+            book, item = move_standalone_into_dir(book, item)
 
     if not has_audio_files(book):
         return b

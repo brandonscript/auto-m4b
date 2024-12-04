@@ -44,7 +44,7 @@ def get_books_tree(
             if not path.is_absolute():
                 path = cfg.inbox_dir / str_path
             return BooksTree(path)
-        case "Path":
+        case "Path" | "PosixPath" | "WindowsPath":
             return BooksTree(cast(Path, key_path_or_book))
         case "InboxItem":
             return cast(InboxItem, key_path_or_book).tree
@@ -52,22 +52,10 @@ def get_books_tree(
             raise ValueError(f"Invalid type: {instancetype}")
 
 
-def get_item(key_path_or_book: "str | Path | Audiobook | InboxItem") -> "InboxItem":
-    from src.lib.config import cfg
-
-    if isinstance(key_path_or_book, str):
-        return InboxItem(cfg.inbox_dir / key_path_or_book)
-    if isinstance(key_path_or_book, Path):
-        return InboxItem(key_path_or_book)
-    if isinstance(key_path_or_book, Audiobook):
-        return InboxItem(key_path_or_book)
-    return key_path_or_book
-
-
 class InboxItem:
 
-    def __init__(self, book: str | Path | BooksTree | Audiobook):
-        self.tree = get_books_tree(book)
+    def __init__(self, tree: BooksTree):
+        self.tree = tree
 
         self.is_dir = self.tree.path.is_dir()
         self.is_file = self.tree.path.is_file()
@@ -97,7 +85,16 @@ class InboxItem:
         return self.key.__hash__()
 
     def reload(self):
-        self = InboxItem(self.path)
+        self = InboxItem(self.tree)
+
+    def update_path(self, path: Path):
+        self.tree.path = path
+        new_key = self.tree.key
+        if root := self.tree.root:
+            root.scan()
+            if new_tree := root.get(new_key):
+                self.tree = new_tree
+        self.reload()
 
     @property
     def key(self) -> str:

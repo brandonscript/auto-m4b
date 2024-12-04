@@ -23,7 +23,7 @@ from src.lib.fs_utils import (
 from src.lib.id3_utils import extract_cover_art, extract_metadata
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info
-from src.lib.typing import AudiobookFmt, BookStructure2, DirName, SizeFmt
+from src.lib.typing import AudiobookFmt, DirName, SizeFmt
 
 
 class Audiobook(BaseModel):
@@ -214,28 +214,6 @@ class Audiobook(BaseModel):
 
     def hash(self, for_dir: DirName = "inbox"):
         return hash_path_audio_files(getattr(self, for_dir + "_dir"))
-
-    def is_a(
-        self,
-        structure: BookStructure2 | tuple[BookStructure2, ...],
-        fmt: AudiobookFmt | None = None,
-        *,
-        but_not: AudiobookFmt | tuple[AudiobookFmt | None, ...] | None = None,
-    ):
-        if not isinstance(structure, tuple):
-            structure = (structure,)
-        if not isinstance(but_not, tuple):
-            but_not = (but_not,)
-        not_fmt_matches = not but_not or self.orig_file_type not in but_not
-        fmt_matches = not fmt or self.orig_file_type == fmt
-        return self.tree.has_any_structure(*structure) and fmt_matches and not_fmt_matches
-
-    def is_not_a(
-        self,
-        structure: BookStructure2 | tuple[BookStructure2, ...],
-        fmt: AudiobookFmt | None = None,
-    ):
-        return not self.is_a(structure, fmt)
 
     @property
     def is_maybe_series_book(self):

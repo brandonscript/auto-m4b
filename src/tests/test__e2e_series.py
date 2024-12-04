@@ -2,6 +2,7 @@ import pytest
 
 from src.auto_m4b import app
 from src.lib.audiobook import Audiobook
+from src.lib.inbox_state import InboxState
 from src.tests.helpers.pytest_utils import testutils
 
 
@@ -14,15 +15,16 @@ class test_series:
     def test_multi_series_container_single_m4a_and_flat_mp3s(
         self,
         nathan_lowell__nested_series_m4a,
-        # capfd: pytest.CaptureFixture[str],
+        capfd: pytest.CaptureFixture[str],
     ):
         testutils.set_match_filter("^(Nathan Lowell)")
+        books = InboxState().get_like("^(Nathan Lowell)")
         app(max_loops=1)
-        # assert testutils.assert_processed_output(
-        #     capfd,
-        #     nathan_lowell__nested_series_m4a,
-        #     loops=[testutils.check_output(already_converted_eq=1)],
-        # )
+        assert testutils.assert_processed_output(
+            capfd,
+            *[b.path for b in books if not b.tree.has_structure("series_parent")],
+            loops=[testutils.check_output(converted_eq=22, already_converted_eq=0)],
+        )
 
     @pytest.mark.parametrize("backups_enabled", [False, True])
     def test_convert_series_backups_on_off(
