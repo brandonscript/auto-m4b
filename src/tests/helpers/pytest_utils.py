@@ -8,6 +8,7 @@ from typing import Any, cast, overload
 
 from pydantic import BaseModel
 from pytest import CaptureFixture
+from rapidfuzz import process
 from tinta import Tinta
 
 from src.lib.audiobook import Audiobook
@@ -543,7 +544,10 @@ class testutils:
         books = [Audiobook(Path(b)) if not isinstance(b, Audiobook) else b for b in exp_books]
 
         processed = cls.get_all_processed_books(out)
-        did_process_all = all([book.key in processed for book in books])
+        exact_matches = [book.key in processed for book in books]
+        if not (did_process_all := all(exact_matches)):
+            fuzzy_matches = [process.extractOne(book.key, processed) for book in books]
+            did_process_all = all([m for m in fuzzy_matches if m and m[1] > 85])
         ok = did_process_all and len(processed) == len(books)
         books_list = f"\n{listify([book.key for book in books])}" if books else ""
         processed_list = f"\n{listify(processed)}" if processed else ""

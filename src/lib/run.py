@@ -13,6 +13,7 @@ from src.lib.formatters import (
     human_elapsed_time,
     pluralize,
     pluralize_with_count,
+    truncate_middle,
 )
 from src.lib.fs_utils import *
 from src.lib.fs_utils import _mv_or_cp_dir_contents
@@ -179,7 +180,7 @@ def print_book_header(book: InboxItem | None):
 def print_book_done(b: int, book: Audiobook, elapsedtime: int):
     smart_print(
         Tinta("\nConverted")
-        .mint(book.basename)
+        .mint(truncate_middle(book.basename, 50))
         .clear(f"in {human_elapsed_time(elapsedtime, relative=False)} 🐾✨🥞")
         .to_str()
     )
@@ -643,6 +644,7 @@ def move_desc_file(book: Audiobook):
 
 def print_moving_to_converted(book):
     ln = "Moving to converted books folder → "
+
     smart_print(f"{ln}{tint_path(linebreak_path(book.converted_file, indent=len(ln)))}")
 
 

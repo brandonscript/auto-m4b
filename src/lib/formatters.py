@@ -211,3 +211,10 @@ def to_audiobook_fmt(s: str, ignore_errors: bool = False) -> AudiobookFmt | None
             raise ValueError(f"Invalid audio format: {s}")
         return None
     return cast(AudiobookFmt, s.replace(".", ""))
+
+
+def truncate_middle(s: str, max_len: int) -> str:
+    if len(s) <= max_len:
+        return s
+    half_len = max_len // 2
+    return f"{s[:half_len]}...{s[-half_len:]}"
