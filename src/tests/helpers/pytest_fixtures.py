@@ -427,6 +427,36 @@ def roman_numeral__mp3():
 
 
 @pytest.fixture(scope="function", autouse=False)
+def fails__mixed_mp3():
+    """A mixed book that fails to convert because its structure can't be determined."""
+    name = "fails__mixed_mp3"
+    book = TEST_DIRS.inbox / name
+    book.mkdir(parents=True, exist_ok=True)
+
+    for i in range(1, 6):
+        testutils.make_mock_file(book / f"fails__mixed_mp3_{i}.mp3")
+    d1 = book / "subdir_5_1"
+    d1.mkdir(parents=True, exist_ok=True)
+    d1f1 = d1 / "balloon_baboon_falls_book3__mp3.mp3"
+    d1f2 = d1 / "supermoons_are_orange_and_sometimes_red_wow!__mp3.mp3"
+
+    d2 = book / "yet_another_subdir_42_19"
+    d2.mkdir(parents=True, exist_ok=True)
+    d2f1 = d2 / "book2_the_constant_noise_that_keeps_humming_in_my_kitchen__mp3.mp3"
+    d2f2 = d2 / "everest_is_a_very_tall_mountain__mp3.mp3"
+    for f in [d1f1, d1f2, d2f1, d2f2]:
+        testutils.make_mock_file(f)
+
+    testutils.set_match_filter(name)
+    yield Audiobook(book)
+    testutils.set_match_filter(None)
+    shutil.rmtree(book, ignore_errors=True)
+    shutil.rmtree(TEST_DIRS.working / "build" / name, ignore_errors=True)
+    shutil.rmtree(TEST_DIRS.working / "fix" / name, ignore_errors=True)
+    shutil.rmtree(TEST_DIRS.working / "merge" / name, ignore_errors=True)
+
+
+@pytest.fixture(scope="function", autouse=False)
 def blank_audiobook():
     """Create a fake mp3 audiobook with one completely valid audiofile that plays a tone A4 for 2 seconds."""
     book = TEST_DIRS.inbox / "blank_audiobook"
@@ -729,6 +759,8 @@ def requires_empty_inbox():
         shutil.move(TEST_DIRS.inbox, backup_inbox)
 
     TEST_DIRS.inbox.mkdir(parents=True, exist_ok=True)
+
+    InboxState().destroy()  # type: ignore
 
     yield TEST_DIRS.inbox
 

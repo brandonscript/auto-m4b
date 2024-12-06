@@ -132,7 +132,10 @@ def flatlist(*args: L | Sequence[L] | Sequence[Sequence[L]]) -> Sequence[L]:
         if is_sequence(arg):
             return _flatten(arg)
         elif is_generator(arg):
-            return _flatten(list(arg))
+            arg = list(arg)
+            if not arg:
+                return []
+            return _flatten(arg)
         elif isinstance(arg, map):
             return list(arg)
         else:
@@ -420,13 +423,38 @@ def singleton(class_: type[C]) -> type[C]:
     return cast(type[C], class_w)
 
 
-def fix_ffprobe(counter: int = 0):
-    from src.lib.term import print_warning
-
+def ffprobe_paths():
     paths_to_add = ["/opt/homebrew/bin", "/usr/local/bin/"]
     for path in paths_to_add:
         if Path(path) not in sys.path and Path(path).exists():
             sys.path.append(path)
+
+    return os.pathsep.join(paths_to_add)
+
+
+def check_ffprobe():
+    from ffmpeg import Error, probe
+
+    assert Error
+    assert probe
+
+    assert (
+        subprocess.run(
+            "ffprobe -version",
+            capture_output=True,
+            shell=True,
+            env={
+                "PATH": ffprobe_paths(),
+            },
+        ).returncode
+        == 0
+    )
+
+
+def fix_ffprobe(counter: int = 0):
+    from src.lib.term import print_warning
+
+    check_ffprobe()
 
     fix_cmd = "pip uninstall ffmpeg-python python-ffmpeg -y && pip install ffmpeg-python"
 

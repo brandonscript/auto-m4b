@@ -12,6 +12,7 @@ from rapidfuzz import process
 from tinta import Tinta
 
 from src.lib.audiobook import Audiobook
+from src.lib.books_tree import BooksTree
 from src.lib.config import cfg, OnComplete
 from src.lib.formatters import human_elapsed_time, listify, pluralize_with_count
 from src.lib.fs_utils import flatten_files_in_dir, inbox_last_updated_at
@@ -533,7 +534,7 @@ class testutils:
     def assert_processed_output(
         cls,
         out: str | CaptureFixture[str],
-        *exp_books: str | Path | Audiobook,
+        *exp_books: str | Path | Audiobook | BooksTree,
         loops: list[check_output] | None = None,
         starting_loop: int = 0,
     ) -> bool:
@@ -541,7 +542,9 @@ class testutils:
         if isinstance(out, CaptureFixture):
             out = cls.get_stdout(out)
 
-        books = [Audiobook(Path(b)) if not isinstance(b, Audiobook) else b for b in exp_books]
+        converted_root = BooksTree(TEST_DIRS.converted)
+
+        books = [BooksTree(b, root=converted_root) if not isinstance(b, BooksTree) else b for b in exp_books]
 
         processed = cls.get_all_processed_books(out)
         exact_matches = [book.key in processed for book in books]

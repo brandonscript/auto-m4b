@@ -29,27 +29,6 @@ class test_unhappy_paths:
         yield
 
     @pytest.mark.order(ORDER)
-    def test_nonstandard_bitrate_mp3s(
-        self,
-        bitrate_nonstandard__mp3: Audiobook,
-        the_crusades_through_arab_eyes__flat_mp3: Audiobook,
-        capfd: CaptureFixture[str],
-    ):
-
-        testutils.set_match_filter("^(bitrate_nonstandard|the_crusades)")
-        app(max_loops=1)
-        assert testutils.assert_processed_output(
-            capfd,
-            bitrate_nonstandard__mp3,
-            the_crusades_through_arab_eyes__flat_mp3,
-            loops=[testutils.check_output(found_books_eq=2, converted_eq=2)],
-        )
-        assert bitrate_nonstandard__mp3.converted_dir.exists()
-        assert the_crusades_through_arab_eyes__flat_mp3.converted_dir.exists()
-
-    ORDER += 1
-
-    @pytest.mark.order(ORDER)
     def test_failed_books_only_print_once(self, roman_numeral__mp3: Audiobook, capfd: CaptureFixture[str]):
         app(max_loops=3)
         # assert the message only appears once
@@ -415,21 +394,25 @@ class test_unhappy_paths:
     ORDER += 1
 
     @pytest.mark.order(ORDER)
-    def test_multi_disc_fails(
+    def test_mixed_fails(
         self,
-        old_mill__multidisc_mp3: Audiobook,
-        disable_multidisc,
+        requires_empty_inbox,
+        fails__mixed_mp3: Audiobook,
         capfd: CaptureFixture[str],
     ):
 
-        shutil.rmtree(old_mill__multidisc_mp3.converted_dir, ignore_errors=True)
+        for d in [_ for b in (fails__mixed_mp3,) for _ in (b.backup_dir, b.converted_dir)]:
+            shutil.rmtree(d, ignore_errors=True)
+
         time.sleep(2)
         app(max_loops=2)
         out = testutils.get_stdout(capfd)
         assert out.count(en.MULTI_ERR) == 1
         assert testutils.assert_processed_output(
             out,
-            loops=[testutils.check_output(found_books_eq=1, converted_eq=0)],
+            loops=[
+                testutils.check_output(found_books_eq=1, converted_eq=0),
+            ],
         )
 
     ORDER += 1
@@ -438,15 +421,13 @@ class test_unhappy_paths:
     @pytest.mark.order(ORDER)
     def test_failed_notify_doesnt_repeat_after_convert(
         self,
+        add_extra_books,
         requires_empty_inbox,
         tower_treasure__flat_mp3: Audiobook,
-        missing_chums__mixed_mp3: Audiobook,
-        old_mill__multidisc_mp3: Audiobook,
+        fails__mixed_mp3: Audiobook,
         tiny__flat_mp3: Audiobook,
         the_sunlit_man__flat_mp3: Audiobook,
-        disable_multidisc,
         enable_archiving,
-        add_extra_books,
         capfd: CaptureFixture[str],
     ):
 
@@ -454,27 +435,35 @@ class test_unhappy_paths:
             shutil.rmtree(tiny__flat_mp3.inbox_dir, ignore_errors=True)
             shutil.rmtree(the_sunlit_man__flat_mp3.inbox_dir, ignore_errors=True)
 
-        testutils.set_match_filter("^(tower|missing|old)")
+        InboxState().destroy()  # type: ignore
+
+        testutils.set_match_filter("^(tower|fails|tiny|the_sunlit)")
         for d in [
             _
             for b in (
                 tower_treasure__flat_mp3,
-                missing_chums__mixed_mp3,
-                old_mill__multidisc_mp3,
+                fails__mixed_mp3,
             )
             for _ in (b.backup_dir, b.converted_dir)
         ]:
             shutil.rmtree(d, ignore_errors=True)
 
         time.sleep(2)
-        app(max_loops=2)
+        app(max_loops=3)
         out = testutils.get_stdout(capfd)
-        assert out.count(en.MULTI_ERR) == 2
+        assert out.count(en.MULTI_ERR) == 1
+
+        books = [tower_treasure__flat_mp3]
+        if add_extra_books:
+            books.extend([tiny__flat_mp3, the_sunlit_man__flat_mp3])
+
         assert testutils.assert_processed_output(
             out,
-            tower_treasure__flat_mp3,
+            *books,
             loops=[
-                testutils.check_output(found_books_eq=3, converted_eq=1),
+                testutils.check_output(
+                    found_books_eq=4 if add_extra_books else 2, converted_eq=3 if add_extra_books else 1
+                ),
             ],
         )
 

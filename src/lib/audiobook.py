@@ -155,7 +155,9 @@ class Audiobook(BaseModel):
 
     @property
     def converted_dir(self) -> Path:
-        return cfg.converted_dir.resolve() / self.key
+        if (p := cfg.converted_dir.resolve() / self.key).suffix == ".m4b":
+            return p.with_suffix("")
+        return p
 
     @property
     def archive_dir(self) -> Path:
@@ -180,12 +182,13 @@ class Audiobook(BaseModel):
     def converted_file(self) -> Path:
         from src.lib.fs_utils import find_first_audio_file
 
-        if self.converted_dir.suffix == ".m4b":
-            return self.converted_dir
+        # if self.converted_dir.suffix == ".m4b":
+        #     return self.converted_dir
         try:
             return find_first_audio_file(self.converted_dir, ext="m4b")
         except FileNotFoundError:
-            return self.converted_dir / f"{self.basename}.m4b"
+            filename = b.with_suffix("") if (b := Path(self.basename)) and b.suffix == ".m4b" else b.with_suffix(".m4b")
+            return self.converted_dir / filename
 
     @property
     def sample_audio1(self):

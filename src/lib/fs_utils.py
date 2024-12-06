@@ -2,6 +2,7 @@ import fnmatch
 import os
 import re
 import shutil
+import statistics
 import time
 from collections.abc import Generator, Iterable
 from pathlib import Path
@@ -99,7 +100,7 @@ def find_files_in_dir(  # type: ignore
     """
 
     ignore_files = ignore_files or []
-    only_file_exts = only_file_exts or []
+    only_file_exts = [ensure_dot(ext) for ext in only_file_exts or []]
 
     if d.is_file():
         raise NotADirectoryError(f"'find_files_in_dir': {d} is a file, not a directory")
@@ -1285,16 +1286,34 @@ def calculate_gcs_percentage(strs: list[str] | list[Path], *, precision: int = 3
     return round(len(gcs or "") / longest_filename_length, precision)
 
 
-def get_similarity(strs: list[str] | list[Path], precision: int = 2) -> float:
+def get_similarity(
+    strs: list[str] | list[Path] | list[str | Path], precision: int = 2, median=False, distinct=False
+) -> float:
     """Uses the Levenshtein distance to calculate the similarity of a list of strings.
-    Returns a dict of the paths and their similarity scores (0-1), rounded to the specified precision.
+    Returns the average similarity of strings/paths (0-1), rounded to the specified precision.
+    Optionally computes the median similarity instead of the average, and setting distinct=True will only compare distinct pairs of strings.
     """
 
     from rapidfuzz import fuzz, process
 
     # if there are no paths to compare to, return 0
     if len(strs) < 2:
-        return -1
+        return -1.0
+
+    def avg(lst: list[float], div: int = 1) -> float:
+        if distinct:
+            lst = list(set(lst))
+        return round((sum(lst) / len(lst)) / div, precision)
+
+    def med(lst: list[float], div: int = 1) -> float:
+        if distinct:
+            lst = list(set(lst))
+        return round(statistics.median(lst) / div, precision)
+
+    # if there are more than two paths, compare each path to the others and average the scores
+    if len(strs) > 2:
+        multi_scores = [get_similarity([s1, s2]) for i, s1 in enumerate(strs) for j, s2 in enumerate(strs) if i < j]
+        return avg(multi_scores) if not median else med(multi_scores)
 
     # Extract just the base filenames (without extensions)
     base_names = [Path(s).stem for s in strs]
@@ -1302,7 +1321,7 @@ def get_similarity(strs: list[str] | list[Path], precision: int = 2) -> float:
     def scores_without_idx(i: int, _strs: list[str]) -> list[str]:
         return [s for j, s in enumerate(_strs) if j != i]
 
-    # Compare each basename to the other basenames until all have been compared
+    # Compare left and right strings
     scores: dict[str, list[tuple[str, int | float, int]]] = {
         s: process.extract(s, scores_without_idx(i, base_names), scorer=fuzz.WRatio) for i, s in enumerate(base_names)
     }
@@ -1310,5 +1329,4 @@ def get_similarity(strs: list[str] | list[Path], precision: int = 2) -> float:
     # Average the scores
     scores_avg = {s: round(sum([score for _, score, _ in scores[s]]) / len(scores[s]), precision) for s in scores}
 
-    # Average the average scores
-    return round((sum(scores_avg.values()) / len(scores_avg)) / 100, precision)
+    return avg(list(scores_avg.values()), 100) if not median else med(list(scores_avg.values()), 100)

@@ -480,6 +480,16 @@ class test_tree_structures:
             assert c.has_only_structure("mixed"), xt.msg.structure_is(c, "mixed")
             xt.is_not_book_root(c)
 
+    def test_mixed_fails(self, fails__mixed_mp3: Audiobook):
+        tree = BooksTree(TEST_DIRS.inbox, match_filter=[fails__mixed_mp3.path])
+        mixed_fails = tree._dirs[fails__mixed_mp3.path.name]
+        assert mixed_fails.has_only_structure("mixed"), xt.msg.structure_is(mixed_fails, "mixed")
+        xt.is_book_root(mixed_fails)
+
+        for c in mixed_fails.children_recursive_f[:1]:
+            assert c.has_only_structure("mixed"), xt.msg.structure_is(c, "mixed")
+            xt.is_not_book_root(c)
+
     def test_multi_disc(self):
         # structure = determine_structure(
         #     TEST_DIRS.inbox,

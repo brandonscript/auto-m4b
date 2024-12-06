@@ -64,6 +64,24 @@ class test_happy_paths:
         )
         assert tiny__flat_mp3.converted_dir.exists()
 
+    def test_nonstandard_bitrate_mp3s(
+        self,
+        bitrate_nonstandard__mp3: Audiobook,
+        the_crusades_through_arab_eyes__flat_mp3: Audiobook,
+        capfd: CaptureFixture[str],
+    ):
+
+        testutils.set_match_filter("^(bitrate_nonstandard|the_crusades)")
+        app(max_loops=1)
+        assert testutils.assert_processed_output(
+            capfd,
+            bitrate_nonstandard__mp3,
+            the_crusades_through_arab_eyes__flat_mp3,
+            loops=[testutils.check_output(found_books_eq=2, converted_eq=2)],
+        )
+        assert bitrate_nonstandard__mp3.converted_dir.exists()
+        assert the_crusades_through_arab_eyes__flat_mp3.converted_dir.exists()
+
     @pytest.mark.parametrize(
         "starting_loop, max_loops, match_filter, watching_count, checking_count, banner_count",
         [

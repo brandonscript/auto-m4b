@@ -3,7 +3,7 @@ import time
 from collections.abc import Callable, Sequence
 from functools import cached_property
 from pathlib import Path
-from typing import Any, cast, Literal, overload, Self, TypeVar
+from typing import Any, cast, Literal, overload, Self, TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,9 @@ from src.lib.misc import (
 )
 from src.lib.term import print_debug, print_warning
 from src.lib.typing import AudiobookFmt, BookStructure2, copy_kwargs
+
+if TYPE_CHECKING:
+    from src.lib.audiobook import Audiobook
 
 
 def filter_matches(func):
@@ -101,7 +104,9 @@ class TreeNumInfo:
         self.parent = self.NumDict(tree.parent.path.name, self.curr) if tree.parent else None
         self.children = self.ArrNumDict([c.path.name for c in tree.children], self.curr)
         self.children_recursive = self.ArrNumDict([c.path.name for c in tree.children_recursive], self.curr)
+        self.files = self.ArrNumDict([f.path.name for f in tree.files], self.curr)
         self.files_recursive = self.ArrNumDict([f.path.name for f in tree.files_recursive], self.curr)
+        self.dirs = self.ArrNumDict([d.path.name for d in tree.dirs.values()], self.curr)
         self.dirs_recursive = self.ArrNumDict([d.path.name for d in tree.dirs_recursive], self.curr)
         self.siblings = self.ArrNumDict([s.path.name for s in (tree.siblings or [])], self.curr)
 
@@ -473,14 +478,25 @@ class TreeNumInfo:
 
             return self.have_start_nums and are_nums_sequential(self.start_nums, sort=True, skips_ok=True)
 
-        @property
-        def similarity(self):
+        def _similarity(self, median: bool = False, distinct: bool = False):
             from src.lib.fs_utils import get_similarity
 
             if not self._paths:
                 return 0.0
 
-            return get_similarity(self._paths)
+            return get_similarity(self._paths, distinct=distinct, median=median)
+
+        @property
+        def similarity(self):
+            return self._similarity()
+
+        @property
+        def median_similarity(self):
+            return self._similarity(median=True)
+
+        @property
+        def distinct_similarity(self):
+            return self._similarity(distinct=True)
 
         @property
         def similarity_to_curr(self):
@@ -490,7 +506,7 @@ class TreeNumInfo:
                 return 0.0
 
             curr = [self._curr._path] if self._curr else []
-            return get_similarity([*curr, *self._paths])
+            return get_similarity([*curr, *self._paths], distinct=True)
 
 
 F = TypeVar("F", bound="Callable[..., Any]")
@@ -536,9 +552,9 @@ class BooksTree(BaseModel):
 
     def __init__(
         self,
-        path: "Path | BooksTree | str" = ".",
+        path: "Path | Audiobook | BooksTree | str" = ".",
         *,
-        root: "Path | BooksTree | None" = None,
+        root: "Path | Audiobook | BooksTree | None" = None,
         # files: Sequence["str | Path | BooksTree"] = [],
         # dirs: Mapping[str, "str | Path | BooksTree"] = {},
         mindepth: int | None = None,
@@ -547,7 +563,7 @@ class BooksTree(BaseModel):
         match_filter: list[Path] | str | None = None,
         # structure: tuple[BookStructure2, ...] = (),
         # size: int = 0,
-        scan: bool = True,
+        scan: bool | None = None,
         determine_structure: bool = True,
     ):
         super().__init__()
@@ -555,9 +571,10 @@ class BooksTree(BaseModel):
             self.__dict__.update(path.__dict__)
             return
 
+        from src.lib.audiobook import Audiobook
         from src.lib.config import cfg
 
-        self.path = Path(path)
+        self.path = path.path if isinstance(path, (Audiobook, self.__class__)) else Path(path)
         self.root = (
             root
             if isinstance(root, BooksTree)
@@ -571,7 +588,7 @@ class BooksTree(BaseModel):
         # if dirs:
         #     self.dirs = {k: BooksTree(v, root=self.root, scan=False) for k, v in dirs.items()}
         self._match_filter = match_filter or cfg.MATCH_FILTER
-        if scan:
+        if scan or (scan is None and not root):
             self.scan(
                 mindepth=mindepth,
                 maxdepth=maxdepth,
@@ -1400,6 +1417,7 @@ class BooksTree(BaseModel):
                                 f"'{self}' might be a series_parent, but all its children have the same book number"
                             )
                             self.set_structures("mixed", recursive=True)
+
                     elif self.ni.curr.has_any_num and self.ni.parent and self.ni.parent.any_num_matches_curr:
                         print_warning(f"'{self}' might be a series_book, but its parent has the same book number")
 
@@ -1475,10 +1493,16 @@ class BooksTree(BaseModel):
                 and not self.ni.children.nums_are_sequential
                 and not self.ni.children.are_missing_nums
             ):
-                # Containers are inherently not book roots, which means they can only contain standalone files, single/flat titles, or series parents
-                self.add_structures("container")
+                if len(self._files) > 1 and self.ni.files.distinct_similarity > 0.8:
+                    # If we have files that are very similar, but still other dirs/files, we can't be sure if we should treat it as a container or not – treat it as mixed
+                    self.add_structures("mixed")
+                else:
+                    # Containers are inherently not book roots, which means they can only contain standalone files, single/flat titles, or series parents
+                    self.add_structures("container")
             elif self.has_files_and_dirs and (
-                not has_only_single_or_standalone_files or self.ni.children.are_missing_nums
+                not has_only_single_or_standalone_files
+                or self.ni.children.are_missing_nums
+                or self.ni.children.distinct_similarity < 0.7
             ):
                 # If there are more than one dir or file (or both), it's a mixed
                 self.set_structures("mixed")
@@ -1572,9 +1596,9 @@ class BooksTree(BaseModel):
             self.remove_structures("unknown")
 
         if any_in(structure, ["mixed"]) and any_matching(self.structure, ["multi_", "series_", "container"]):
-            print_debug(
-                f"{self.path} has {self.structure} but about to add 'mixed' which supercedes all structures, so removing all other structures"
-            )
+            # print_debug(
+            #     f"{self.path} has {self.structure} but about to add 'mixed' which supercedes all structures, so removing all other structures"
+            # )
             self.set_structures("mixed", recursive=recursive)
             return self.structure
 

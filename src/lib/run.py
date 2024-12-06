@@ -819,6 +819,11 @@ def process_book(b: int, item: InboxItem):
     if not has_audio_files(book):
         return b
 
+    if book.tree.has_structure("mixed"):
+        print_error(en.MULTI_ERR)
+        fail_book(book, en.MULTI_ERR)
+        return b
+
     if not can_process_multi_dir(book):
         return b
 
