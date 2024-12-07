@@ -5,6 +5,7 @@ class en:
     INBOX_RECENTLY_MODIFIED = "New activity detected in the inbox..."
     BOOK_RECENTLY_MODIFIED = "Skipping this book, it was recently updated and may still be copying"
     BOOK_SHOULD_RETRY = "This book previously failed, but it has been updated – trying again"
+    BOOK_NEEDS_FLATTENING = "Audio files for this book are in a subfolder, moving them to the book's root folder..."
     DEBUG_WAITING_FOR_INBOX = "Waiting for inbox updates:"
     DEBUG_INBOX_HASH_UNCHANGED = "Inbox hash is the same, no changes since"
     BOOK_ALREADY_CONVERTED = "This book has already been converted 🎉"

@@ -555,6 +555,8 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
 
     # make a deeply nested container dir
     list(map(testutils.make_mock_file, [f for f in MOCKED.container_dirs if "." in f.name]))
+    for f in [*MOCKED.container_dir_d1_standalone_files, *MOCKED.container_dir_d2_standalone_files]:
+        testutils.make_mock_file(f, size=51 * 1024)
 
     # make a multi-series directory
     names = ["Dawn", "High Noon", "Dusk"]
@@ -616,7 +618,7 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
 
     # make standalone files
     for f in MOCKED.standalone_files:
-        testutils.make_mock_file(f)
+        testutils.make_mock_file(f, size=51 * 1024)
 
     # make a single files
     testutils.make_mock_file(MOCKED.single_dir_m4b / "mock_book_single_m4b.m4b")

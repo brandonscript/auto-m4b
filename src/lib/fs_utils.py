@@ -6,7 +6,7 @@ import statistics
 import time
 from collections.abc import Generator, Iterable
 from pathlib import Path
-from typing import Any, Literal, NamedTuple, overload, TYPE_CHECKING
+from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
 from src.lib.config import AUDIO_EXTS
 from src.lib.formatters import ensure_dot, friendly_date, human_size, strip_dot
@@ -619,13 +619,36 @@ def name_matches(name: Any, match_filter: str | None = None) -> bool:
     return re.search(match_filter, str(name), re.I) is not None
 
 
-def try_relative_to(p: "str | Path | BooksTree", root: "str | Path | BooksTree") -> "Path | BooksTree | None":
+@overload
+def try_relative_to(p: str, root: str) -> str | None: ...
+
+
+@overload
+def try_relative_to(p: Path, root: Path) -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: str, root: Path) -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: Path, root: str) -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: "BooksTree", root: "BooksTree") -> str | Path | None: ...
+
+
+def try_relative_to(p: "str | Path | BooksTree", root: "str | Path | BooksTree") -> str | Path | None:
     from src.lib.books_tree import BooksTree
 
     try:
-        p = p.path if isinstance(p, BooksTree) else Path(p)
-        root = root.path if isinstance(root, BooksTree) else Path(root)
-        return p.relative_to(root)
+        _p = p.path if isinstance(p, BooksTree) else Path(p)
+        _root = root.path if isinstance(root, BooksTree) else Path(root)
+        rel = _p.relative_to(_root)
+        if isinstance(_p, str) and isinstance(rel, Path):
+            return str(rel)
+        return cast(Path, rel)
     except ValueError:
         return None
 
@@ -1298,7 +1321,7 @@ def get_similarity(
 
     # if there are no paths to compare to, return 0
     if len(strs) < 2:
-        return -1.0
+        return 1.0
 
     def avg(lst: list[float], div: int = 1) -> float:
         if distinct:

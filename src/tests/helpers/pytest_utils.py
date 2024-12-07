@@ -291,7 +291,7 @@ class testutils:
         cfg.ON_COMPLETE = "test_do_nothing"
 
     @classmethod
-    def make_mock_file(cls, path: Path, size: int = 1024 * 5):
+    def make_mock_file(cls, path: Path, *, size: int = 1024 * 5):
         if not path.is_absolute():
             path = TEST_DIRS.inbox / path
         path.parent.mkdir(parents=True, exist_ok=True)

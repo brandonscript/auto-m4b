@@ -490,7 +490,7 @@ def has_audio_files(book: Audiobook):
 def flatten_nested_book(book: Audiobook):
     if book.tree.has_structure("nested"):
         smart_print(
-            f"Audio files for this book are a subfolder, moving them to the book's root folder...",
+            en.BOOK_NEEDS_FLATTENING,
             end="",
         )
         flatten_files_in_dir(book.inbox_dir)

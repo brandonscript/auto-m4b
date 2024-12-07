@@ -3,6 +3,7 @@ import pytest
 from src.auto_m4b import app
 from src.lib.audiobook import Audiobook
 from src.lib.inbox_state import InboxState
+from src.lib.strings import en
 from src.tests.helpers.pytest_utils import testutils
 
 
@@ -80,3 +81,13 @@ class test_series:
             "xEZNYAN.png",
         ]:
             assert (series_parent.converted_dir / pic).exists()
+
+    def test_flattens_nested_books_and_series_in_container(
+        self,
+        secret_project_series__nested_flat_mixed: Audiobook,
+        capfd: pytest.CaptureFixture[str],
+    ):
+
+        app(max_loops=1)
+        stdout, _ = capfd.readouterr()
+        assert stdout.count(en.BOOK_NEEDS_FLATTENING) == 2

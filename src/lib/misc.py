@@ -13,6 +13,24 @@ from dotenv import dotenv_values
 from src.lib.typing import DirName, ENV_DIRS
 
 
+def is_gt_100mb(size: int) -> bool:
+    if "pytest" in sys.modules:
+        return size > 100 * 1024
+    return size > 100 * 1024 * 1024
+
+
+def is_gt_75mb(size: int) -> bool:
+    if "pytest" in sys.modules:
+        return size > 75 * 1024
+    return size > 75 * 1024 * 1024
+
+
+def is_gt_50mb(size: int) -> bool:
+    if "pytest" in sys.modules:
+        return size > 50 * 1024
+    return size > 50 * 1024 * 1024
+
+
 def get_git_root():
     return Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"]).strip().decode("utf-8"))
 

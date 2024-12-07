@@ -361,19 +361,6 @@ class test_unhappy_paths:
     ORDER += 1
 
     @pytest.mark.order(ORDER)
-    def test_secret_project_series__nested_flat_mixed(
-        self,
-        secret_project_series__nested_flat_mixed: Audiobook,
-        capfd: CaptureFixture[str],
-    ):
-
-        app(max_loops=1)
-        stdout, _ = capfd.readouterr()
-        assert en.MULTI_ERR in stdout
-
-    ORDER += 1
-
-    @pytest.mark.order(ORDER)
     def test_long_filename__mp3(self, conspiracy_theories__flat_mp3: Audiobook):
         inbox = InboxState()
 

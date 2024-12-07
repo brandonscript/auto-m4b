@@ -100,6 +100,9 @@ class MOCKED:
         *_container_dir_others,
         *_container_dir_files,
     ]
+    container_dir_d1_standalone_files = [_container_dir_others[0], _container_dir_others[2]]
+    container_dir_d2_standalone_files = [_container_dir_series_books[3]]
+
     all_dirs_no_series = isorted(flat_dirs + [mixed_dir] + multi_dirs + single_dirs)
 
     all_dirs = isorted(flat_dirs + [mixed_dir] + multi_dirs + series_dirs[1:] + single_dirs + container_dirs)
@@ -116,6 +119,16 @@ class MOCKED:
         standalone_mp3_2,
         _container_dir_series_books[3],
     ]
+    standalone_files_proper = isorted(
+        [
+            standalone_m4b,
+            standalone_mp3_1,
+            standalone_mp3_2,
+            _container_dir_series_books[3],
+            _container_dir_others[0],
+            _container_dir_others[2],
+        ]
+    )
     standalone_files_d1 = deepcopy(standalone_files[:3])
 
     empty = TEST_DIRS.inbox / "mock_book_empty"
