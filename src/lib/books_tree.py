@@ -977,14 +977,6 @@ class BooksTree(BaseModel):
         return bool(self._files and not self._dirs)
 
     @property
-    def has_files_and_dirs(self):
-        return bool(self._files and self._dirs)
-
-    @property
-    def has_multiple_files_and_no_dirs(self):
-        return bool(len(self._files) > 1 and not self._dirs)
-
-    @property
     def has_no_files_or_dirs(self):
         return bool(not self._files and not self._dirs)
 
@@ -1229,6 +1221,9 @@ class BooksTree(BaseModel):
 
         is_match = self.match_filter and _match_filter_func([self.path], self.match_filter, root=root)
 
+        if is_match:
+            ...
+
         if (self.is_root and not is_root) or (not self.is_root and is_root):
             raise ValueError(
                 f"Root status of the current path and the root path do not match: {self.is_root=}, {is_root=}"
@@ -1244,24 +1239,44 @@ class BooksTree(BaseModel):
             [c.determine_if_book_root() for c in self.children_recursive]
             return self.structure
 
-        # Let's refactor this and deal with the simple use cases first.
-        if _is_simple_flat := self.is_dir() and self.depth == 1 and self.files and not self.dirs:
-            self.add_structures("flat", recursive=True)
+        is_empty = not self.files and not self.dirs
+        has_one_file_and_no_dirs = bool(len(self.files) == 1 and not self.dirs)
+        has_multiple_files_and_no_dirs = bool(len(self.files) > 1 and not self.dirs)
+
+        if _is_nested := (_is_nested_inner := self.depth > 1 and self.is_dir() and not self.siblings) or (
+            _is_nested_root := self.is_dir() and all((len(d.dirs) <= 1 for d in self.dirs_recursive)) and not self.files
+        ):
+            self.add_structures("nested", recursive=True)
+            if len(self.files_recursive) == 1:
+                self.add_structures("single", recursive=True)
+            else:
+                self.add_structures("flat", recursive=True)
             return self.structure
 
-        if (
+        # Let's refactor this and deal with the simple use cases first.
+        if (_is_basic_flat := self.is_dir() and self.depth == 1 and self.files and not self.dirs) or (
             _is_flat_series_book := self.is_dir()
             and self.parent
             and self.parent.has_structure("series_parent")
             and self.files
             and not self.dirs
         ):
-            self.add_structures("flat", recursive=True)
+            if len(self.files) == 1:
+                self.add_structures("single", recursive=True)
+            else:
+                self.add_structures("flat", recursive=True)
+            return self.structure
+
+        if _is_already_single_standalone := self.is_file() and self.has_any_structure("single", "standalone_file"):
             return self.structure
 
         if _is_simple_standalone := self.is_file() and self.depth == 1:
             self.add_structures("standalone_file")
             return self.structure
+
+        # if is_nested:
+        #     self.add_structures("nested", recursive=True)
+        #     return self.structure
 
         # DEBUG only: bypass the structure determination if the current path does not match the filter
         # if not _match_filter_func([self.path], self.match_filter, root=root):
@@ -1272,10 +1287,6 @@ class BooksTree(BaseModel):
 
         # --- standalone (no parent / parent == root)
         if self.is_file():
-
-            # KEEP
-            if self.has_any_structure("single", "standalone_file"):
-                return self.structure
 
             only_one_file = len(parent.files) == 1 or parent.has_structure("single")
             mixed_file_types = len(set([f.path.suffix for f in parent.files])) > 1
@@ -1298,8 +1309,8 @@ class BooksTree(BaseModel):
 
                 if only_one_file:
                     self.set_structures("single")
-                    if parent.has_structure("single") and parent.parent and parent.parent.has_structure("single"):
-                        self.add_structures("nested")
+                    # if parent.has_structure("single") and parent.parent and parent.parent.has_structure("single"):
+                    #     self.add_structures("nested")
 
                 # if (
                 #     (only_one_file or mixed_file_types or container_root.ni.files_recursive.similarity < 0.7)
@@ -1313,24 +1324,24 @@ class BooksTree(BaseModel):
                 #         and not self.ni.siblings.are_likely("series")
                 #     ):
                 #         self.add_structures("nested")
-                if parent.has_structure("mixed"):
-                    self.add_structures("mixed")
-                elif not parent.has_structures_like("multi_", "series_"):
-                    self.add_structures("flat")
-                    if parent.has_any_structure("nested", "container") and depth > 2:
-                        self.add_structures("nested")
-                if parent.has_any_structure("multi_disc") or (
-                    self.i.is_likely_multi_disc and parent.has_files_and_dirs
-                ):
-                    if parent and not parent.has_structure("multi_disc"):
-                        parent.set_structures("multi_parent", "multi_disc")
-                    self.add_structures("multi_disc")
-                elif parent.has_any_structure("multi_part") or (
-                    self.i.is_likely_multi_part and parent.has_files_and_dirs
-                ):
-                    if parent and not parent.has_structure("multi_part"):
-                        parent.set_structures("multi_parent", "multi_part")
-                    self.add_structures("multi_part")
+                # if parent.has_structure("mixed"):
+                #     self.add_structures("mixed")
+                # elif not parent.has_structures_like("multi_", "series_"):
+                #     self.add_structures("flat")
+                # if parent.has_any_structure("nested", "container") and depth > 2:
+                #     self.add_structures("nested")
+                # if parent.has_any_structure("multi_disc") or (
+                #     self.i.is_likely_multi_disc and parent.has_files_and_dirs
+                # ):
+                #     if parent and not parent.has_structure("multi_disc"):
+                #         parent.set_structures("multi_parent", "multi_disc")
+                #     self.add_structures("multi_disc")
+                # elif parent.has_any_structure("multi_part") or (
+                #     self.i.is_likely_multi_part and parent.has_files_and_dirs
+                # ):
+                #     if parent and not parent.has_structure("multi_part"):
+                #         parent.set_structures("multi_parent", "multi_part")
+                #     self.add_structures("multi_part")
                 # elif parent.has_any_structure("series_parent") or self.i.is_likely_series_book:
                 #     if not self.i.curr.has_any_num:
                 #         # If the current file has no numbers, but the parent is a series parent, it's likely a false positive and we should set the parent to mixed
@@ -1349,38 +1360,38 @@ class BooksTree(BaseModel):
         else:
             parent.structure = cast(tuple[BookStructure2, ...], parent.structure)
 
-        has_one_file_and_no_dirs = bool(len(self._files) == 1 and not self._dirs)
+        if has_multiple_files_and_no_dirs:
+            self.set_structures("flat", recursive=True)
 
         # if depth < 2 and len(self.files_recursive) == 1:
         #     self.set_structures("single", recursive=True)
         # elif has_one_file_and_no_dirs and not self.has_structure_like("multi_"):
         #     self.add_structures("single")
-        if self.has_multiple_files_and_no_dirs:
-            self.set_structures("flat", recursive=True)
-            if parent.has_any_structure("nested", "container"):
-                self.add_structures("nested")
-        elif self.has_files_and_dirs:
-            self.set_structures("container")
-        elif self.has_no_files_or_dirs:
+
+        # if parent.has_any_structure("nested", "container"):
+        #     self.add_structures("nested")
+        elif is_empty:
             self.set_structures("empty")
             return self.structure
 
         # KEEP
         if len(self.files_recursive) == 1:
             self.add_structures("single", recursive=True)
-            if len(self.dirs) == 1:
-                nested_dir = self.dirs[next(iter(self.dirs.keys()))]
-                nested_dir.add_structures("nested", recursive=True)
+            # if len(self.dirs) == 1:
+            #     nested_dir = self.dirs[next(iter(self.dirs.keys()))]
+            #     nested_dir.add_structures("nested", recursive=True)
 
         # recursively check to see if there is only one nested dir in each dir
-        if (
-            self.dirs
-            and not self.files
-            and parent.has_any_structure("_root_", "container")
-            and len(self.files_recursive) > 1
-            and not any((len(self.dirs) > 1, *[len(d.dirs) > 1 for d in self.dirs_recursive]))
-        ):
-            self.add_structures("flat", "nested", recursive=True)
+        # if (
+        #     self.dirs
+        #     and not self.files
+        #     and parent.has_any_structure("_root_", "container")
+        #     and len(self.files_recursive) > 1
+        #     and not any((len(self.dirs) > 1, *[len(d.dirs) > 1 for d in self.dirs_recursive]))
+        # ):
+        #     self.add_structures("flat", "nested", recursive=True)
+
+        is_known_multi = False
 
         # if multi_disc_parent:
         if not parent.is_root:
@@ -1396,12 +1407,12 @@ class BooksTree(BaseModel):
             if not self.structure:
                 self.set_structures("unknown")
 
-            if (
-                depth > 1
-                and (self.has_only_dirs and self.has_any_structure("single", "flat", "series_book"))
-                or parent.has_structure("container")
-            ):
-                self.add_structures("nested")
+            # if (
+            #     depth > 1
+            #     and (self.has_only_dirs and self.has_any_structure("single", "flat", "series_book"))
+            #     or parent.has_structure("container")
+            # ):
+            #     self.add_structures("nested")
 
             if any(
                 (
@@ -1418,8 +1429,6 @@ class BooksTree(BaseModel):
                 # - If the children have different series numbers, it's likely a series parent.
                 # - If the children don't have series numbers, but are all files with dissimilar names, and
                 #   sufficiently sized to be standalones, this is likely a series parent.
-
-                is_known_multi = False
 
                 parent_ok = False
                 children_ok = False
@@ -1525,10 +1534,10 @@ class BooksTree(BaseModel):
                     # elif self.i.curr.has_any_num and self.i.parent and self.i.parent.any_num_matches_curr:
                     #     print_warning(f"'{self}' might be a series_book, but its parent has the same book number")
 
-                # Add nested if it has a <struc> no. and child dirs
-                # TODO: Don't think we want this
-                # if is_known_multi and self.ni.curr.has_any_num and self._dirs:
-                #     self.add_structures("nested", recursive="dirs")
+                    # Add nested if it has a <struc> no. and child dirs
+                    # TODO: Don't think we want this
+                    # if is_known_multi and self.ni.curr.has_any_num and self._dirs:
+                    #     self.add_structures("nested", recursive="dirs")
 
                 if not is_known_multi and self.siblings and not self.i.siblings.have_any_nums:
                     # Set to "mixed"
@@ -1554,8 +1563,11 @@ class BooksTree(BaseModel):
                     self.set_structures("mixed", recursive=True)
                     # [p.set_structures("mixed") for p in [*self._files, *self._dirs.values()]]
 
-            if not parent.structure or parent.has_structure("unknown"):
-                parent.set_structures(*self.structure)
+        if has_files_and_dirs := not is_known_multi and bool(self.files and self.dirs):
+            self.add_structures("container")
+
+        if not parent.structure or parent.has_structure("unknown"):
+            parent.set_structures(*self.structure)
 
         # first pass check for single/standalone files
         [f.determine_structure(self) for f in self.files]
@@ -1600,10 +1612,10 @@ class BooksTree(BaseModel):
                 (f.has_any_structure("standalone_file", "single") for f in self.files)
             )
 
-            if not self.files and len(self.dirs) == 1:
-                # Nested dirs cannot contain files, and can only contain one dir.
-                self.add_structures("nested")
-            elif (
+            # if not self.files and len(self.dirs) == 1:
+            #     # Nested dirs cannot contain files, and can only contain one dir.
+            #     self.add_structures("nested")
+            if (
                 self.dirs
                 and has_only_single_or_standalone_files
                 and not self.i.children.nums_are_sequential
@@ -1615,7 +1627,7 @@ class BooksTree(BaseModel):
                 else:
                     # Containers are inherently not book roots, which means they can only contain standalone files, single/flat titles, or series parents
                     self.add_structures("container")
-            elif self.has_files_and_dirs and (
+            elif has_files_and_dirs and (
                 not has_only_single_or_standalone_files
                 or self.i.children.are_missing_nums
                 or self.i.children.distinct_similarity < 0.7

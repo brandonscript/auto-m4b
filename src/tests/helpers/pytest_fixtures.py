@@ -551,7 +551,7 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
 
     # make a book with a single flat nested folder
     for i in range(1, 4):
-        testutils.make_mock_file(MOCKED.flat_nested_dir / "inner_dir" / f"mock_book_flat_nested - part_{i}.mp3")
+        testutils.make_mock_file(MOCKED.nested_dir / "inner_dir" / f"mock_book_nested - part_{i}.mp3")
 
     # make a deeply nested container dir
     list(map(testutils.make_mock_file, [f for f in MOCKED.container_dirs if "." in f.name]))

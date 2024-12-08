@@ -439,34 +439,35 @@ class test_tree_structures:
         assert series_parent.has_only_structure("series_parent"), xt.msg.structure_is(series_parent, "series_parent")
         for c in series_parent.children[:3]:
             assert c.has_only_structures("series_book", "flat"), xt.msg.structure_has(c, ("series_book", "flat"))
-        assert series_parent.children[3].has_only_structures("series_book", "single"), xt.msg.structure_has(
-            series_parent.children[3], ("series_book", "single")
+        assert series_parent.children[3].has_only_structures("series_book", "standalone_file"), xt.msg.structure_has(
+            series_parent.children[3], ("series_book", "standalone_file")
         )
 
         flat_unrelated = container_dir.children[1]
-        assert flat_unrelated.has_only_structures("flat", "nested"), xt.msg.structure_has(
-            flat_unrelated, ("flat", "nested")
-        )
+        assert flat_unrelated.has_only_structures("flat"), xt.msg.structure_has(flat_unrelated, ("flat"))
         for c in flat_unrelated.children_recursive_f:
-            assert c.has_only_structures("flat", "nested"), xt.msg.structure_has(c, ("flat", "nested"))
-        single_mp3 = container_dir.children[2]
-        assert single_mp3.has_only_structure("single"), xt.msg.structure_is(single_mp3, "single")
-        single_m4b = container_dir.children[3]
-        assert single_m4b.has_only_structure("single"), xt.msg.structure_is(single_m4b, "single")
+            assert c.has_only_structures("flat"), xt.msg.structure_has(c, ("flat"))
+        standalone_mp3 = container_dir.children[2]
+        assert standalone_mp3.has_only_structure("standalone_file"), xt.msg.structure_is(
+            standalone_mp3, "standalone_file"
+        )
+        standalone_m4b = container_dir.children[3]
+        assert standalone_m4b.has_only_structure("standalone_file"), xt.msg.structure_is(
+            standalone_m4b, "standalone_file"
+        )
         for c in container_dir.children:
             assert c.not_has_structure("container"), xt.msg.structure_not_has(c, "container")
 
-    def test_flat_nested_dir(self):
-        tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.flat_nested_dir])
-        flat_nested_dir = tree.dirs[MOCKED.flat_nested_dir.name]
-        assert flat_nested_dir.parent
-        assert flat_nested_dir.has_only_structures("flat", "nested"), xt.msg.structure_is(
-            flat_nested_dir, ("flat", "nested")
-        )
-        xt.is_root(flat_nested_dir.parent)
-        xt.is_not_root(flat_nested_dir)
-        xt.is_book_root(flat_nested_dir)
-        for c in flat_nested_dir.children_recursive_f:
+    def test_nested_dir(self):
+        tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.nested_dir])
+        nested_dir = tree.dirs[MOCKED.nested_dir.name]
+        assert nested_dir.parent
+        assert nested_dir.has_only_structures("flat", "nested"), xt.msg.structure_is(nested_dir, ("flat", "nested"))
+        xt.is_root(nested_dir.parent)
+        xt.is_not_root(nested_dir)
+        xt.is_book_root(nested_dir)
+        for c in nested_dir.children_recursive_f:
+            assert c.container_root == nested_dir
             assert c.has_only_structures("flat", "nested"), xt.msg.structure_is(c, ("flat", "nested"))
             xt.is_not_book_root(c)
 
@@ -672,7 +673,9 @@ class test_tree_structures:
     def test_single_nested(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.single_nested_dir_mp3])
         single_nested = tree.dirs[MOCKED.single_nested_dir_mp3.name]
-        assert single_nested.has_only_structure("single"), xt.msg.structure_has(single_nested, "single")
+        assert single_nested.has_only_structures("single", "nested"), xt.msg.structure_has(
+            single_nested, ("single", "nested")
+        )
         xt.is_book_root(single_nested)
 
         for c in single_nested.children_recursive_f:
@@ -806,7 +809,7 @@ class test_tree_finding:
         "expected_structure, path",
         [
             *[(("flat"), d) for d in MOCKED.flat_dirs],
-            (("flat", "nested"), MOCKED.flat_nested_dir),
+            (("flat", "nested"), MOCKED.nested_dir),
             ("series_parent", MOCKED.series_parent_dir),
             (("multi_parent", "multi_disc"), MOCKED.multi_disc_dir),
             (("multi_parent", "multi_part"), MOCKED.multi_part_dir),
