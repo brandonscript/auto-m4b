@@ -1310,14 +1310,19 @@ def calculate_gcs_percentage(strs: list[str] | list[Path], *, precision: int = 3
 
 
 def get_similarity(
-    strs: list[str] | list[Path] | list[str | Path], precision: int = 2, median=False, distinct=False
+    strs: list[str] | list[Path] | list[str | Path],
+    precision: int = 2,
+    median=False,
+    distinct=False,
+    lowest=False,
+    highest=False,
 ) -> float:
     """Uses the Levenshtein distance to calculate the similarity of a list of strings.
     Returns the average similarity of strings/paths (0-1), rounded to the specified precision.
     Optionally computes the median similarity instead of the average, and setting distinct=True will only compare distinct pairs of strings.
     """
 
-    from rapidfuzz import fuzz, process
+    from rapidfuzz import process
 
     # if there are no paths to compare to, return 0
     if len(strs) < 2:
@@ -1333,23 +1338,27 @@ def get_similarity(
             lst = list(set(lst))
         return round(statistics.median(lst) / div, precision)
 
-    # if there are more than two paths, compare each path to the others and average the scores
-    if len(strs) > 2:
-        multi_scores = [get_similarity([s1, s2]) for i, s1 in enumerate(strs) for j, s2 in enumerate(strs) if i < j]
-        return avg(multi_scores) if not median else med(multi_scores)
-
     # Extract just the base filenames (without extensions)
     base_names = [Path(s).stem for s in strs]
 
-    def scores_without_idx(i: int, _strs: list[str]) -> list[str]:
-        return [s for j, s in enumerate(_strs) if j != i]
-
     # Compare left and right strings
     scores: dict[str, list[tuple[str, int | float, int]]] = {
-        s: process.extract(s, scores_without_idx(i, base_names), scorer=fuzz.WRatio) for i, s in enumerate(base_names)
+        s1: process.extract(s1, [b for b in base_names[i:] if b != s1]) for i, s1 in enumerate(base_names)
     }
 
-    # Average the scores
-    scores_avg = {s: round(sum([score for _, score, _ in scores[s]]) / len(scores[s]), precision) for s in scores}
+    flat_scores = [s for v in scores.values() for s in v]
 
-    return avg(list(scores_avg.values()), 100) if not median else med(list(scores_avg.values()), 100)
+    if lowest:
+        # Return the lowest score
+        return round(min([score for _, score, _ in flat_scores]) / 100, precision)
+
+    elif highest:
+        # Return the highest score
+        return round(max([score for _, score, _ in flat_scores]) / 100, precision)
+
+    # Average the scores
+    elif median:
+        return med([score for _, score, _ in flat_scores], 100)
+
+    else:
+        return avg([score for _, score, _ in flat_scores], 100)

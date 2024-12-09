@@ -631,11 +631,11 @@ class test_tree_structures:
     def test_multi_nested(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.multi_nested_dir])
         multi_nested = tree.dirs[MOCKED.multi_nested_dir.name]
-        xt.is_not_book_root(multi_nested)
-        assert multi_nested.has_only_structure("container"), xt.msg.structure_is(multi_nested, "container")
-        for d in multi_nested.dirs.values():
-            assert d.has_only_structures("flat", "nested"), xt.msg.structure_is(d, ("flat", "nested"))
-            xt.is_book_root(d)
+        xt.is_book_root(multi_nested)
+        assert multi_nested.has_only_structure("mixed"), xt.msg.structure_is(multi_nested, "mixed")
+        for d in multi_nested.children_recursive_f:
+            assert d.has_only_structures("mixed"), xt.msg.structure_is(d, ("mixed"))
+            xt.is_not_book_root(d)
 
     def test_multi_nested_sanderson(self, secret_project_series__nested_flat_mixed: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox)

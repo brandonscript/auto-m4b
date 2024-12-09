@@ -479,13 +479,15 @@ class TreeNumInfo:
 
             return self.have_start_nums and are_nums_sequential(self.start_nums, sort=True, skips_ok=True)
 
-        def _similarity(self, median: bool = False, distinct: bool = False):
+        def _similarity(
+            self, median: bool = False, distinct: bool = False, lowest: bool = False, highest: bool = False
+        ):
             from src.lib.fs_utils import get_similarity
 
             if not self._paths:
                 return 0.0
 
-            return get_similarity(self._paths, distinct=distinct, median=median)
+            return get_similarity(self._paths, distinct=distinct, median=median, lowest=lowest, highest=highest)
 
         @property
         def similarity(self):
@@ -498,6 +500,14 @@ class TreeNumInfo:
         @property
         def distinct_similarity(self):
             return self._similarity(distinct=True)
+
+        @property
+        def max_similarity(self):
+            return self._similarity(highest=True)
+
+        @property
+        def min_similarity(self):
+            return self._similarity(lowest=True)
 
         @property
         def similarity_to_curr(self):
@@ -1255,6 +1265,10 @@ class BooksTree(BaseModel):
         is_empty = not self.files and not self.dirs
         has_one_file_and_no_dirs = bool(len(self.files) == 1 and not self.dirs)
         has_multiple_files = len(self.files) > 1
+        has_multiple_dirs = len(self.dirs) > 1
+        has_files_and_dirs = bool(self.files and self.dirs)
+        has_one_file_and_dirs = bool(len(self.files) == 1 and self.dirs)
+        has_both_and_multiple_of_one = bool(has_files_and_dirs and (has_multiple_files or has_multiple_dirs))
         has_multiple_files_and_no_dirs = bool(len(self.files) > 1 and not self.dirs)
         parent_is_container = bool((p := self.parent) and p.has_structure("container"))
         parent_is_series_parent = bool((p := self.parent) and p.has_structure("series_parent"))
@@ -1267,9 +1281,12 @@ class BooksTree(BaseModel):
             [f.determine_structure(parent=self) for f in self.files]
             return self.structure
 
-        has_mixed_content = bool(self.files and self.dirs) or (
-            len(self.dirs) > 1 and not any((is_known_multi, is_series_parent_or_book))
+        has_mixed_content = (
+            has_files_and_dirs or has_multiple_dirs and not any((is_known_multi, is_series_parent_or_book))
         )
+
+        if is_match:
+            ...
 
         if _is_nested := (_is_nested_inner := self.depth > 1 and self.is_dir() and not self.siblings) or (
             _is_nested_root := self.is_dir() and all((len(d.dirs) <= 1 for d in self.dirs_recursive)) and not self.files
@@ -1302,47 +1319,6 @@ class BooksTree(BaseModel):
             self.add_structures("standalone_file")
             return self.structure
 
-        if is_match:
-            ...
-
-        if has_mixed_content:
-            [d.determine_structure(parent=self) for d in self.dirs.values()]
-            [f.determine_structure(parent=self) for f in self.files]
-
-            # KEEP
-            if has_multiple_files and (
-                (has_mixed_file_types := len(set([f.path.suffix for f in self.files])) > 1)
-                or (
-                    self.i.files.distinct_similarity < 0.8
-                    and (_all_sizes_gt_75mb := all(is_gt_75mb(f.size) for f in self.files))
-                )
-            ):
-                [f.set_structures("standalone_file") for f in self.files]
-            else:
-                # If we have mixed file types, that's fine, but if they are very similar, we can't be sure if we should treat it as a container or not – treat it as mixed
-                self.clear_structure()
-                self.set_structures("mixed", recursive=True)
-
-            if (
-                (_has_multiple_dirs := len(self.dirs) > 1)
-                and not any((is_known_multi, is_series_parent_or_book))
-                or (
-                    _is_likely_container := all(
-                        (
-                            c.has_any_structure("standalone_file", "single", "flat", "series_parent", "multi_parent")
-                            for c in self.children
-                        )
-                    )
-                )
-            ):
-                self.add_structures("container")
-            else:
-                try:
-                    self.add_structures("mixed", recursive=True)
-                except ValueError as e:
-                    ...
-            return self.structure
-
         # if is_nested:
         #     self.add_structures("nested", recursive=True)
         #     return self.structure
@@ -1353,6 +1329,47 @@ class BooksTree(BaseModel):
 
         if is_match:
             ...
+
+        if has_mixed_content:
+
+            if is_match:
+                ...
+
+            [d.determine_structure(parent=self) for d in self.dirs.values()]
+            [f.determine_structure(parent=self) for f in self.files]
+
+            # KEEP
+            if has_multiple_files and (
+                (has_mixed_file_types := len(set([f.path.suffix for f in self.files])) > 1)
+                or (
+                    (self.i.files.distinct_similarity < 0.8 or has_one_file_and_dirs)
+                    and (_all_sizes_gt_75mb := all(is_gt_75mb(f.size) for f in self.files))
+                )
+            ):
+                [f.set_structures("standalone_file") for f in self.files]
+
+            self.i.files_recursive.max_similarity
+
+            if (has_both_and_multiple_of_one) and (
+                (
+                    self.i.dirs.distinct_similarity > 0.8
+                    or self.i.files_recursive.distinct_similarity > 0.8
+                    or (self.i.files.max_similarity - self.i.files.min_similarity) > 0.2
+                )
+            ):
+                # If we have mixed file types, that's fine, but if they are very similar, we can't be
+                # sure if we should treat it as a container or not – treat it as mixed
+                self.clear_structure(recursive=True)
+                self.set_structures("mixed", recursive=True)
+                return self.structure
+
+            elif _is_likely_container := all(
+                (
+                    c.has_any_structure("standalone_file", "single", "flat", "series_parent", "multi_parent")
+                    for c in self.children
+                )
+            ):
+                self.set_structures("container")
 
         # --- standalone (no parent / parent == root)
         if self.is_file():
