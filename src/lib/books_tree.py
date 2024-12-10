@@ -1277,6 +1277,9 @@ class BooksTree(BaseModel):
         is_series_parent_or_book = self.determine_series_structure(parent)
 
         if self.has_any_structure("series_parent", "multi_parent", "multi_disc", "multi_part"):
+            if is_match:
+                ...
+
             [d.determine_structure(parent=self) for d in self.dirs.values()]
             [f.determine_structure(parent=self) for f in self.files]
             return self.structure
@@ -1289,7 +1292,9 @@ class BooksTree(BaseModel):
             ...
 
         if _is_nested := (_is_nested_inner := self.depth > 1 and self.is_dir() and not self.siblings) or (
-            _is_nested_root := self.is_dir() and all((len(d.dirs) <= 1 for d in self.dirs_recursive)) and not self.files
+            _is_nested_root := self.is_dir()
+            and all((len(d.dirs) <= 1 for d in [self, *self.dirs_recursive]))
+            and not self.files
         ):
             self.add_structures("nested", recursive=True)
             if len(self.files_recursive) == 1:
@@ -1350,9 +1355,10 @@ class BooksTree(BaseModel):
 
             self.i.files_recursive.max_similarity
 
-            if (has_both_and_multiple_of_one) and (
+            if (has_multiple_dirs or has_both_and_multiple_of_one) and (
                 (
                     self.i.dirs.distinct_similarity > 0.8
+                    or self.i.files.distinct_similarity > 0.9
                     or self.i.files_recursive.distinct_similarity > 0.8
                     or (self.i.files.max_similarity - self.i.files.min_similarity) > 0.2
                 )

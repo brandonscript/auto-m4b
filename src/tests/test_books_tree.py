@@ -641,12 +641,12 @@ class test_tree_structures:
         tree = BooksTree(TEST_DIRS.inbox)
         container = tree.dirs[secret_project_series__nested_flat_mixed.basename]
         xt.is_not_book_root(container)
-        assert container.has_only_structure("container"), xt.msg.structure_is(container, "container")
+        assert container.has_only_structure("series_parent"), xt.msg.structure_is(container, "series_parent")
         for d in container.dirs.values():
             if "Yumi" in d.name:
-                assert d.has_only_structures("single", "nested"), xt.msg.structure_is(d, ("single", "nested"))
+                assert d.has_only_structures("single", "series_book"), xt.msg.structure_is(d, ("single", "series_book"))
             else:
-                assert d.has_only_structure("flat"), xt.msg.structure_is(d, "flat")
+                assert d.has_only_structures("flat", "series_book"), xt.msg.structure_is(d, ("flat", "series_book"))
             xt.is_book_root(d)
 
     def test_singles(self):
