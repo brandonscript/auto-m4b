@@ -142,6 +142,15 @@ class testutils:
     def set_match_filter(cls, match_filter: str | None, delay: int = 0):
         time.sleep(delay)
         cls.print(f"Setting MATCH_FILTER to {match_filter}")
+        from src.lib.config import cfg
+
+        if match_filter is None:
+            os.environ.pop("MATCH_FILTER", None)
+            cfg.MATCH_FILTER = ""
+        else:
+            os.environ["MATCH_FILTER"] = match_filter
+            cfg.MATCH_FILTER = match_filter
+
         InboxState().set_match_filter(match_filter)
 
     @classmethod

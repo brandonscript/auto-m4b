@@ -718,7 +718,9 @@ class test_tree_structures_series:
 
         assert [b.path for b in tree.books_f] == [a.path for a in Chanur_Series[1:]]
 
-    def test_complex_container_with_series(self, nathan_lowell__nested_series_m4a: list[Audiobook]):
+    def test_complex_container_with_series(
+        self, requires_empty_inbox, nathan_lowell__nested_series_m4a: list[Audiobook]
+    ):
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^(Nathan Lowell)")
         assert tree.dirs_f == {"Nathan Lowell": BooksTree(TEST_DIRS.inbox / "Nathan Lowell")}
         container = tree.dirs["Nathan Lowell"]
@@ -741,7 +743,7 @@ class test_tree_structures_series:
             ),
         )
 
-        single_nested = cast(
+        single_dirs = cast(
             list[BooksTree], list(map(container.get_like, ["Dark Knight Station Origins", "Wizard's Butler"]))
         )
 
@@ -751,8 +753,8 @@ class test_tree_structures_series:
         for p in series_parents:
             assert p.has_only_structure("series_parent"), xt.msg.structure_is(p, "series_parent")
 
-        for f in single_nested:
-            assert f.has_only_structures("single", "nested"), xt.msg.structure_is(f, ("single", "nested"))
+        for f in single_dirs:
+            assert f.has_only_structures("single"), xt.msg.structure_is(f, ("single"))
 
         series_books = [
             "01 In Ashes Born",
@@ -778,16 +780,16 @@ class test_tree_structures_series:
         ]
 
         for c in [c for c in container.children_recursive_f if any_matching([c.name], series_books)]:
-            assert c.has_structure("series_book")
+            assert c.has_structure("series_book"), xt.msg.structure_has(c, "series_book")
             if c.is_file():
-                if c.path.suffix == ".m4a":
-                    assert c.has_structure("single")
+                if c.path.suffix == ".m4a" and not "Zypheria" in str(c.path):
+                    assert c.has_structure("single"), xt.msg.structure_has(c, "single")
                 elif c.path.suffix == ".mp3":
-                    assert c.has_structure("flat")
+                    assert c.has_structure("flat"), xt.msg.structure_has(c, "flat")
 
         assert (zypheria := container.get_like("02 Zypheria's Call"))
-        assert zypheria.has_structure("single")
-        assert zypheria.not_has_structure("nested")
+        assert zypheria.has_structure("standalone_file"), xt.msg.structure_has(zypheria, "standalone_file")
+        assert zypheria.not_has_structure("nested"), xt.msg.structure_not_has(zypheria, "nested")
 
         for c in [
             c

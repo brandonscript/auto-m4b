@@ -140,7 +140,7 @@ class TreeNumInfo:
             and not self.children.nums_match_each_other
             and not self.children.are_missing_nums
             and not self.curr.any_num_matches_curr
-            and self.children.distinct_similarity < 0.85
+            and self.children.distinct_similarity < 0.95
         ) or bool(re.search(r"(?:\b|_)series(?:\b|_)", self._tree.name.lower(), re.I))
 
     @property
@@ -277,13 +277,16 @@ class TreeNumInfo:
 
         @property
         def any_num_matches_curr(self):
-            return self._curr and any(
-                [
-                    self.disc_num_matches_curr,
-                    self.part_num_matches_curr,
-                    self.series_num_matches_curr,
-                    self.start_num_matches_curr,
-                ]
+            return bool(
+                self._curr
+                and any(
+                    [
+                        self.disc_num_matches_curr,
+                        self.part_num_matches_curr,
+                        self.series_num_matches_curr,
+                        self.start_num_matches_curr,
+                    ]
+                )
             )
 
     class ArrNumDict:
@@ -1257,9 +1260,13 @@ class BooksTree(BaseModel):
                 c for c in self.children_recursive if not c.structure or c.has_structure("unknown")
             ]:
                 raise ValueError(
-                    f"Expected structure to be determined for the following children: {'\n'.join([str(c) for c in children_without_structure])}"
+                    f"Expected structure to be determined for: {'\n'.join([str(c) for c in children_without_structure])}"
                 )
             [c.determine_if_book_root() for c in self.children_recursive]
+            return self.structure
+
+        if _is_empty := self.is_dir() and not any((self.dirs, self.files)):
+            self.set_structures("empty")
             return self.structure
 
         has_multiple_files = len(self.files) > 1
@@ -1329,15 +1336,15 @@ class BooksTree(BaseModel):
             [f.determine_structure(parent=self) for f in self.files]
 
             if has_multiple_files and (
-                (has_mixed_file_types := len(set([f.path.suffix for f in self.files])) > 1)
+                (_has_mixed_file_types := len(set([f.path.suffix for f in self.files])) > 1)
                 or (
-                    (self.i.files.distinct_similarity < 0.8 or bool(len(self.files) == 1 and self.dirs))
+                    (self.i.files.distinct_similarity < 0.8 or ((len(self.files) == 1 and self.dirs)))
                     and (_all_sizes_gt_75mb := all(is_gt_75mb(f.size) for f in self.files))
                 )
             ):
                 [f.set_structures("standalone_file") for f in self.files]
 
-            if (has_multiple_dirs or bool(has_files_and_dirs and (has_multiple_files or has_multiple_dirs))) and (
+            if (has_multiple_dirs or (has_files_and_dirs and (has_multiple_files or has_multiple_dirs))) and (
                 (
                     self.i.dirs.distinct_similarity > 0.8
                     or self.i.files.distinct_similarity > 0.9
