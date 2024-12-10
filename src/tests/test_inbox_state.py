@@ -4,6 +4,7 @@ from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.fs_utils import hash_path_audio_files
 from src.lib.inbox_state import InboxState
+from src.lib.misc import isorted
 from src.tests.helpers.pytest_utils import testutils
 
 
@@ -70,18 +71,20 @@ class TestInboxState:
         capfd: pytest.CaptureFixture[str],
     ):
 
-        testutils.set_match_filter("^(tower|missing|old|fails)")
+        testutils.set_match_filter("^(tower|missing|fails|tiny)")
 
         InboxState().destroy()  # type: ignore
         inbox = InboxState()
-        assert inbox.books_and_series == [
-            fails__mixed_mp3.tree,
-            missing_chums__mixed_mp3.tree,
-            tiny__flat_mp3.tree,
-            tower_treasure__flat_mp3.tree,
-        ]
+        assert isorted(inbox.tree.books_and_series_f) == isorted(
+            [
+                tower_treasure__flat_mp3.tree,
+                missing_chums__mixed_mp3.tree,
+                fails__mixed_mp3.tree,
+                tiny__flat_mp3.tree,
+            ]
+        )
 
-        assert len(inbox.items) == 4
+        assert len(inbox.matched_ok_books) == 4
 
-        for item in inbox.items.values():
+        for item in inbox.matched_ok_books.values():
             assert item.status == "new"
