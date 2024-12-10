@@ -1343,10 +1343,13 @@ def get_similarity(
 
     # Compare left and right strings
     scores: dict[str, list[tuple[str, int | float, int]]] = {
-        s1: process.extract(s1, [b for b in base_names[i:] if b != s1]) for i, s1 in enumerate(base_names)
+        s1: process.extract(s1, [b for j, b in enumerate(base_names) if i != j]) for i, s1 in enumerate(base_names)
     }
 
     flat_scores = [s for v in scores.values() for s in v]
+
+    if not flat_scores:
+        return 0.0
 
     if lowest:
         # Return the lowest score
