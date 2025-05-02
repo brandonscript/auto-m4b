@@ -16,8 +16,6 @@
         "${workspaceFolder}/.env.local.stardust",
         "--debug",
         "--test",
-        "--match",
-        "Touch of Frost"
       ]
       // "args": ["-l", "1", "--env", "${workspaceFolder}/.env.local.stardust", "--debug"]
     }

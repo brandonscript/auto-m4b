@@ -595,6 +595,10 @@ class BooksTree(BaseModel):
             if isinstance(root, BooksTree)
             else BooksTree(root, scan=False, match_filter=match_filter) if root is not None else None
         )
+
+        self._files: list["BooksTree"] = []
+        self._dirs: dict[str, "BooksTree"] = {}
+
         if r := self.root:
             if self.path != r.path and (existing := r.get_path(self.path)) and existing.structure:
                 self = existing
@@ -607,13 +611,6 @@ class BooksTree(BaseModel):
             else:
                 self.parent = r
 
-        self._files: list["BooksTree"] = []
-        self._dirs: dict[str, "BooksTree"] = {}
-
-        # if files:
-        #     self.files = [BooksTree(f, root=self.root, scan=False) for f in files]
-        # if dirs:
-        #     self.dirs = {k: BooksTree(v, root=self.root, scan=False) for k, v in dirs.items()}
         self._match_filter = match_filter or cfg.MATCH_FILTER
         if scan or (scan is None and not root):
             self.scan(

@@ -53,6 +53,15 @@ class test_happy_paths:
             loops=[testutils.check_output(found_books_eq=4, converted_eq=4)],
         )
 
+    def test_basic_book_m4b(self, blackmail_bibingka__flat_m4b: Audiobook, capfd: CaptureFixture[str]):
+        app(max_loops=1)
+        assert testutils.assert_processed_output(
+            capfd,
+            blackmail_bibingka__flat_m4b,
+            loops=[testutils.check_output(found_books_eq=1, converted_eq=1)],
+        )
+        assert blackmail_bibingka__flat_m4b.converted_dir.exists()
+
     def test_backup_book_mp3(self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str], enable_backups):
         app(max_loops=1)
         out = testutils.get_stdout(capfd)
@@ -221,7 +230,7 @@ class test_happy_paths:
             ),
         ],
     )
-    def test_backups_are_ok_when_flattening_multidisc_books(
+    def test_multidisc_backups_work_when_flattened(
         self,
         partial_flatten_backup_dirs: list[str],
         the_hobbit__multidisc_mp3: Audiobook,

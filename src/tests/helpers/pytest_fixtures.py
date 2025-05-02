@@ -62,12 +62,12 @@ def reset_match_filter():
     InboxState().set_match_filter(orig_cfg_match_filter)
 
 
-@pytest.fixture(scope="function", params=[("fixture_name")])
+@pytest.fixture(scope="function", params=["fixture_name"])
 def indirect_fixture(request: pytest.FixtureRequest):
     return request.getfixturevalue(request.param)
 
 
-@pytest.fixture(scope="function", params=[("fixture_names")])
+@pytest.fixture(scope="function", params=["fixture_names"])
 def indirect_fixtures(request: pytest.FixtureRequest):
     if isinstance(request.param, str):
         return request.getfixturevalue(request.param)
@@ -331,8 +331,15 @@ def conspiracy_theories__flat_mp3():
 
 
 @pytest.fixture(scope="function")
-def secret_project_series__nested_flat_mixed():
-    yield from load_test_fixture("secret_project_series__nested_flat_mixed", exclusive=True)
+def blackmail_bibingka__flat_m4b():
+
+    yield from load_test_fixture(
+        "blackmail_bibingka__flat_m4b",
+        exclusive=True,
+        override_name="Blackmail and Bibingka A Tita Rosie's Kitchen Mystery, Book 3",
+        match_filter="^(Blackmail and Bibingka)",
+        cleanup_inbox=True,
+    )
 
 
 @pytest.fixture(scope="function")

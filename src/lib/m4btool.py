@@ -49,7 +49,11 @@ class M4bTool:
         _("--no-chapter-reindexing")
 
         if (book.orig_file_type in ["m4a", "m4b"] or not book.has_id3_cover) and book.cover_art_file:
-            _(("--cover", dockerize_volume(book.cover_art_file)))
+            merge_cover_art_file = book._merge_cover_art_file or self.book.merge_dir / book.cover_art_file.relative_to(
+                self.book.inbox_dir
+            )
+            if merge_cover_art_file.exists():
+                _(("--cover", dockerize_volume(merge_cover_art_file)))
 
         if cfg.USE_FILENAMES_AS_CHAPTERS:
             _("--use-filenames-as-chapters")

@@ -1,2 +1,2 @@
 #!/bin/bash
-pipenv run pip uninstall ffmpeg-python python-ffmpeg -y && pip install ffmpeg-python
+poetry run pip uninstall ffmpeg-python python-ffmpeg -y && pip install ffmpeg-python

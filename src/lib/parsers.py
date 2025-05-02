@@ -1,6 +1,8 @@
+import contextlib
 import os
 import re
 import string
+import subprocess
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from itertools import combinations
@@ -14,10 +16,22 @@ from nltk.corpus import words
 from spacy.matcher import Matcher
 from spacy.ml import Doc
 
-nltk.download("words")
-english_words = set(words.words())
+from src.lib.term import print_debug
 
-nlp = spacy.load("en_core_web_sm")
+with contextlib.redirect_stdout(open(os.devnull, "w")):
+    nltk.download("words")
+    english_words = set(words.words())
+
+try:
+    # Load spaCy model silently by redirecting stdout/stderr temporarily
+    with contextlib.redirect_stdout(open(os.devnull, "w")), contextlib.redirect_stderr(open(os.devnull, "w")):
+        nlp = spacy.load("en_core_web_sm")
+except Exception as e:
+    print_debug(f"Error loading spaCy model: {e}")
+    # run `python -m spacy download en`
+    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+    nlp = spacy.load("en_core_web_sm")
+
 matcher = Matcher(nlp.vocab)
 matcher.add("PERSON", [[{"IS_ALPHA": True}]])
 matcher.add("WORK_OF_ART", [[{"IS_ALPHA": True}]])
@@ -39,7 +53,6 @@ from src.lib.misc import (
     isorted,
     re_group,
 )
-from src.lib.term import print_debug
 from src.lib.typing import AuthorNarrator, MEMO_TTL, NameParserTarget
 
 # TODO: Add test coverage for narrator with /

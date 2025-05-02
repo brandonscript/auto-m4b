@@ -14,13 +14,18 @@ def handle_err(e: Exception):
 
     from src.lib.config import cfg
 
-    with open(cfg.FATAL_FILE, "a") as f:
-        f.write(str(e))
+    if cfg.CRASH_PROTECTION:
+        with open(cfg.FATAL_FILE, "a") as f:
+            f.write(str(e))
 
     if cfg.DEBUG:
         print_red(f"\n{traceback.format_exc()}")
     else:
         print_error(f"Error: {e}")
+
+    if cfg.CRASH_PROTECTION:
+        err = f"auto-m4b fatally crashed - delete the error lock file before restarting:\n\n {cfg.FATAL_FILE}"
+        print_error(err)
 
     if "pytest" in sys.modules:
         raise e

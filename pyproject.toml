@@ -84,3 +84,54 @@ testpaths = ["src/tests"]
 python_files = ["*_test.py", "test_*.py"]
 python_classes = ["test_", "_test", "Test*"]
 python_functions = ["test_", "_test"]
+
+[tool.poetry]
+name = "auto-m4b"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+inflect = "^6.0.0"
+humanize = "^4.9.0"
+ffmpeg = "^1.4"
+ffmpeg-python = "0.2.0"
+numpy = "^1.26.0"
+pydantic = "^2.5.0"
+tinta = "0.1.7b5.post1"
+python-dotenv = "^1.0.0"
+columnar = "^1.4.1"
+# python-ffmpeg = "^1.0.17"
+cachetools = "^5.3.0"
+types-cachetools = "^5.3.0"
+rapidfuzz = "^3.0.0"
+bidict = "^0.22.0"
+regex = "^2023.10.3"
+mutagen = "^1.47.0"
+spacy = { version = "<4", extras = ["apple"], platform = "darwin" }
+nltk = "^3.8.1"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.11.6"
+black = "*"
+mypy = "*"
+pytest = "*"
+pytest-asyncio = "*"
+pillow = "*"
+pytest-order = "*"
+pytest-skip-slow = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+app = "src:main"
+forever = "src:main"
+docker = "src:main"
+tests = "pytest:main"
+fix-ffprobe = "scripts.fix_ffprobe:main"
+install-docker-m4b-tool = "scripts.install_docker_m4b_tool:main"
+start-docker-m4b-tool = "scripts.start_docker:main"

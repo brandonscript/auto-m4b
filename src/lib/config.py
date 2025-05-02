@@ -2,6 +2,7 @@ import argparse
 import functools
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -111,6 +112,15 @@ parser.add_argument(
     type=str,
     default=None,
 )
+parser.add_argument(
+    "--crash_protection",
+    help="Enable/disable crash protection (--crash_protection=off to disable). Default is True.",
+    action="store",
+    nargs="?",
+    const=True,
+    default=True,
+    type=lambda x: False if str(x).lower() in ("off", "false", "no", "n", "0") else True,
+)
 
 T = TypeVar("T", bound=object)
 D = TypeVar("D")
@@ -201,6 +211,7 @@ class AutoM4bArgs:
     test: bool | None
     max_loops: int
     match_filter: str | None
+    crash_protection: bool | None
 
     def __init__(
         self,
@@ -209,6 +220,7 @@ class AutoM4bArgs:
         test: bool | None = None,
         max_loops: int | None = None,
         match_filter: str | None = None,
+        crash_protection: bool | None = None,
     ):
         args = parser.parse_known_args()[0]
 
@@ -217,6 +229,7 @@ class AutoM4bArgs:
         self.test = pick(test, args.test, None)
         self.max_loops = pick(max_loops, args.max_loops, -1)
         self.match_filter = pick(match_filter, args.match_filter)
+        self.crash_protection = pick(crash_protection, args.crash_protection, True)
 
     def __str__(self) -> str:
         return to_json(self.__dict__)
@@ -247,8 +260,13 @@ def ensure_dir_exists_and_is_writable(path: Path, throw: bool = True) -> None:
 def use_pid_file():
     from src.lib.config import cfg
 
+    if not cfg.CRASH_PROTECTION:
+        # Delete the fatal file if it exists
+        if cfg.FATAL_FILE.exists():
+            cfg.FATAL_FILE.unlink()
+
     # read the pid file and look for a line starting with `FATAL` in all caps, if so, the app crashed and we should exit
-    if cfg.FATAL_FILE.exists():
+    if cfg.FATAL_FILE.exists() and cfg.CRASH_PROTECTION:
         err = f"auto-m4b fatally crashed on last run, once the problem is fixed, please delete the following lock file to continue:\n\n {cfg.FATAL_FILE}\n\n{cfg.FATAL_FILE.open().read()}"
         print_error(err)
         raise RuntimeError(err)
@@ -426,6 +444,11 @@ class Config:
     def _BACKUP(self): ...
 
     BACKUP = _BACKUP
+
+    @env_property(typ=bool, default=True)
+    def _CRASH_PROTECTION(self): ...
+
+    CRASH_PROTECTION: bool = _CRASH_PROTECTION
 
     @property
     def MAX_LOOPS(self):
@@ -682,6 +705,9 @@ class Config:
             # Set the m4b_tool to the docker image
             # create working_dir if it does not exist
             self.working_dir.mkdir(parents=True, exist_ok=True)
+            escaped_working_dir = str(self.working_dir)
+            if " " in str(self.working_dir):
+                escaped_working_dir = shlex.quote(str(self.working_dir))
             self._m4b_tool = [
                 c
                 for c in [
@@ -692,7 +718,7 @@ class Config:
                     "-u",
                     f"{uid}:{gid}",
                     "-v",
-                    f"{self.working_dir}:/mnt:rw",
+                    f"{escaped_working_dir}:/mnt:rw",
                     "sandreas/m4b-tool:latest",
                 ]
                 if c
