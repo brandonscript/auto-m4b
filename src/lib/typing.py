@@ -1,5 +1,5 @@
 import functools
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import (
     Any,
@@ -76,7 +76,8 @@ TagSource = Literal[
     "fs",
     "unknown",
 ]
-AdditionalTags = Literal["cover", "track", "encoded by", "date", "genre", "publisher"]
+AdditionalTags = Literal["cover", "track", "discnumber", "encoded by", "date", "genre", "publisher"]
+Id3TagDict = dict[TagSource | AdditionalTags, str]
 NameParserTarget = Literal["fs", "generic", "comment"]
 ENV_DIRS = [
     "INBOX_FOLDER",
@@ -133,3 +134,8 @@ def copy_kwargs_omit_first_arg(
         raise RuntimeError(f"You must pass a function to this decorator, got {func} instead.")
 
     return _cast_func
+
+
+OnComplete = Literal["archive", "delete", "test_do_nothing"]
+
+NumericIterable = TypeVar("NumericIterable", bound=Iterable[int | float] | list[int | float])

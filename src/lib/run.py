@@ -1,22 +1,22 @@
+import re
 import shutil
 import subprocess
 import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Literal
 
 from tinta import Tinta
 
 from src.lib.audiobook import Audiobook
-from src.lib.config import cfg
+from src.lib.config import AUDIO_EXTS, cfg
 from src.lib.formatters import (
     human_elapsed_time,
     pluralize,
     pluralize_with_count,
     truncate_middle,
 )
-from src.lib.fs_utils import *
-from src.lib.fs_utils import _mv_or_cp_dir_contents
 from src.lib.id3_utils import verify_and_update_id3_tags
 from src.lib.inbox_state import InboxItem, InboxState
 from src.lib.logger import log_global_results
@@ -54,6 +54,9 @@ from src.lib.term import (
 
 
 def move_standalone_into_dir(book: Audiobook, item: InboxItem):
+
+    from src.lib.fs_utils import ensure_dot, find_adjacent_files_with_same_basename, mv_file_into_dir
+
     if not book.tree.has_any_structure("single", "standalone_file") or not book.tree.is_file():
         return book, item
 
@@ -75,6 +78,8 @@ def move_standalone_into_dir(book: Audiobook, item: InboxItem):
 
 
 def process_already_m4b(book: Audiobook, item: InboxItem):
+
+    from src.lib.fs_utils import ensure_dot, find_adjacent_files_with_same_basename, mv_dir_contents, mv_file_into_dir
 
     print_book_info(book)
     smart_print(f"\n{en.BOOK_ALREADY_CONVERTED}\n")
@@ -205,7 +210,7 @@ def audio_files_found():
 def fail_book(book: Audiobook, reason: str = "unknown"):
     """Adds the book's path to the failed books dict with a value of the last modified date of of the book"""
     inbox = InboxState()
-    if book.key in inbox.failed_books:
+    if not book.key or book.key in inbox.failed_books:
         return
     inbox.set_failed(book.key, reason)
 
@@ -225,6 +230,15 @@ def fail_book(book: Audiobook, reason: str = "unknown"):
 
 def backup_ok(book: Audiobook):
     # Copy files to backup destination
+    from src.lib.fs_utils import (
+        compare_dirs_by_files,
+        cp_dir_contents,
+        cp_file_into_dir,
+        dir_is_empty_ignoring_files,
+        find_too_small_files,
+        human_size,
+    )
+
     if not cfg.BACKUP:
         print_debug("Not backing up (backups are disabled)")
     elif dir_is_empty_ignoring_files(book.inbox_dir):
@@ -311,6 +325,8 @@ def backup_ok(book: Audiobook):
 
 
 def ok_to_overwrite(book: Audiobook):
+    from src.lib.term import print_notice, print_warning
+
     if book.converted_file.is_file():
         if cfg.OVERWRITE_MODE == "skip":
             if book.archive_dir.exists():
@@ -361,6 +377,8 @@ def check_failed_books():
 
 
 def copy_to_working_dir(book: Audiobook):
+    from src.lib.fs_utils import cp_dir, cp_file_into_dir
+
     # Move from inbox to merge folder
     smart_print("\nCopying files to working folder...", end="")
     cp_dir(book.inbox_dir, book.merge_dir.parent, overwrite_mode="overwrite-silent")
@@ -421,6 +439,8 @@ def books_to_process() -> tuple[int, Callable[[], None]]:
 
 
 def can_process_multi_dir(book: Audiobook):
+    from src.lib.fs_utils import flatten_files_in_dir, flattening_files_in_dir_affects_order
+
     inbox = InboxState()
     if book.tree.has_structure_like("series") or book.tree.has_structure_like("multi"):
         help_msg = f"Please organize the files in a single folder and rename them so they sort alphabetically\nin the correct order"
@@ -488,6 +508,8 @@ def has_audio_files(book: Audiobook):
 
 
 def flatten_nested_book(book: Audiobook):
+    from src.lib.fs_utils import flatten_files_in_dir
+
     if book.tree.has_structure("nested"):
         smart_print(
             en.BOOK_NEEDS_FLATTENING,
@@ -622,6 +644,8 @@ def convert_book(book: Audiobook):
 
 
 def move_desc_file(book: Audiobook):
+    from src.lib.fs_utils import mv_file_into_dir
+
     desc_files = []
     did_remove_old_desc = False
     for d in [book.build_dir, book.merge_dir, book.converted_dir]:
@@ -649,6 +673,8 @@ def print_moving_to_converted(book):
 
 
 def move_converted_book_and_extras(book: Audiobook):
+    from src.lib.fs_utils import mv_dir_contents, mv_file_into_dir, rm_all_empty_dirs
+
     print_moving_to_converted(book)
 
     # Copy other jpg, png, and txt files from mergefolder to output folder
@@ -702,6 +728,8 @@ def move_converted_book_and_extras(book: Audiobook):
 
 
 def cleanup_series_dir(parent: InboxItem | None):
+    from src.lib.fs_utils import _mv_or_cp_dir_contents, is_ok_to_delete, rm_dir
+
     if not parent or not parent.is_series_parent:
         print_debug(f"{parent} is not a series parent, can't move series extras or clean up")
         return
@@ -753,6 +781,9 @@ def cleanup_series_dir(parent: InboxItem | None):
 
 
 def archive_inbox_book(book: Audiobook):
+    from src.lib.fs_utils import is_ok_to_delete, mv_dir_contents, rm_dir
+    from src.lib.term import print_notice, print_warning
+
     if cfg.ON_COMPLETE == "test_do_nothing":
         print_notice("Test mode: The original folder will not be moved or deleted")
     else:
@@ -787,6 +818,8 @@ def archive_inbox_book(book: Audiobook):
 
 
 def process_book(b: int, item: InboxItem):
+    from src.lib.fs_utils import clean_dirs, rm_all_empty_dirs, rm_dirs, was_recently_modified
+    from src.lib.term import print_notice
 
     inbox = InboxState()
     book = item.to_audiobook()
@@ -882,6 +915,10 @@ def process_book(b: int, item: InboxItem):
 
 
 def process_inbox():
+    from src.lib.fs_utils import clean_dirs, inbox_last_updated_at
+    from src.lib.run import audio_files_found, print_banner
+    from src.lib.term import print_debug
+
     inbox = InboxState()
 
     if inbox.loop_counter == 1:

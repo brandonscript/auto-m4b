@@ -273,13 +273,13 @@ mock_book_container_1_2 = {
     "mock_book_container": {
         "_dirs": {
             "mock_book_container_series": {
-                "_files": mock_book_container_full["mock_book_container"]["_dirs"]["mock_book_container_series"][
+                "_files": mock_book_container_full["mock_book_container"]["_dirs"]["mock_book_container_series"][  # type: ignore
                     "_files"
                 ],
                 "_dirs": {},
             },
             "mock_book_d2_it_takes_two": mock_book_container_full["mock_book_container"]["_dirs"][
-                "mock_book_d2_it_takes_two"
+                "mock_book_d2_it_takes_two"  # type: ignore
             ],
         },
         "_files": mock_book_container_full["mock_book_container"]["_files"],
@@ -301,7 +301,7 @@ mock_book_container_2_2 = {
         "_files": mock_book_container_full["mock_book_container"]["_files"],
     }
 }
-mock_book_container_2_2["mock_book_container"]["_dirs"]["mock_book_container_series"]["_dirs"] = {}
+mock_book_container_2_2["mock_book_container"]["_dirs"]["mock_book_container_series"]["_dirs"] = {}  # type: ignore
 mock_book_container_2_2["mock_book_container"]["_files"] = []
 
 mock_book_mixed_2_2 = {
@@ -314,8 +314,8 @@ mock_book_mixed_2_2 = {
 }
 
 mock_book_container_2_3 = deepcopy(mock_book_container_2_2)
-mock_book_container_2_3["mock_book_container"]["_dirs"]["mock_book_container_series"]["_dirs"] = deepcopy(
-    mock_book_container_full["mock_book_container"]["_dirs"]["mock_book_container_series"]["_dirs"]
+mock_book_container_2_3["mock_book_container"]["_dirs"]["mock_book_container_series"]["_dirs"] = deepcopy(  # type: ignore
+    mock_book_container_full["mock_book_container"]["_dirs"]["mock_book_container_series"]["_dirs"]  # type: ignore
 )
 
 # fmt: off
@@ -342,5 +342,5 @@ TREES = {
     "2, 3": {}
 }
 TREES["2, 3"] = deepcopy(TREES["2, 2"])
-TREES["2, 3"]["_dirs"] = {**deepcopy(TREES["2, 2"]["_dirs"]), **deepcopy(mock_book_container_2_3)}
+TREES["2, 3"]["_dirs"] = {**deepcopy(TREES["2, 2"]["_dirs"]), **deepcopy(mock_book_container_2_3)} # type: ignore
 # fmt: on

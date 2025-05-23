@@ -3,10 +3,12 @@ import functools
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
-from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
+from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING, Union
 
+from lib.parsers import get_title_partno_score
 from src.lib.misc import fix_ffprobe
 
 fix_ffprobe()
@@ -24,17 +26,18 @@ from src.lib.cleaners import clean_string, strip_author_narrator, strip_leading_
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim, get_numbers_in_string
 from src.lib.parsers import (
-    common_str_pattern,
     contains_partno_or_ch,
     find_greatest_common_string,
-    get_title_partno_score,
     get_year_from_date,
     has_graphic_audio,
     parse_author,
     parse_narrator,
     parse_year,
-    startswith_num_pattern,
     to_words,
+)
+from src.lib.patterns import (
+    common_str_pattern,
+    startswith_num_pattern,
 )
 from src.lib.term import (
     nl,
@@ -42,14 +45,17 @@ from src.lib.term import (
     print_debug,
     print_error,
     print_list_item,
+    print_warning,
     smart_print,
 )
-from src.lib.typing import AdditionalTags, BadFileError, ScoredProp, TagSource
+from src.lib.typing import AdditionalTags, BadFileError, Id3TagDict, ScoredProp, TagSource
 
 MissingApplicationError = ValueError
 
 if TYPE_CHECKING:
     from src.lib.audiobook import Audiobook
+
+CacheValue = Union[Id3TagDict, Literal["__BAD__"]]
 
 
 def write_id3_tags_exiftool(file: Path, exiftool_args: list[str]) -> None:
@@ -323,8 +329,13 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     nl()
 
 
+FFPROBE_REPAIRS = 0
+
+
 def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, throw: bool = False):
     from src.lib.config import cfg
+
+    global FFPROBE_REPAIRS
 
     if file is None:
         return None
@@ -334,16 +345,30 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
     try:
         options = options or {}
         probe_result = ffmpeg.probe(str(file), cmd="ffprobe", **options)
-    except ffmpeg.Error as e:
+    except Exception as e:
         from src.lib.logger import write_err_file
 
+        err_str = str(cast(ffmpeg.Error, e).stderr) if isinstance(e, ffmpeg.Error) else str(e)
+
+        # Some mock files are not readable by ffprobe, so we return None
+        if "pytest" in sys.argv and "mock_" in err_str and "Invalid data found when processing input" in err_str:
+            return None
+
+        if "No such file or directory: 'ffprobe'" in err_str and FFPROBE_REPAIRS <= 3:
+            fix_ffprobe()
+            FFPROBE_REPAIRS += 1
+            return ffprobe_file(file, options=options, throw=throw)
+
         write_err_file(file, e, "ffprobe")
-        msg = f"Error: Could run ffprobe on file '{file}' with options {options}.\nTry running `pipenv run fix-ffprobe`..."
+        base_msg = f"Error: Could run ffprobe on file '{file}' with options {options}."
         if throw:
-            raise BadFileError(msg) from e
-        print_error(msg)
+            raise BadFileError(base_msg) from e
+        if "ffprobe version" in err_str:
+            print_warning(f"{base_msg}\n{err_str}")
+        else:
+            print_error(f"{base_msg}\nTry running `./scripts/fix-ffprobe.sh`...")
         if cfg.DEBUG:
-            print_debug(e.stderr)
+            print_debug(err_str)
         return None
 
     return cast(dict, probe_result)
@@ -404,7 +429,7 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                         "-i",
                         str(path),
                         "-map",
-                        f"0:{stream['index']}",
+                        f"0:{stream['index']}",  # type: ignore
                         "-c",
                         "copy",
                     ]
@@ -468,35 +493,96 @@ def id3_tags_source_to_raw(
     return {cast(TagSource, id3_tag_map.inv.get(k, k)): v for k, v in in_dict.items()}
 
 
-def extract_id3_tags(
-    file: "BooksTree | Path | None", *tags: TagSource | AdditionalTags, throw=False
-) -> dict[TagSource | AdditionalTags, str]:
+ID3_TAGS_CACHE_TTL = 300
+
+
+class Id3Cache:
+    def __init__(self, ttl: int = ID3_TAGS_CACHE_TTL):
+        self.ttl = ttl
+        self._entries: dict[str, tuple[float, CacheValue]] = {}
+
+    def get(self, key: str) -> CacheValue | None:
+        if key not in self._entries:
+            return None
+        age, cached = self._entries[key]
+        if time.time() - age < self.ttl:
+            return cached
+        self.invalidate(key)
+        return None
+
+    def set(self, key: str, value: CacheValue) -> None:
+        self._entries[key] = (time.time(), value)
+
+    def invalidate(self, key: str) -> None:
+        if key in self._entries:
+            del self._entries[key]
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
+id3Cache = Id3Cache()
+
+
+def extract_id3_tags(file: "BooksTree | Path", *tags: TagSource | AdditionalTags, throw=False) -> Id3TagDict:
+    cache_key = str(file.path) if isinstance(file, BooksTree) else str(Path(file)) if file else ""
+    cached_result = id3Cache.get(cache_key)
+    if cached_result is not None:
+        if cached_result == "__BAD__":
+            if throw:
+                raise HeaderNotFoundError(f"Error: Previously failed to extract id3 tags from {file}")
+            return {}
+        return cached_result
 
     path = file.path if isinstance(file, BooksTree) else Path(file) if file else None
 
-    if not path or not path.exists():
+    if not path or not path.is_file():
         if throw:
-            raise HeaderNotFoundError(f"Error: Cannot extract id3 tags, '{file}' does not exist")
+            raise FileNotFoundError(f"Error: Cannot extract id3 tags, '{file}' does not exist")
+        id3Cache.set(cache_key, "__BAD__")
         return {}
 
     try:
-        if ffresult := ffprobe_file(path, throw=throw):
+        if ffresult := cast(dict[str, Any], ffprobe_file(path, throw=throw)):
             tag_dict = id3_tags_raw_to_source(
                 {key.lower(): value for key, value in (ffresult["format"]["tags"] or {}).items()}
             )
             if not tags:
+                id3Cache.set(cache_key, tag_dict)
                 return tag_dict
-            return {tag: tag_dict.get(tag, "") for tag in tags}
+            filtered_tags = cast(Id3TagDict, {tag: tag_dict.get(tag, "") for tag in tags})
+            id3Cache.set(cache_key, filtered_tags)
+            return filtered_tags
     except Exception as e:
+        id3Cache.set(cache_key, "__BAD__")
         if throw:
             raise HeaderNotFoundError(
                 f"Error: Could not extract id3 tags from {path} with tags {', '.join(tags)}"
             ) from e
-        # if cfg.DEBUG:
-        #     print_debug(
-        #         f"Could not read '{tag}' from {path}'s id3 tags, it probably doesn't exist"
-        #     )
+
+    if ffresult is None:
+        id3Cache.set(cache_key, "__BAD__")
     return {}
+
+
+def extract_id3_tags_from_dir(dir: Path, *tags: TagSource | AdditionalTags, throw=False) -> dict[str, Id3TagDict]:
+    """Extracts id3 tags from all audio files in a directory, flatly (not recursively)"""
+    from src.lib.fs_utils import filter_ignored, only_audio_files
+
+    return {
+        c.name: extract_id3_tags(c, *tags, throw=throw)
+        for c in only_audio_files(filter_ignored(dir.iterdir()))
+        if c.is_file()
+    }
+
+
+def is_id3_tag_dict(id3: Any) -> bool:
+    """Checks if the id3 tag dict is valid by looking for the most common tags"""
+    if not isinstance(id3, dict):
+        return False
+    if not all(isinstance(v, str) for v in id3.values()):
+        return False
+    return "title" in id3 or "album" in id3 or "artist" in id3 or "albumartist" in id3
 
 
 class BaseScoreCard:
@@ -529,11 +615,11 @@ class BaseScoreCard:
         return self._scorer._tag_matcher(self._prop, self._is_likely[0], "")
 
     @property
-    def _is_likely(self) -> tuple[TagSource, int, str | None]:
+    def _is_likely(self) -> tuple[TagSource | AdditionalTags, int, str | None]:
         # put all the scores in a list and return the highest score and its var name
         rep = re.compile(rf"_(is|contains)_{self._prop}$")
         scores = [
-            (cast(TagSource, re.sub(rep, "", p)), getattr(self, p), p)
+            (cast(TagSource | AdditionalTags, re.sub(rep, "", p)), getattr(self, p), p)
             for p in dir(self)
             if not p.startswith("_") and p.endswith(self._prop) and isinstance(getattr(self, p), int)
         ]
@@ -541,7 +627,7 @@ class BaseScoreCard:
             return "unknown", 0, None
         tag, best, prop = max(scores, key=lambda x: x[1])
         # return the highest score and the name of its variable - use inflection or inspect
-        return tag, best, prop
+        return cast(TagSource | AdditionalTags, tag), best, prop
 
     def __repr__(self):
         return self.__str__()
@@ -1031,7 +1117,7 @@ class MetadataScore:
         val: str = ""
         if from_tag == "comment":
             val = getattr(self._p, f"{key}_in_comment")
-        elif common_str_pattern.match(from_tag):
+        elif from_tag and common_str_pattern.match(from_tag):
             val = getattr(self._p, common_str_pattern.sub("", from_tag) + "_c")
         elif from_tag == "fs":
             if key == "date":
@@ -1040,7 +1126,7 @@ class MetadataScore:
             try:
                 val = getattr(self._p, f"{from_tag}1")
             except AttributeError:
-                val = getattr(self._p, from_tag)
+                val = getattr(self._p, from_tag) if from_tag else ""
 
         val = clean_string(val if val else fallback)
         match key:
@@ -1315,6 +1401,7 @@ class MetadataScore:
 
         artist_is_narrator = 0
         albumartist_is_narrator = 0
+        albumartist_is_author = 0
         composer_is_narrator = 0
         common_artist_is_narrator = 0
         common_albumartist_is_narrator = 0
@@ -1372,7 +1459,7 @@ class MetadataScore:
                     albumartist_is_narrator += similarity_score(self._p.narrator_in_comment, self._p.albumartist1)
 
                 if self._p.author_in_comment:
-                    albumartist_is_narrator += 10 * int(-1 if self._p._aar1_eq_comment_author else 1)
+                    albumartist_is_author += 10 * int(-1 if self._p._aar1_eq_comment_author else 1)
             else:
                 albumartist_is_narrator = -404
 
@@ -1488,7 +1575,7 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     t4 = time.time()
 
     li(f"Title: {book.title}")
-    li(f"Author: {book.author}")
+    li(f"Author: {book.artist}")
     if book.narrator:
         li(f"Narrator: {book.narrator}")
 

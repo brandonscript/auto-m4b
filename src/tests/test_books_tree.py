@@ -315,7 +315,7 @@ class test_tree_scanning:
         tree = BooksTree(TEST_DIRS.inbox, match_filter=matching_paths)
 
         def _check():
-            if "chanur" in indirect_fixtures[0].key.lower():
+            if "chanur" in indirect_fixtures[0].key.lower():  # type: ignore
                 assert next(
                     (
                         b
@@ -331,14 +331,14 @@ class test_tree_scanning:
                     xt.is_not_book_root(chanur_series)
                     assert indirect_fixtures[0].key == chanur_series.key
                     for c in indirect_fixtures[1:]:
-                        bk = chanur_series.get(c.key)
+                        bk = chanur_series.get(c.key)  # type: ignore
                         assert bk
                         assert bk.has_structure("series_book"), xt.msg.structure_has(bk, "series_book")
                         xt.is_book_root(bk)
                 else:
                     pytest.fail("Chanur Series not found in tree")
 
-            if re.search(r"(house|missing|old_mill|tower)", indirect_fixtures[0].key):
+            if re.search(r"(house|missing|old_mill|tower)", indirect_fixtures[0].key):  # type: ignore
 
                 if cliff := tree.get_like("house"):
                     assert cliff.has_only_structure("flat"), xt.msg.structure_is(cliff, "flat")
@@ -366,7 +366,7 @@ class test_tree_scanning:
                 else:
                     pytest.fail("Tower not found in tree")
 
-            if re.search(r"Nathan Lowell", indirect_fixtures[0].key):
+            if re.search(r"Nathan Lowell", indirect_fixtures[0].key):  # type: ignore
 
                 # assert there is at least one series_parent
                 assert next(
@@ -416,6 +416,17 @@ class test_tree_structures:
 
     def test_flat_dirs(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=MOCKED.flat_dirs)
+        flat_dir_names = [d.name for d in MOCKED.flat_dirs]
+        flat_dirs = [d for name, d in tree.dirs.items() if name in flat_dir_names]
+        flat_files = flatlist([d.files for d in flat_dirs])
+        flat_all = [*flat_dirs, *flat_files]
+        for d in flat_all:
+            assert d.has_only_structure("flat"), xt.msg.structure_is(d, "flat")
+        for c in tree.children_f:
+            xt.is_book_root(c)
+
+    def test_flat_with_match_filter(self, authors_guide_to_murder__flat_mp3: Audiobook):
+        tree = BooksTree(TEST_DIRS.inbox)
         flat_dir_names = [d.name for d in MOCKED.flat_dirs]
         flat_dirs = [d for name, d in tree.dirs.items() if name in flat_dir_names]
         flat_files = flatlist([d.files for d in flat_dirs])

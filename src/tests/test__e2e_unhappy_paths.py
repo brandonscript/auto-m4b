@@ -14,7 +14,7 @@ from src.lib.audiobook import Audiobook
 from src.lib.fs_utils import rename_dir
 from src.lib.inbox_state import InboxState
 from src.lib.strings import en
-from src.tests.conftest import TEST_DIRS
+from src.tests.helpers.pytest_dumps import TEST_DIRS
 from src.tests.helpers.pytest_fixtures import load_test_fixtures
 from src.tests.helpers.pytest_utils import testutils
 

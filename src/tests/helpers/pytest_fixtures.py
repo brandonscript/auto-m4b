@@ -343,6 +343,17 @@ def blackmail_bibingka__flat_m4b():
 
 
 @pytest.fixture(scope="function")
+def authors_guide_to_murder__flat_mp3():
+
+    yield from load_test_fixture(
+        "authors_guide_to_murder__flat_mp3",
+        exclusive=True,
+        match_filter="^authors_guide_to_murder",
+        cleanup_inbox=True,
+    )
+
+
+@pytest.fixture(scope="function")
 def Chanur_Series(reset_inbox_state):
     series = "chanur_series__series_mp3"
     override_series = "Chanur Series"
@@ -392,6 +403,16 @@ def nathan_lowell__nested_series_m4a():
         exclusive=True,
         override_name="Nathan Lowell",
         match_filter="^(Nathan Lowell)",
+    )
+
+
+@pytest.fixture(scope="function", autouse=False)
+def secret_project_series__nested_flat_mixed():
+    yield from load_test_fixture(
+        "secret_project_series__nested_flat_mixed",
+        exclusive=True,
+        override_name="Sanderson - Secret Project Series",
+        match_filter="^(Sanderson.*Secret Project Series)",
     )
 
 

@@ -16,6 +16,8 @@ from multiprocessing import cpu_count
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TypeVar
 
+from lib.constants import AUDIO_EXTS, DEFAULT_SLEEP_TIME, DEFAULT_WAIT_TIME, IGNORE_FILES, OTHER_EXTS
+from lib.typing import OnComplete
 from src.lib.misc import (
     get_git_root,
     is_boolish,
@@ -35,48 +37,7 @@ from src.lib.misc import (
 from src.lib.term import nl, print_amber, print_debug, print_error
 from src.lib.typing import OverwriteMode
 
-DEFAULT_SLEEP_TIME: float = 10
-DEFAULT_WAIT_TIME: float = 5
-AUDIO_EXTS = [".mp3", ".m4a", ".m4b", ".wma"]
-OTHER_EXTS = [
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".bmp",
-    ".tiff",
-    ".webp",
-    ".heic",
-    ".svg",
-    ".epub",
-    ".mobi",
-    ".azw",
-    ".pdf",
-    ".txt",
-    ".log",
-]
-
-IGNORE_FILES = [
-    ".DS_Store",
-    "._*",
-    ".AppleDouble",
-    ".LSOverride",
-    ".Spotlight-V100",
-    ".Trashes",
-    "__MACOSX",
-    "Desktop.ini",
-    "ehthumbs.db",
-    "Thumbs.db",
-    "@eaDir",
-]
-
-WORKING_DIRS = [
-    "BUILD_FOLDER",
-    "MERGE_FOLDER",
-    "TRASH_FOLDER",
-]
-
-OnComplete = Literal["archive", "delete", "test_do_nothing"]
+AUDIO_EXTS = AUDIO_EXTS
 
 parser = argparse.ArgumentParser(exit_on_error=False)
 parser.add_argument("--env", help="Path to .env file", type=Path)
@@ -138,7 +99,7 @@ def pick(a: T, b, default: None = None) -> T | None: ...
 def pick(a, b, default: T) -> T: ...
 
 
-def pick(a: T, b, default: D = None) -> T | D:
+def pick(a: T, b, default: D = None) -> T | D:  # type: ignore
     if a is not None:
         return cast(T | D, a)
     if b is not None:

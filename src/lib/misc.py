@@ -4,9 +4,10 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Generator, Iterable, Sequence
+import time
+from collections.abc import Callable, Generator, Iterable, Sequence
 from pathlib import Path, PosixPath
-from typing import Any, cast, overload, TypeVar
+from typing import Any, cast, Generic, overload, TypeVar
 
 from dotenv import dotenv_values
 
@@ -112,7 +113,7 @@ def flatlist(arg: Sequence[L] | Sequence[Sequence[L]]) -> Sequence[L]: ...
 def flatlist(*args: L | Sequence[L] | Sequence[Sequence[L]]) -> Sequence[L]: ...
 
 
-def flatlist(*args: L | Sequence[L] | Sequence[Sequence[L]]) -> Sequence[L]:
+def flatlist(*args: L | Sequence[L] | Sequence[Sequence[L]]) -> Sequence[L]:  # type: ignore
     """
     Ensures that any number of arguments are a flat iterable of the same type.
 
@@ -134,12 +135,13 @@ def flatlist(*args: L | Sequence[L] | Sequence[Sequence[L]]) -> Sequence[L]:
         """Flatten an iterable of nested iterables into a single list."""
         flat_list = []
         for item in arg:
+            item = cast(Sequence[L | Sequence[L]], item)
             if is_sequence(item):
                 flat_list.extend(_flatten(item))  # Recursively flatten
             elif is_generator(item):
                 flat_list.extend(_flatten(list(item)))
             elif isinstance(arg, map):
-                return list(item)
+                return list(cast(Sequence[L], item))
             else:
                 flat_list.append(item)
         return flat_list
@@ -148,19 +150,19 @@ def flatlist(*args: L | Sequence[L] | Sequence[Sequence[L]]) -> Sequence[L]:
         arg = args[0]
         # Always flatten the argument if it's iterable, even if it's a single one
         if is_sequence(arg):
-            return _flatten(arg)
+            return _flatten(cast(Sequence[L | Sequence[L]], arg))
         elif is_generator(arg):
-            arg = list(arg)
+            arg = list(cast(Generator[L | Sequence[L], None, None], arg))
             if not arg:
                 return []
-            return _flatten(arg)
+            return _flatten(cast(Sequence[L | Sequence[L]], arg))
         elif isinstance(arg, map):
-            return list(arg)
+            return list(cast(Sequence[L], arg))
         else:
-            return [arg]
+            return [cast(L, arg)]
     else:
         # Flatten all arguments into a single list
-        return _flatten(args)
+        return _flatten(cast(Sequence[L | Sequence[L]], args))
 
 
 def isorted(
@@ -171,7 +173,7 @@ def isorted(
     if not iterable:
         return []
 
-    return cast(list[S], list(sorted(flatlist(*iterable), key=lambda x: str(x).lower(), reverse=reverse)))
+    return cast(list[S], list(sorted(flatlist(*iterable), key=lambda x: str(x).lower(), reverse=reverse)))  # type: ignore
 
 
 def any_in(l1: Iterable[T], l2: Iterable[T]) -> bool:
@@ -450,45 +452,60 @@ def ffprobe_paths():
     return os.pathsep.join(paths_to_add)
 
 
-def check_ffprobe():
-    from ffmpeg import Error, probe
-
-    assert Error
-    assert probe
-
-    assert (
-        subprocess.run(
-            "ffprobe -version",
-            capture_output=True,
-            shell=True,
-            env={
-                "PATH": ffprobe_paths(),
-            },
-        ).returncode
-        == 0
-    )
-
-
 def fix_ffprobe(counter: int = 0):
-    from src.lib.term import print_warning
 
-    check_ffprobe()
+    def check_ffprobe():
+        import ffmpeg
+        from ffmpeg import Error, probe  # type: ignore
 
-    fix_cmd = "pip uninstall ffmpeg-python python-ffmpeg -y && pip install ffmpeg-python"
-
-    try:
-        from ffmpeg import Error, probe
-
+        assert ffmpeg.probe  # type: ignore
         assert Error
         assert probe
+        subprocess.check_output(["which", "ffprobe"]).decode().strip()
+        assert (
+            subprocess.run(
+                "ffprobe -version",
+                capture_output=True,
+                shell=True,
+                env={
+                    "PATH": ffprobe_paths(),
+                },
+            ).returncode
+            == 0
+        )
 
-        if counter > 0:
-            exit(0)
-    except Exception as e:
-        if counter == 0:
-            print_warning("ffmpeg's ffprobe is not installed or not working. Attempting to fix...\n")
+    # Get the path to the .venv
+    src_root = Path(__file__).parent.parent.parent
+    venv_path = src_root / ".venv"
+    binary = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    site_packages = venv_path / f"lib/{binary}/site-packages"
+    bin_root = venv_path / "bin" / binary
+    if not site_packages.exists():
+        raise RuntimeError(f"auto_m4b's site_packages not found at '{site_packages}', cannot fix ffprobe")
 
-        os.system(fix_cmd)
+    fix_cmd = f"{bin_root} -m pip uninstall ffmpeg-python python-ffmpeg -y && {bin_root} -m pip install ffmpeg-python --target {site_packages} --force-reinstall --upgrade"
+
+    try:
+        check_ffprobe()
+    except Exception as _e:
+        # if counter == 0:
+        #     print_warning("ffmpeg's ffprobe is not installed or not working — attempting to fix...\n")
+
+        # Look for ffprobe in PATH and known locations
+        known_locations = ["/opt/homebrew/bin", "/usr/local/bin"]
+        for location in known_locations:
+            if Path(location).exists():
+                os.environ["PATH"] = f"{location}:{os.environ['PATH']}"
+
+        ffprobe_path = subprocess.check_output(["which", "ffprobe"]).decode().strip()
+        if ffprobe_path and not (d := os.path.dirname(ffprobe_path)) in os.environ["PATH"]:
+            os.environ["PATH"] = f"{d}:{os.environ['PATH']}"
+
+        code = subprocess.run(
+            fix_cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ).returncode
+        if code == 0:
+            return
         if counter < 3:
             counter += 1
             fix_ffprobe(counter)
@@ -504,3 +521,51 @@ def increment(s: str) -> str:
     if m:
         return s[: m.start()] + str(int(m.group()) + 1)
     return s
+
+
+def clamp[T: (
+    float,
+    int,
+), Min: (float, int), Max: (float, int)](value: T, min_value: Min, max_value: Max) -> T | Min | Max:
+    """Clamps a value between a minimum and maximum value.
+
+    Args:
+        value: The value to clamp
+        min_value: The minimum allowed value
+        max_value: The maximum allowed value
+
+    Returns:
+        The clamped value, of the same type as the input value
+    """
+    return cast(T, max(min_value, min(value, max_value)))
+
+
+T_co = TypeVar("T_co", covariant=True)
+
+
+def cached_property_max_age(ttl: int = 300):
+    def decorator(func: Callable[..., T_co]):
+        return cast(T_co, _cached_property_max_age(func, ttl))
+
+    return decorator
+
+
+class _cached_property_max_age(property, Generic[T_co]):
+    def __init__(self, func: Callable[..., T_co], ttl: int = 300):
+        self.ttl = ttl
+        self.cache: dict[Any, T_co] = {}
+        self.time_cache: dict[Any, float] = {}
+        super().__init__(func)
+
+    def __get__(self, instance: Any, owner: Any) -> T_co:
+        if instance is None:
+            return cast(T_co, self)
+        now = time.time()
+        if instance not in self.cache or (now - self.time_cache.get(instance, 0)) > self.ttl:
+            if not self.fget:
+                raise ValueError(
+                    "func is not set for cached_property_max_age, did you use @cached_property_max_age(...)?"
+                )
+            self.cache[instance] = self.fget(instance)
+            self.time_cache[instance] = now
+        return self.cache[instance]

@@ -2,14 +2,12 @@ import fnmatch
 import os
 import re
 import shutil
-import statistics
 import time
 from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
 from src.lib.config import AUDIO_EXTS
-from src.lib.formatters import ensure_dot, friendly_date, human_size, strip_dot
 from src.lib.misc import (
     flatlist,
     isorted,
@@ -98,6 +96,7 @@ def find_files_in_dir(  # type: ignore
     Returns:
     list[str | Path]: A list of file names (str) or Path objects (if absolute=True)
     """
+    from src.lib.formatters import ensure_dot
 
     ignore_files = ignore_files or []
     only_file_exts = [ensure_dot(ext) for ext in only_file_exts or []]
@@ -178,6 +177,7 @@ def get_size(path: Path, fmt: Literal["human"] = "human", only_file_exts: list[s
 def get_size(path: Path, fmt: SizeFmt = "bytes", only_file_exts: list[str] = []) -> str | int:
     # takes a file or directory and returns the size in either bytes or human readable format, only counting audio files
     # if no path specified, assume current directory
+    from src.lib.formatters import human_size
 
     if not path.exists():
         raise FileNotFoundError(f"Cannot get size, '{path}' does not exist")
@@ -639,6 +639,14 @@ def try_relative_to(p: Path, root: str) -> Path | None: ...
 def try_relative_to(p: "BooksTree", root: "BooksTree") -> str | Path | None: ...
 
 
+@overload
+def try_relative_to(p: str, root: "BooksTree") -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: Path, root: "BooksTree") -> Path | None: ...
+
+
 def try_relative_to(p: "str | Path | BooksTree", root: "str | Path | BooksTree") -> str | Path | None:
     from src.lib.books_tree import BooksTree
 
@@ -932,6 +940,7 @@ def find_first_audio_file(
 
 
 def find_first_audio_file(path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: bool = False) -> Path | None:
+    from src.lib.formatters import strip_dot
 
     if path.is_file():
         return path
@@ -957,6 +966,8 @@ def find_first_audio_file(path: Path, *, ext: AudiobookFmt | None = None, ignore
 def find_next_audio_file(
     path: Path, *, first: Path | None, ext: AudiobookFmt | None = None, ignore_errors: bool = False
 ) -> Path | None:
+    from src.lib.formatters import strip_dot
+
     if path.is_file():
         return None
 
@@ -1003,20 +1014,24 @@ def find_cover_art_file(path: Path) -> Path | None:
 
 
 def filter_ignored(
-    paths: Iterable[Path | None] | Generator[Path, Any, Any],
+    paths: list[Path | None] | Iterable[Path | None] | Generator[Path, Any, Any],
 ) -> list[Path]:
     from src.lib.config import cfg
 
-    paths = [p for p in flatlist(paths) if p]
+    paths = [p for p in flatlist(paths) if p and isinstance(p, Path)]
 
     return [p for p in paths if not any(fnmatch.filter([str(p.name)], ignore) for ignore in cfg.IGNORE_FILES)]
 
 
 def is_audio_file(file: str | Path) -> bool:
+    from src.lib.formatters import ensure_dot
+
     return ensure_dot(Path(file).suffix.lower()) in AUDIO_EXTS
 
 
 def is_audio_ext(ext: str) -> bool:
+    from src.lib.formatters import ensure_dot
+
     return ensure_dot(ext.lower()) in AUDIO_EXTS
 
 
@@ -1086,6 +1101,7 @@ def inbox_last_updated_at(friendly: Literal[True]) -> str: ...
 
 def inbox_last_updated_at(friendly: bool = False) -> float | str:
     from src.lib.config import cfg
+    from src.lib.formatters import friendly_date
 
     last_update = last_updated_at(cfg.inbox_dir, only_file_exts=cfg.AUDIO_EXTS)
     return friendly_date(last_update) if friendly else last_update
@@ -1262,106 +1278,3 @@ def filter_depth(
         and (mindepth is None or len(p.relative_to(root).parts) + offset >= mindepth)
         and (maxdepth is None or len(p.relative_to(root).parts) + offset <= maxdepth)
     )
-
-
-def find_greatest_common_string(
-    strs: list[str] | list[Path], *, case_sensitive: bool = False, min_chars: int = 2
-) -> str | None:
-    if not strs:
-        return ""
-
-    # Extract just the base filenames (without extensions)
-    base_names = [os.path.splitext(f)[0] for f in strs]
-
-    if not case_sensitive:
-        base_names = [name.lower() for name in base_names]
-
-    # Take the shortest filename as the reference (optimization)
-    shortest_name = min(base_names, key=len)
-    other_names = base_names
-
-    gcs = ""
-
-    # Iterate over all substrings of the shortest name
-    for i in range(len(shortest_name)):
-        for j in range(i + 1, len(shortest_name) + 1):
-            substring = shortest_name[i:j]
-            # Check if this substring is present in all filenames
-            if all(substring in name for name in other_names):
-                # Update GCS if this substring is longer than the current GCS
-                if len(substring) > len(gcs):
-                    gcs = substring
-
-    return gcs if len(gcs) >= min_chars else None
-
-
-def calculate_gcs_percentage(strs: list[str] | list[Path], *, precision: int = 3, min_chars: int = 2) -> float:
-    if not strs:
-        return 0.0
-
-    # Find the greatest common string
-    gcs = find_greatest_common_string(strs, min_chars=min_chars)
-
-    # Determine the length of the longest filename
-    longest_filename_length = max(len(str(f.name if isinstance(f, Path) else f)) for f in strs)
-
-    # Calculate the percentage
-    return round(len(gcs or "") / longest_filename_length, precision)
-
-
-def get_similarity(
-    strs: list[str] | list[Path] | list[str | Path],
-    precision: int = 2,
-    median=False,
-    distinct=False,
-    lowest=False,
-    highest=False,
-) -> float:
-    """Uses the Levenshtein distance to calculate the similarity of a list of strings.
-    Returns the average similarity of strings/paths (0-1), rounded to the specified precision.
-    Optionally computes the median similarity instead of the average, and setting distinct=True will only compare distinct pairs of strings.
-    """
-
-    from rapidfuzz import process
-
-    # if there are no paths to compare to, return 0
-    if len(strs) < 2:
-        return 1.0
-
-    def avg(lst: list[float], div: int = 1) -> float:
-        if distinct:
-            lst = list(set(lst))
-        return round((sum(lst) / len(lst)) / div, precision)
-
-    def med(lst: list[float], div: int = 1) -> float:
-        if distinct:
-            lst = list(set(lst))
-        return round(statistics.median(lst) / div, precision)
-
-    # Extract just the base filenames (without extensions)
-    base_names = [Path(s).stem for s in strs]
-
-    # Compare left and right strings
-    scores: dict[str, list[tuple[str, int | float, int]]] = {
-        s1: process.extract(s1, [b for j, b in enumerate(base_names) if i != j]) for i, s1 in enumerate(base_names)
-    }
-
-    flat_scores = [s for v in scores.values() for s in v]
-
-    if not flat_scores:
-        return 0.0
-
-    if lowest:
-        # Return the lowest score
-        return round(min([score for _, score, _ in flat_scores]) / 100, precision)
-
-    elif highest:
-        # Return the highest score
-        return round(max([score for _, score, _ in flat_scores]) / 100, precision)
-
-    # Average the scores
-    elif median:
-        return med([score for _, score, _ in flat_scores], 100)
-
-    else:
-        return avg([score for _, score, _ in flat_scores], 100)

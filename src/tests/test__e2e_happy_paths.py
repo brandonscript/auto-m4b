@@ -5,10 +5,10 @@ import time
 import pytest
 from pytest import CaptureFixture
 
+from lib.typing import OnComplete
 from src.auto_m4b import app
 from src.lib import term
 from src.lib.audiobook import Audiobook
-from src.lib.config import OnComplete
 from src.lib.id3_utils import extract_cover_art
 from src.lib.inbox_state import InboxState
 from src.lib.misc import re_group

@@ -1,106 +1,33 @@
-import contextlib
 import os
 import re
 import string
-import subprocess
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TYPE_CHECKING, TypeVar
 
-import nltk
-import spacy
-from nltk import pos_tag, word_tokenize
-from nltk.corpus import words
-from spacy.matcher import Matcher
-from spacy.ml import Doc
-
-from src.lib.term import print_debug
-
-with contextlib.redirect_stdout(open(os.devnull, "w")):
-    nltk.download("words")
-    english_words = set(words.words())
-
-try:
-    # Load spaCy model silently by redirecting stdout/stderr temporarily
-    with contextlib.redirect_stdout(open(os.devnull, "w")), contextlib.redirect_stderr(open(os.devnull, "w")):
-        nlp = spacy.load("en_core_web_sm")
-except Exception as e:
-    print_debug(f"Error loading spaCy model: {e}")
-    # run `python -m spacy download en`
-    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-    nlp = spacy.load("en_core_web_sm")
-
-matcher = Matcher(nlp.vocab)
-matcher.add("PERSON", [[{"IS_ALPHA": True}]])
-matcher.add("WORK_OF_ART", [[{"IS_ALPHA": True}]])
-matcher.add("PRODUCT", [[{"IS_ALPHA": True}]])
-matcher.add("EVENT", [[{"IS_ALPHA": True}]])
-matcher.add("ORG", [[{"IS_ALPHA": True}]])
-
-import inflect as _inflect
-
-inflect = _inflect.engine()
-
 import cachetools
 import cachetools.func
-import regex as rex
+from nltk import pos_tag, word_tokenize
+from spacy.ml import Doc
 
+from lib.misc import get_numbers_in_string
+from lib.nlp import english_words, inflect, nlp
+from lib.patterns import book_series_pattern, multi_disc_pattern
+from lib.typing import MEMO_TTL
 from src.lib.misc import (
     any_in,
-    get_numbers_in_string,
     isorted,
     re_group,
 )
+from src.lib.patterns import *
+from src.lib.term import print_debug
 from src.lib.typing import AuthorNarrator, MEMO_TTL, NameParserTarget
 
-# TODO: Add test coverage for narrator with /
-# fmt: off
-_titlecase_word = r"[A-Z][\p{Ll}\.'-]*"
-_author_prefixes = r"[Ww]ritten.?[Bb]y|[Aa]uthor"
-_narrator_prefixes = r"(?:[Rr]ead|[Nn]arrated|[Pp]erformed).?[Bb]y|[Nn]arrator"
-def _name_substr(ignore_if_trailing: str = '', max_l_of_comma: int = 4, max_r_of_comma: int = 4):
-    if ignore_if_trailing:
-        ignore_if_trailing = f"(?!{ignore_if_trailing})"
-    # (?:[Ww]ritten.?[Bb]y|[Pp]erformed.?[Bb]y|[Rr]ead.?[Bb]y)\W+(?P<name>(?:(?:(?<= )(?: ?[A-Z][a-z\.-]*){1,4})),? ?(?:(?: ?[A-Z][a-z\.-]*){1,4}(?!Performed by)))
-    return rf"(?:(?:(?:^|(?<= ))(?: ?{_titlecase_word}){{1,{max_l_of_comma}}})),? ?(?:(?: ?{_titlecase_word}){{1,{max_r_of_comma}}}{ignore_if_trailing})"
-_div = r"[-_–—.\s]*?"
-wordsplit_pat = re.compile(r"[\s_.]")
+if TYPE_CHECKING:
+    from src.lib.audiobook import Audiobook
 
-author_fs_pattern = re.compile(r"^(?P<author>.*?)[\W\s]*[-_–—\(]", re.I)
-author_comment_pattern = rex.compile(rf"(?:{_author_prefixes})\W+(?P<author>{_name_substr(_narrator_prefixes)})", rex.V1)
-author_generic_pattern = rex.compile(rf"(?P<author>{_name_substr()})", rex.V1)
-narrator_comment_pattern = rex.compile(rf"(?:{_narrator_prefixes})\W+(?P<narrator>{_name_substr(_author_prefixes)})", rex.V1)
-narrator_generic_pattern = rex.compile(rf"(?P<narrator>{_name_substr()})", rex.V1)
-narrator_slash_pattern = re.compile(r"(?P<author>.+)\/(?P<narrator>.+)", re.I)
-narrator_in_artist_pattern = re.compile(rf"(?P<author>.*)\W+{narrator_comment_pattern}", re.I)
-graphic_audio_pattern = re.compile(r"graphic\s*audio", re.I)
-lastname_firstname_pattern = re.compile(r"^(?P<lastname>.*?), (?P<firstname>.*)$", re.I)
-firstname_lastname_pattern = re.compile(r"^(?P<firstname>.*?).*\s(?P<lastname>\S+)$", re.I)
-
-book_title_pattern = re.compile(r"(?<=[-_–—])[\W\s]*(?P<book_title>[\w\s]+?)\s*(?=\d{4}|\(|\[|$)", re.I)
-# partno_or_ch_match_pattern = re.compile(rf",?{_div}(?:part|ch(?:\.|apter))?{_div}\W*(?P<num1>\d+)(?:$|{_div}(?:of|-){_div}(?P<num2>\d+)\W*$)", re.I)
-partno_or_ch_match_pattern2 = re.compile(rf"(?:(?:(?:(?<=\W)|^)p|P)[Aa]?[Rr]?[Tt]|C[Hh]?(?:[\. ]|[Aa][Pp][Tt][Ee][Rr])|[^A-Za-z0-9\n]+?)\W*(?P<num1>\d+)(?:.?(?:of|-|to).?(?P<num2>\d+))?[^\n]*$")
-part_or_ch_match_words = re.compile(rf"(?:(?<=\W)|^){_div}(?:pa?r?t|ch(?:\.|apter)){_div}\d+.*$", re.I)
-path_junk_pattern = re.compile(r"^[ \,.\)\}\]_-]*|[ \,.\)\}\]_-]*$", re.I)
-path_garbage_pattern = re.compile(r"^[ \,.\)\}\]]*", re.I)
-path_strip_l_t_alphanum_pattern = re.compile(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", re.I)
-roman_numeral_pattern = re.compile(r"((?:^|(?<=[\W_]))[IVXLCDM]+(?:$|(?=[\W_])))", re.I)
-roman_strip_pattern = re.compile(r"(?<=\w)(?=[\W_.-])|(?<=[\W_.-])(?=\w)|(?<=[a-z])(?=[A-Z])")
-
-year_pattern = re.compile(r"(?P<year>\d{4})", re.I)
-
-common_str_pattern = re.compile(r"(^common_|_c(ommon)?$)")
-startswith_num_pattern = re.compile(r"(?P<num>^\d+)")
-
-multi_disc_pattern = re.compile(r"(?:^|(?<=[\W_-]))(dis[ck]|cd)(\b|\s|[_.-])*#?(\b|\s|[_.-])*(?:\b|[\W_-])*(?P<num>\d+)", re.I)
-book_series_pattern = re.compile(r"(^\d+|(?:^|(?<=[\W_-]))(bo{0,2}k|vol(?:ume)?|#)(?:\b|[\W_-])*(?P<num>\d+)|(?<=[\W_-])Series.*/.+)", re.I)
-multi_part_pattern = re.compile(r"(?:^|(?<=[\W_-]))(pa?r?t|ch(?:\.|apter))(?:\b|[\W_-])*(\d+)", re.I)
-
-only_non_alphanum_pattern = rex.compile(r"^[^\p{L}]+$")
-abbreviated_names_pattern = re.compile(r"^(?:[A-Z]\.?){1,3}$")
-# fmt: on
 
 S = TypeVar("S", bound=str | Path)
 
@@ -140,10 +67,6 @@ class romans:
         l = list(l)
         to_path = lambda x: Path(x) if isinstance(l[0], Path) else x
         return cast(list[S], [to_path(cls.strip(str(s))) for s in l])
-
-
-if TYPE_CHECKING:
-    from src.lib.audiobook import Audiobook
 
 
 def to_words(s: str, *, sep=r"[\s_.]") -> list[str]:
@@ -526,7 +449,7 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
         catg = (
             catg
             if catg
-            else ("NNP" if nltk_tree and any_in([leaf[1] for leaf in nltk_tree.leaves()], ["NNP", "NN"]) else None)
+            else ("NNP" if nltk_tree and any_in([leaf[1] for leaf in nltk_tree.leaves()], ["NNP", "NN"]) else None)  # type: ignore
         )
         last_was_person_tree = bool(prev_tree and prev_tree.label() == "PERSON")
         next_is_person_tree = bool(next_tree and next_tree.label() == "PERSON")
@@ -542,7 +465,7 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
         if nltk_tree and curr_label_is_maybe_person:
             # Collect tokens that are part of a PERSON entity
             if label == "PERSON" or (label != "PERSON" and last_was_person):
-                current_name.append(" ".join(leaf[0] for leaf in nltk_tree.leaves()))
+                current_name.append(" ".join(leaf[0] for leaf in nltk_tree.leaves()))  # type: ignore
             last_was_person: bool = label == "PERSON"
         elif (
             (last_was_person_tree and next_is_person_tree) or (last_was_person and curr_is_noun) or curr_is_abbr_letters
@@ -691,6 +614,34 @@ def try_parse_num(s: str, fallback: Any = None) -> int | float | None:
             return fallback
 
 
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def is_maybe_multiple_books_or_series(s: str | Path) -> bool:
+    s = str(s)
+    return not is_maybe_multi_disc(s) and bool(book_series_pattern.search(s))
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def get_disc_num(s: str | Path) -> int:
+    return int(re_group(multi_disc_pattern.search(str(s)), "num", default=-1))
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def is_maybe_multi_disc(s: str | Path) -> bool:
+    return get_disc_num(str(s)) > -1
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def is_maybe_multi_part(s: str) -> bool:
+    return (
+        not is_maybe_multi_disc(s) and not is_maybe_multiple_books_or_series(s) and bool(multi_part_pattern.search(s))
+    )
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def get_start_num(s: str | Path) -> int:
+    return int(re_group(startswith_num_pattern.search(str(s).lstrip()), "num", default=-1))
+
+
 def get_title_partno_score(title_1: str, title_2: str, album_1: str, sortalbum_1: str) -> tuple[bool, int, bool]:
     """Returns a score for the likelihood that the title(s) indicate the part number of a multi-part book, e.g. "Part 01" or "The Martian Part 014. A positive score indicates a likely part #, negative indicates not a part #."""
     from src.lib.cleaners import strip_part_number
@@ -729,58 +680,3 @@ def get_title_partno_score(title_1: str, title_2: str, album_1: str, sortalbum_1
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
 def get_series_num(s: str | Path) -> int:
     return int(re_group(book_series_pattern.search(str(s)), "num", default=-1))
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def is_maybe_multiple_books_or_series(s: str | Path) -> bool:
-    s = str(s)
-    return not is_maybe_multi_disc(s) and bool(book_series_pattern.search(s))
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def get_disc_num(s: str | Path) -> int:
-    return int(re_group(multi_disc_pattern.search(str(s)), "num", default=-1))
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def is_maybe_multi_disc(s: str | Path) -> bool:
-    return get_disc_num(str(s)) > -1
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def get_part_num(s: str | Path) -> int:
-    s = str(s)
-    if not part_or_ch_match_words.search(s):
-        return -1
-    return int(re_group(partno_or_ch_match_pattern2.search(s), "num1", default=-1))
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def is_maybe_multi_part(s: str) -> bool:
-    return (
-        not is_maybe_multi_disc(s) and not is_maybe_multiple_books_or_series(s) and bool(multi_part_pattern.search(s))
-    )
-
-
-@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def get_start_num(s: str | Path) -> int:
-    return int(re_group(startswith_num_pattern.search(str(s).lstrip()), "num", default=-1))
-
-
-def are_nums_sequential(nums: list[int], *, sort=False, skips_ok=False) -> bool:
-    if sort:
-        nums = sorted(nums)
-    if not skips_ok:
-        return all(nums[i] == nums[i - 1] + 1 for i in range(1, len(nums)))
-    # otherwise just check if they're in ascending order
-    return nums == list(range(nums[0], nums[-1] + 1))
-
-
-def get_all_nums_in_string(s: str) -> list[tuple[int | float, int]]:
-    """Finds all numbers (int and float) in a string, and returns a list of tuples with the number and its position in the string"""
-    return list(
-        filter(
-            lambda x: x[0] is not None,
-            [(try_parse_num(m.group()), m.start()) for m in rex.finditer(r"\d+(?:\.\d+)?", s) if m],
-        )
-    )  # type: ignore
