@@ -120,6 +120,8 @@ def find_greatest_common_string(s: list[str]) -> str:
     common_prefixes = set()
 
     for file1, file2 in combinations(s, 2):
+        if not file1 or not file2:
+            continue
         prefix = os.path.commonprefix([file1, file2])
         common_prefixes.add(prefix)
 
@@ -164,7 +166,17 @@ def startswith_partno(s: str, s2: str | None = None) -> bool:
 def nlp_get_titles(s: str) -> list[str]:
     s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
     doc: Doc = nlp(s)
-    return [ent.text for ent in doc.ents if ent.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG"]]
+    objects = [ent.text for ent in doc.ents if ent.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG"]]
+    people = [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
+    # Remove people from the string
+    no_people = re.sub(r"\b" + "|".join(people) + r"\b", "", s)
+    # Clean up the string by:
+    # 1. Replace multiple spaces with a single space
+    # 2. Strip leading/trailing non-alphanumeric characters (preserving diacritics)
+    no_people = re.sub(r"\s+", " ", no_people)  # Normalize spaces
+    # Strip leading/trailing non-alphanumeric chars while preserving diacritics
+    no_people = leading_trailing_non_alphanum_pattern.sub("", no_people)
+    return [no_people, *objects]
 
 
 def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":

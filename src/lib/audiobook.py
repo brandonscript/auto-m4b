@@ -20,7 +20,6 @@ from src.lib.fs_utils import (
     hash_path_audio_files,
     last_updated_at,
 )
-from src.lib.id3_utils import extract_cover_art, extract_metadata
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info
 from src.lib.typing import AudiobookFmt, DirName, SizeFmt
@@ -106,9 +105,13 @@ class Audiobook(BaseModel):
         return extract_path_info(self, quiet)
 
     def extract_metadata(self, quiet: bool = False):
+        from src.lib.id3_utils import extract_metadata
+
         return extract_metadata(self, quiet)
 
     def extract_cover_art(self):
+        from src.lib.id3_utils import extract_cover_art
+
         if self.cover_art_file:
             return self.cover_art_file
         try:
@@ -143,11 +146,11 @@ class Audiobook(BaseModel):
 
     @property
     def backup_dir(self) -> Path:
-        return cfg.backup_dir.resolve() / self.key
+        return cfg.backup_dir.resolve() / (self.key or "")
 
     @property
     def build_dir(self) -> Path:
-        return cfg.build_dir.resolve() / self.key
+        return cfg.build_dir.resolve() / (self.key or "")
 
     @property
     def build_tmp_dir(self) -> Path:
@@ -155,17 +158,17 @@ class Audiobook(BaseModel):
 
     @property
     def converted_dir(self) -> Path:
-        if (p := cfg.converted_dir.resolve() / self.key).suffix == ".m4b":
+        if (p := cfg.converted_dir.resolve() / (self.key or "")).suffix == ".m4b":
             return p.with_suffix("")
         return p
 
     @property
     def archive_dir(self) -> Path:
-        return cfg.archive_dir.resolve() / self.key
+        return cfg.archive_dir.resolve() / (self.key or "")
 
     @property
     def merge_dir(self) -> Path:
-        return cfg.merge_dir.resolve() / self.key
+        return cfg.merge_dir.resolve() / (self.key or "")
 
     @property
     def build_file(self) -> Path:
@@ -217,6 +220,16 @@ class Audiobook(BaseModel):
 
     def hash(self, for_dir: DirName = "inbox"):
         return hash_path_audio_files(getattr(self, for_dir + "_dir"))
+
+    @property
+    def is_flat_but_messy(self):
+        if not self.tree.has_structure("flat") or not self.tree.dirs:
+            return False
+        has_deep_files = len(self.tree.files_f) < len(self.tree.files_recursive_f)
+        same_album = (self.tree.i.files_recursive.album_similarity() or 0) > 0.9
+        same_artist = (self.tree.i.files_recursive.artist_similarity() or 0) > 0.9
+        same_albumartist = (self.tree.i.files_recursive.albumartist_similarity() or 0) > 0.9
+        return has_deep_files and same_album and (same_artist or same_albumartist)
 
     @property
     def is_maybe_series_book(self):
@@ -362,6 +375,8 @@ class Audiobook(BaseModel):
 
     @property
     def id3_cover(self):
+        from src.lib.id3_utils import extract_cover_art
+
         return extract_cover_art(self.sample_audio1, save_to_file=False)
 
     @property

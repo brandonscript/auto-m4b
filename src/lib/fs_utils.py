@@ -197,6 +197,12 @@ def get_size(path: Path, fmt: SizeFmt = "bytes", only_file_exts: list[str] = [])
     return human_size(size) if fmt == "human" else size
 
 
+def sizes_match(path1: Path, path2: Path) -> bool | None:
+    if not path1.is_file() or not path2.is_file():
+        return None
+    return get_size(path1) == get_size(path2)
+
+
 @overload
 def get_audio_size(path: Path, fmt: Literal["bytes"] = "bytes") -> int: ...
 
@@ -345,6 +351,10 @@ def _mv_or_cp_dir_contents(
     if not check_src_dst(src_dir, "dir", dst_dir, "dir", overwrite_mode):
         raise FileNotFoundError("Source or destination directory does not exist")
 
+    if not any(src_dir.iterdir()):
+        # print_notice(f"No files found in {src_dir}, skipping")
+        return
+
     # Check for files that may require overwriting
     files_common_to_both = set(find_files_in_dir(src_dir, ignore_files=ignore_files)) & set(
         find_files_in_dir(dst_dir, ignore_files=ignore_files)
@@ -362,10 +372,6 @@ def _mv_or_cp_dir_contents(
         for file in files_common_to_both:
             print_grey(f"     - {file}")
 
-    if not any(src_dir.iterdir()):
-        # print_notice(f"No files found in {src_dir}, skipping")
-        return
-
     def ok_to_mv_or_cp(src_file: Path, dst_file: Path) -> bool:
 
         if any(
@@ -382,7 +388,11 @@ def _mv_or_cp_dir_contents(
 
     files_not_verbed = []
 
-    for src_file in src_dir.glob("*"):
+    src_paths = list(src_dir.glob("*"))
+
+    for src_file in src_paths:
+
+        src_rel_path = src_file.relative_to(src_dir)
         if src_file.is_dir():
             _mv_or_cp_dir_contents(
                 operation,
@@ -392,14 +402,17 @@ def _mv_or_cp_dir_contents(
                 ignore_files=ignore_files,
                 only_file_exts=only_file_exts,
             )
-        dst_file = dst_dir / src_file.name
-        if ok_to_mv_or_cp(src_file, dst_file):
-            if operation == "copy":
-                shutil.copy2(src_file, dst_file)
-            elif operation == "move":
-                shutil.move(src_file, dst_file)
-            if not dst_file.is_file():
-                files_not_verbed.append(src_file)
+        else:
+            dst_file = dst_dir / src_rel_path
+            if str(src_rel_path) in files_common_to_both or sizes_match(src_file, dst_file):
+                continue
+            if ok_to_mv_or_cp(src_file, dst_file):
+                if operation == "copy":
+                    shutil.copy2(src_file, dst_file)
+                elif operation == "move":
+                    shutil.move(src_file, dst_file)
+                if not dst_file.is_file():
+                    files_not_verbed.append(src_file)
 
     # files_not_in_right = set(find_files(src_dir, ignore_files)) - set(
     #     find_files(dst_dir, ignore_files)

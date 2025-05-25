@@ -140,10 +140,13 @@ class testutils:
         InboxState().set_ok(book)
 
     @classmethod
-    def set_match_filter(cls, match_filter: str | None, delay: int = 0):
+    def set_match_filter(cls, match_filter: list[Path] | str | None, delay: int = 0):
         time.sleep(delay)
         cls.print(f"Setting MATCH_FILTER to {match_filter}")
         from src.lib.config import cfg
+
+        if isinstance(match_filter, list):
+            match_filter = f"({'|'.join([re.escape(str(m.relative_to(cfg.inbox_dir))) for m in match_filter])})"
 
         if match_filter is None:
             os.environ.pop("MATCH_FILTER", None)

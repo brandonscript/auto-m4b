@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from lib.books_tree.books_tree_summary import TreeNodeSummary
 from lib.books_tree.books_tree_utils import _match_filter_func, filter_matches
+from lib.id3_tags import Id3Tags
 from src.lib.misc import (
     any_in,
     any_matching,
@@ -59,6 +60,7 @@ class BooksTree(BaseModel):
     root: "BooksTree | None" = None
     _match_filter: list[Path] | str | None = None
     _last_scan: float | None = None
+    id3_tags: Id3Tags | None = None
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -79,6 +81,7 @@ class BooksTree(BaseModel):
         # size: int = 0,
         scan: bool | None = None,
         determine_structure: bool = True,
+        scan_id3: bool = False,
     ):
         super().__init__()
         if isinstance(path, BooksTree):
@@ -118,6 +121,7 @@ class BooksTree(BaseModel):
                 maxdepth=maxdepth,
                 allow_file_root=allow_file_root,
                 determine_structure=determine_structure,
+                scan_id3=scan_id3,
             )
         # self.size = size
         # if structure:
@@ -154,6 +158,7 @@ class BooksTree(BaseModel):
         allow_file_root: bool = False,
         allow_non_root: bool = False,
         determine_structure: bool = True,
+        scan_id3: bool = True,
     ):
 
         from src.lib.fs_utils import filter_depth, filter_ignored, only_audio_files
@@ -214,6 +219,13 @@ class BooksTree(BaseModel):
         )
 
         self._last_scan = time.time()
+
+        if scan_id3 and self.is_root:
+            for f in [f for f in self.files_recursive if not f.id3_tags]:
+                f.id3_tags = Id3Tags.from_file(f.path)
+        elif self.is_file() and not self.id3_tags:
+            self.id3_tags = Id3Tags.from_file(self.path)
+
         if determine_structure:
             self.determine_structure()
         return self

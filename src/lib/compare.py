@@ -1,9 +1,10 @@
 import os
 import statistics
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from functools import wraps
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Any, Literal, overload, TypeVar
 
 SimilarityComparisonMethod = Literal["median", "avg", "min", "max"] | None
 
@@ -247,3 +248,43 @@ def calculate_gcs_percentage(strs: list[str] | list[Path], *, precision: int = 3
 
     # Calculate the percentage
     return round(len(gcs or "") / longest_filename_length, precision)
+
+
+T = TypeVar("T")
+
+
+def cached_similarity(cache_attr: str):
+    """Decorator to handle caching of similarity calculations"""
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(
+            self,
+            comparison: SimilarityComparisonMethod | None = None,
+            distinct: bool = True,
+            include_curr: bool = False,
+        ) -> T:
+            cache = getattr(self, cache_attr, None)
+            if not cache:
+                cache = {
+                    "comparison": comparison,
+                    "distinct": distinct,
+                    "include_curr": include_curr,
+                }
+                setattr(self, cache_attr, cache)
+
+            if (
+                cache["comparison"] == comparison
+                and cache["distinct"] == distinct
+                and cache["include_curr"] == include_curr
+                and "result" in cache
+            ):
+                return cache["result"]
+
+            result = func(self, comparison, distinct, include_curr)
+            cache["result"] = result
+            return result
+
+        return wrapper
+
+    return decorator

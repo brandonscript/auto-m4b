@@ -8,7 +8,7 @@ import dotenv
 import pytest
 
 from src.lib.fs_utils import clean_dirs, find_adjacent_files_with_same_basename
-from src.lib.id3_utils import extract_id3_tags, write_id3_tags_mutagen
+from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState
 from src.tests.helpers.pytest_dumps import FIXTURES_ROOT, GIT_ROOT, MOCKED, TEST_DIRS
 from src.tests.helpers.pytest_utils import testutils
@@ -508,11 +508,12 @@ def blank_audiobook():
 @pytest.fixture(scope="function", autouse=False)
 def mock_id3_tags():
     def write_tags(*files_and_tags: tuple[Path, dict[str, str]]):
+        from src.lib.id3_tags import Id3Tags
 
         for f, tags in files_and_tags:
             write_id3_tags_mutagen(f, tags)
 
-        return [extract_id3_tags(f) for f, _ in files_and_tags]
+        return [(t := Id3Tags.from_file(f)) and t.to_dict() for f, _ in files_and_tags]
 
     return write_tags
 

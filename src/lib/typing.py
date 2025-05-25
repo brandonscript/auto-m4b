@@ -76,8 +76,8 @@ TagSource = Literal[
     "fs",
     "unknown",
 ]
-AdditionalTags = Literal["cover", "track", "discnumber", "encoded by", "date", "genre", "publisher"]
-Id3TagDict = dict[TagSource | AdditionalTags, str]
+AdditionalTags = Literal["cover", "track", "discnumber", "encoded by", "date", "genre", "publisher", "_updated"]
+Id3TagDict = dict[TagSource | AdditionalTags, str | float]
 NameParserTarget = Literal["fs", "generic", "comment"]
 ENV_DIRS = [
     "INBOX_FOLDER",

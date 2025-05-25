@@ -5,8 +5,9 @@ import pytest
 from mutagen.id3._util import ID3NoHeaderError
 from mutagen.mp3 import HeaderNotFoundError
 
+from lib.id3_tags import extract_id3_tags
 from src.lib.audiobook import Audiobook
-from src.lib.id3_utils import extract_id3_tags, map_kid3_keys, write_id3_tags_mutagen
+from src.lib.id3_utils import map_kid3_keys, write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState
 from src.lib.misc import increment
 from src.lib.parsers import (
@@ -32,7 +33,9 @@ def test_id3_extract_fails_for_corrupt_file(corrupt_audiobook: Audiobook):
     [
         (
             {
-                "comment": "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand, Colleen Delany as Narrator; Jon Vertullo as Cassian, and Amanda Forstrom as Morrigan; with Shawn K. Jain, Nora Achrati, Karenna Foley, Gabriel Michael, Natalie Van Sistine, Eva Wilhelm, Henry W. Kramer, Bianca Bryan, Renee Dorian, Matthew Bassett, Rob McFadyen, Ryan Carlo Dalusung, Yasmin Tuazon, Matthew Schleigh, Nanette Savard, Dan Delgado, Michael John Casey, Alejandro Ruiz, and Samantha Cooper"
+                "comment": (
+                    "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand, Colleen Delany as Narrator; Jon Vertullo as Cassian, and Amanda Forstrom as Morrigan; with Shawn K. Jain, Nora Achrati, Karenna Foley, Gabriel Michael, Natalie Van Sistine, Eva Wilhelm, Henry W. Kramer, Bianca Bryan, Renee Dorian, Matthew Bassett, Rob McFadyen, Ryan Carlo Dalusung, Yasmin Tuazon, Matthew Schleigh, Nanette Savard, Dan Delgado, Michael John Casey, Alejandro Ruiz, and Samantha Cooper"
+                )
             },
             {},
             {
@@ -249,7 +252,9 @@ def test_ignore_graphic_audio(graphic_audio__single_m4b: Audiobook, capfd: pytes
         ),
         (
             {
-                "comment": "When we rescued the first fluffy-eared princess, I didn't realize how lucky we’d been. She was a kind soul, and gentle-everything you’d imagine a sweet princess to be. Though atop the second tower, the next stripey-tailed princess bore a rage as wild as the sun. Her body burned hot like a furnace. But it was our job to help her return to normal-well, not our main job. Our journey took us from cold mountains to wild seas on a pirate ship. Our quest? To save the third-and last-princess, so we could halt The Witch King in his tracks."
+                "comment": (
+                    "When we rescued the first fluffy-eared princess, I didn't realize how lucky we’d been. She was a kind soul, and gentle-everything you’d imagine a sweet princess to be. Though atop the second tower, the next stripey-tailed princess bore a rage as wild as the sun. Her body burned hot like a furnace. But it was our job to help her return to normal-well, not our main job. Our journey took us from cold mountains to wild seas on a pirate ship. Our quest? To save the third-and last-princess, so we could halt The Witch King in his tracks."
+                )
             },
             "",
         ),
@@ -421,7 +426,9 @@ def test_verify_tags_after_convert(
     [
         (
             {
-                "comment": "Mysterious Benedict Society#1    Read by Del Roy                           Unabridged  13 hrs 17 min           Listening Library/Random House Audio"
+                "comment": (
+                    "Mysterious Benedict Society#1    Read by Del Roy                           Unabridged  13 hrs 17 min           Listening Library/Random House Audio"
+                )
             },
             "Del Roy",
         ),
@@ -437,7 +444,9 @@ def test_verify_tags_after_convert(
         (
             {
                 "artist": "H. D. Carlton",
-                "comment": "Death walks alongside me...but the reaper is no match for me. I'm trapped in a world full of monsters dressed as men, and those who aren't as they seem. They won't keep me forever. I no longer recognize the person I've become.",
+                "comment": (
+                    "Death walks alongside me...but the reaper is no match for me. I'm trapped in a world full of monsters dressed as men, and those who aren't as they seem. They won't keep me forever. I no longer recognize the person I've become."
+                ),
                 "composer": "Teddy Hamilton, Michelle Sparks",
             },
             "Teddy Hamilton, Michelle Sparks",

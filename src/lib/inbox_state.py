@@ -12,7 +12,7 @@ from src.lib.books_tree import BooksTree
 from src.lib.formatters import friendly_short_date
 from src.lib.fs_utils import find_root_from_path, try_relative_to
 from src.lib.hasher import Hasher
-from src.lib.inbox_item import get_key, InboxItem, InboxItemStatus
+from src.lib.inbox_item import get_item, get_key, InboxItem, InboxItemStatus
 from src.lib.misc import any_in, singleton
 from src.lib.strings import en
 from src.lib.term import print_debug, print_notice
@@ -158,7 +158,7 @@ class InboxState(Hasher):
         super().scan()
 
         if not self.tree:
-            self.tree = BooksTree(cfg.inbox_dir)
+            self.tree = BooksTree(cfg.inbox_dir, scan_id3=True)
         self.tree.scan()
         # self._tree.scan()
 

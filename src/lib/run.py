@@ -55,7 +55,8 @@ from src.lib.term import (
 
 def move_standalone_into_dir(book: Audiobook, item: InboxItem):
 
-    from src.lib.fs_utils import ensure_dot, find_adjacent_files_with_same_basename, mv_file_into_dir
+    from src.lib.formatters import ensure_dot
+    from src.lib.fs_utils import find_adjacent_files_with_same_basename, mv_file_into_dir
 
     if not book.tree.has_any_structure("single", "standalone_file") or not book.tree.is_file():
         return book, item
@@ -79,7 +80,8 @@ def move_standalone_into_dir(book: Audiobook, item: InboxItem):
 
 def process_already_m4b(book: Audiobook, item: InboxItem):
 
-    from src.lib.fs_utils import ensure_dot, find_adjacent_files_with_same_basename, mv_dir_contents, mv_file_into_dir
+    from src.lib.formatters import ensure_dot
+    from src.lib.fs_utils import find_adjacent_files_with_same_basename, mv_dir_contents, mv_file_into_dir
 
     print_book_info(book)
     smart_print(f"\n{en.BOOK_ALREADY_CONVERTED}\n")
@@ -230,13 +232,13 @@ def fail_book(book: Audiobook, reason: str = "unknown"):
 
 def backup_ok(book: Audiobook):
     # Copy files to backup destination
+    from src.lib.formatters import human_size
     from src.lib.fs_utils import (
         compare_dirs_by_files,
         cp_dir_contents,
         cp_file_into_dir,
         dir_is_empty_ignoring_files,
         find_too_small_files,
-        human_size,
     )
 
     if not cfg.BACKUP:
@@ -510,9 +512,9 @@ def has_audio_files(book: Audiobook):
 def flatten_nested_book(book: Audiobook):
     from src.lib.fs_utils import flatten_files_in_dir
 
-    if book.tree.has_structure("nested"):
+    if book.tree.has_structure("nested") or (is_messy := book.is_flat_but_messy):
         smart_print(
-            en.BOOK_NEEDS_FLATTENING,
+            en.BOOK_IS_FLAT_BUT_MESSY if is_messy else en.BOOK_NEEDS_FLATTENING,
             end="",
         )
         flatten_files_in_dir(book.inbox_dir)
@@ -866,11 +868,12 @@ def process_book(b: int, item: InboxItem):
     if not can_process_roman_numeral_book(book):
         return b
 
-    flatten_nested_book(book)
     print_book_info(book)
 
     if not backup_ok(book):
         return b
+
+    flatten_nested_book(book)
 
     if not ok_to_overwrite(book):
         return b

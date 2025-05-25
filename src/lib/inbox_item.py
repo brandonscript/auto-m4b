@@ -23,7 +23,7 @@ def get_key(path_or_book: "str | Path | BooksTree | Audiobook | InboxItem") -> s
         return path_or_book
     if isinstance(path_or_book, Path):
         return path_or_book.name
-    return path_or_book.key
+    return cast(str, path_or_book.key)
 
 
 def get_books_tree(
@@ -50,6 +50,19 @@ def get_books_tree(
             return cast(InboxItem, key_path_or_book).tree
         case _:
             raise ValueError(f"Invalid type: {instancetype}")
+
+
+def get_item(key_path_or_book: "str | Path | Audiobook | InboxItem") -> "InboxItem":
+    from src.lib.books_tree import BooksTree
+    from src.lib.config import cfg
+
+    if isinstance(key_path_or_book, (str, Path)):
+        return InboxItem(BooksTree(cfg.inbox_dir / key_path_or_book, scan=False))
+    if isinstance(key_path_or_book, Audiobook):
+        return InboxItem(key_path_or_book.tree)
+    if isinstance(key_path_or_book, BooksTree):
+        return InboxItem(key_path_or_book)
+    raise ValueError(f"Invalid type: {type(key_path_or_book)}")
 
 
 class InboxItem:
@@ -90,7 +103,7 @@ class InboxItem:
     def update_path(self, path: Path):
         self.tree.path = path
         new_key = self.tree.key
-        if root := self.tree.root:
+        if new_key and (root := self.tree.root):
             root.scan()
             if new_tree := root.get(new_key):
                 self.tree = new_tree
@@ -98,7 +111,7 @@ class InboxItem:
 
     @property
     def key(self) -> str:
-        return self.tree.key
+        return cast(str, self.tree.key)
 
     @property
     def path(self) -> Path:
@@ -242,7 +255,7 @@ class InboxItem:
             return None
 
         all_series_parents = list(filter(lambda x: x.has_structure("series_parent"), self.tree.root.books_and_series))
-        return next((p.key for p in all_series_parents if self.tree.key.startswith(p.key)), None)
+        return next((p.key for p in all_series_parents if (k := self.tree.key) and p.key and k.startswith(p.key)), None)
 
     @property
     def series_basename(self):
