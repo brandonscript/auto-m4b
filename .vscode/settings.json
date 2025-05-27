@@ -22,7 +22,7 @@
   ],
   "python.terminal.activateEnvInCurrentTerminal": true,
   "python.terminal.activateEnvironment": true,
-  "debugpy.debugJustMyCode": true,
+  "debugpy.debugJustMyCode": false,
   "python.REPL.enableREPLSmartSend": false,
   "black-formatter.args": [
     "--config",

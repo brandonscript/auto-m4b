@@ -489,7 +489,7 @@ def fix_ffprobe(counter: int = 0):
         check_ffprobe()
     except Exception as _e:
         # if counter == 0:
-        #     print_warning("ffmpeg's ffprobe is not installed or not working — attempting to fix...\n")
+        #     print_warning("ffmpeg's ffprobe is not installed or not working — attempting to fix...\n")
 
         # Look for ffprobe in PATH and known locations
         known_locations = ["/opt/homebrew/bin", "/usr/local/bin"]

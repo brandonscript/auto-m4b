@@ -358,13 +358,13 @@ series_true_tests = [
 )
 def test_is_maybe_multiple_books_or_series(test_case, expected):
 
-    from src.lib.parsers import is_maybe_multiple_books_or_series
+    from src.lib.parsers import is_maybe_series_book
 
-    assert is_maybe_multiple_books_or_series(test_case) == expected
-    assert is_maybe_multiple_books_or_series(test_case.lower()) == expected
-    assert is_maybe_multiple_books_or_series(test_case.title()) == expected
-    assert is_maybe_multiple_books_or_series(test_case.capitalize()) == expected
-    assert is_maybe_multiple_books_or_series(test_case.upper()) == expected
+    assert is_maybe_series_book(test_case) == expected
+    assert is_maybe_series_book(test_case.lower()) == expected
+    assert is_maybe_series_book(test_case.title()) == expected
+    assert is_maybe_series_book(test_case.capitalize()) == expected
+    assert is_maybe_series_book(test_case.upper()) == expected
 
 
 @pytest.mark.parametrize(

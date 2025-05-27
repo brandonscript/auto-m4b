@@ -1,33 +1,34 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast, Literal, TYPE_CHECKING, TypeVar
+from typing import cast, TYPE_CHECKING, TypeVar
 
 from lazy.lazy import lazy
 
-from lib.books_tree.books_tree_utils import (
-    are_nums_sequential,
-    get_all_nums_in_string,
-    get_missing_nums,
-    get_part_num,
-    only_gte_0,
-)
-from lib.compare import cached_similarity, get_list_similarity, get_similarity, SimilarityComparisonMethod, unique_items
-from lib.parsers import get_disc_num, get_series_num, get_start_num
-from src.lib.compare import (
+from lib.compare import (
+    cached_similarity,
+    get_list_similarity,
     get_similarity,
     get_uniqueness,
     list_items_match_each_other,
     list_items_match_value,
+    unique_items,
 )
-from src.lib.misc import (
-    clamp,
-    is_gt_50mb,
-    percent_truthy_in_list,
+from lib.misc import percent_truthy_in_list
+from lib.typing import SimilarityComparisonMethod
+from src.lib.books_tree.books_tree_utils import (
+    are_nums_contiguous,
+    get_all_nums_in_string,
+    get_common_nums_in_strings,
+    get_missing_nums,
+    get_part_num,
+    only_gte_0,
+    only_gte_0_tuple,
 )
+from src.lib.parsers import get_disc_num, get_series_num, get_start_num
 
 if TYPE_CHECKING:
-    from lib.books_tree.books_tree import BooksTree
-    from lib.books_tree.books_tree_node import TreeNode
+    from src.lib.books_tree.books_tree import BooksTree
+    from src.lib.books_tree.books_tree_node import TreeNode
 
 T = TypeVar("T")
 
@@ -60,11 +61,16 @@ class TreeNodeList:
         se = self.series_nums
         st = self.start_nums
 
-        first_last_di = f"{di[0]}-{di[-1]}" if len(di) > 1 else di[0] if di else "—"
-        first_last_pa = f"{pa[0]}-{pa[-1]}" if len(pa) > 1 else pa[0] if pa else "—"
-        first_last_se = f"{se[0]}-{se[-1]}" if len(se) > 1 else se[0] if se else "—"
-        first_last_st = f"{st[0]}-{st[-1]}" if len(st) > 1 else st[0] if st else "—"
-        return f"{{d: {first_last_di}, p: {first_last_pa}, s: {first_last_se}, ^: {first_last_st}, ~: {self.pathname_similarity(distinct=True)}}}"
+        disc_nums = f"💽 {di[0]}-{di[-1]}" if len(di) > 1 else di[0] if di else ""
+        part_nums = f"🎉 {pa[0]}-{pa[-1]}" if len(pa) > 1 else pa[0] if pa else ""
+        series_nums = f"📺 {se[0]}-{se[-1]}" if len(se) > 1 else se[0] if se else ""
+        start_nums = f"🔥 {st[0]}-{st[-1]}" if len(st) > 1 else st[0] if st else ""
+        path_sim = f"🚴‍♀️ {self.pathname_similarity(distinct=True)}"
+        album_sim = f"📘 {self.album_similarity(distinct=True)}" if self.have_albums else ""
+        author_sim = f"🧑‍🎨 {self.author_similarity(distinct=True)}" if self._have_artists else ""
+        return " ".join(
+            (str(v) for v in (disc_nums, part_nums, series_nums, start_nums, path_sim, album_sim, author_sim) if v)
+        )
 
     def __str__(self):
         return self.__repr__()
@@ -75,19 +81,98 @@ class TreeNodeList:
 
     @lazy
     def part_nums(self):
-        return only_gte_0([get_part_num(p.name) for p in self._trees])
+        if self._node._tree.is_match:
+            ...
+        return only_gte_0([get_part_num(t.name) for t in self._trees])
 
     @lazy
     def series_nums(self):
-        return only_gte_0([get_series_num(p.name) for p in self._trees])
+        return only_gte_0([get_series_num(t.name) for t in self._trees])
 
     @lazy
     def start_nums(self):
-        return only_gte_0([get_start_num(p.name) for p in self._trees])
+        return only_gte_0([get_start_num(t.name) for t in self._trees])
 
     @lazy
-    def all_path_nums(self):
-        return [only_gte_0([n for (n, _) in get_all_nums_in_string(Path(p.name).stem)]) for p in self._trees]
+    def all_path_nums(self) -> list[list[tuple[int | float, ...]]]:
+        """Returns a list of lists of tuples, where each tuple contains the number and its position in the pathname.
+        e.g. if there are two paths with ["10 apples, 14 pears", "12 apples, 20 pears"]], it would return:
+        [ [(10, 0), (14, 11)], [(12, 0), (20, 11)] ]
+            ^ num    ^ num       ^ num    ^ num
+            pos ^    pos ^       pos ^    pos ^
+        """
+        return [only_gte_0_tuple(get_all_nums_in_string(Path(p.name).stem), 0) for p in self._trees]
+
+    @lazy
+    def all_path_nums_reverse(self) -> list[list[tuple[int | float, ...]]]:
+        """Same as all_path_nums, but with numbers detected in reverse order from the end of the pathname - useful
+        if filenames have different lengths, but you want to match numbers at the end of the pathname."""
+        return [only_gte_0_tuple(get_all_nums_in_string(Path(p.name).stem, reverse=True), 0) for p in self._trees]
+
+    @lazy
+    def all_path_nums_completion(self):
+        from src.lib.books_tree.books_tree_utils import get_common_nums_in_strings
+
+        # Given a return value of e.g. `[ [(10, 0), (14, 11)], [(12, 0), (20, 11)] ]` from all_path_nums,
+        # returns the completion for all path nums positions that match.
+
+        if not self.all_path_nums and not self.all_path_nums_reverse:
+            return None
+
+        max_nums = max(len(x) for x in self.all_path_nums + self.all_path_nums_reverse)
+
+        apn = self.all_path_nums
+        # Unshift if the first path has no numbers, because it is the curr node
+        if len(apn) > 1 and not apn[0]:
+            apn = apn[1:]
+
+        apnr = self.all_path_nums_reverse
+        # Unshift if the first path has no numbers, because it is the curr node
+        if len(apnr) > 1 and not apnr[0]:
+            apnr = apnr[1:]
+
+        apn = get_common_nums_in_strings(apn) or []
+        apnr = get_common_nums_in_strings(apnr) or []
+
+        most = max((max(apn or [[]], key=len), max(apnr or [[]], key=len)))
+        return round(len(most) / max_nums, 3) if most else 0.0
+
+    @lazy
+    def all_path_nums_are_contiguous(self):
+
+        if not self.all_path_nums and not self.all_path_nums_reverse:
+            return None
+
+        apn = self.all_path_nums
+        if len(apn) > 1 and not apn[0]:
+            apn = apn[1:]
+
+        apnr = self.all_path_nums_reverse
+        if len(apnr) > 1 and not apnr[0]:
+            apnr = apnr[1:]
+
+        apn = get_common_nums_in_strings(apn) or []
+        apnr = get_common_nums_in_strings(self.all_path_nums_reverse) or []
+
+        pivoted_apn = (
+            [[x[i][0] for x in apn if i < len(x)] for i in range(max((len(x) for x in apn or [[]])))] if apn else []
+        )
+        pivoted_apnr = (
+            [[x[i][0] for x in apnr if i < len(x)] for i in range(max((len(x) for x in apnr or [[]])))] if apnr else []
+        )
+
+        # Remove any where all the numbers are the same
+        pivoted_apn = [x for x in pivoted_apn if len(set(x)) > 1]
+        pivoted_apnr = [x for x in pivoted_apnr if len(set(x)) > 1]
+
+        apn_contiguous = (
+            percent_truthy_in_list([bool(are_nums_contiguous(x, sort=True, skips_ok=True)) for x in pivoted_apn]) / 100
+        )
+        apnr_contiguous = (
+            percent_truthy_in_list([bool(are_nums_contiguous(x, sort=True, skips_ok=True)) for x in pivoted_apnr]) / 100
+        )
+
+        return max(apn_contiguous, apnr_contiguous) == 1.0
 
     @lazy
     def id3_albums(self):
@@ -126,7 +211,7 @@ class TreeNodeList:
         prop: str,
         comparison: SimilarityComparisonMethod | None = None,
         distinct: bool = True,
-        include_curr: bool = False,
+        include_curr: bool = True,
         *,
         get_values: Callable[[], list[str]] | None = None,
     ) -> float | None:
@@ -143,76 +228,74 @@ class TreeNodeList:
 
     @cached_similarity("_album_similarity_cache")
     def album_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = False
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
     ):
         return self._calculate_similarity("id3_albums", comparison, distinct, include_curr)
 
     @cached_similarity("_albumartist_similarity_cache")
-    def albumartist_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = False
+    def _albumartist_similarity(
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
     ):
         return self._calculate_similarity("id3_albumartists", comparison, distinct, include_curr)
 
     @cached_similarity("_artist_similarity_cache")
-    def artist_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = False
+    def _artist_similarity(
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
     ):
         return self._calculate_similarity("id3_artists", comparison, distinct, include_curr)
 
+    @cached_similarity("_author_similarity_cache")
+    def author_similarity(
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
+    ):
+        a = self._albumartist_similarity(comparison, distinct, include_curr)
+        aa = self._artist_similarity(comparison, distinct, include_curr)
+        if not a and not aa:
+            return None
+        return max(a or 0.0, aa or 0.0)
+
     @cached_similarity("_disc_nums_similarity_cache")
     def disc_nums_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = False
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
     ):
         return self._calculate_similarity("id3_disc_nums", comparison, distinct, include_curr)
 
     @cached_similarity("_title_similarity_cache")
     def title_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = False
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
     ):
         return self._calculate_similarity("id3_titles", comparison, distinct, include_curr)
 
     @cached_similarity("_track_nums_similarity_cache")
     def track_nums_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = False
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
     ):
         return self._calculate_similarity("id3_track_nums", comparison, distinct, include_curr)
 
     @cached_similarity("_pathname_similarity_cache")
     def pathname_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = False
+        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
     ):
         return self._calculate_similarity(
             "name", comparison, distinct, include_curr, get_values=lambda: [p.name for p in self._trees]
         )
 
-    def are_maybe(self, structure: Literal["multi_disc", "multi_part", "series", "unknown"]) -> bool:
-        md = self.score_multi_disc or 0.0
-        mp = self.score_multi_part or 0.0
-        s = self.score_series or 0.0
-
-        match structure:
-            case "multi_disc":
-                return md > mp and md > s
-            case "multi_part":
-                return mp > md and mp > s
-            case "series":
-                return s > md and s > mp
-            case "unknown":
-                return not sum((self.are_maybe("multi_disc"), self.are_maybe("multi_part"), self.are_maybe("series")))
-
     @lazy
-    def disc_nums_are_sequential(self):
+    def disc_nums_are_contiguous(self):
 
-        return are_nums_sequential(self.disc_nums, sort=True, skips_ok=True)
+        return are_nums_contiguous(self.disc_nums, sort=True, skips_ok=True)
 
     @lazy
     def disc_nums_completion(self):
         """Return the ratio of disc numbers / total disc numbers, from 0-1"""
+
+        if self._node._tree.is_match:
+            ...
+
         if not self.have_disc_nums:
             return None
         # return percent_truthy_in_list([x > -1 for x in self.disc_nums]) / 100
-        files = [t for t in self._trees if t.is_file()]
-        return len(self.disc_nums) / len(files) if files else None
+        return len(self.disc_nums) / len(self._trees)
 
     @lazy
     def disc_nums_match_curr(self):
@@ -238,12 +321,16 @@ class TreeNodeList:
         return any([x for x in self.id3_albums])
 
     @lazy
-    def have_albumartists(self):
+    def _have_albumartists(self):
         return any([x for x in self.id3_albumartists])
 
     @lazy
-    def have_artists(self):
+    def _have_artists(self):
         return any([x for x in self.id3_artists])
+
+    @lazy
+    def have_authors(self):
+        return self._have_albumartists or self._have_artists
 
     @lazy
     def have_disc_nums(self):
@@ -295,9 +382,9 @@ class TreeNodeList:
         return get_missing_nums(self.id3_track_nums)
 
     @lazy
-    def part_nums_are_sequential(self):
+    def part_nums_are_contiguous(self):
 
-        return are_nums_sequential(self.part_nums, sort=True, skips_ok=True)
+        return are_nums_contiguous(self.part_nums, sort=True, skips_ok=True)
 
     @lazy
     def part_nums_completion(self):
@@ -305,8 +392,7 @@ class TreeNodeList:
         if not self.have_part_nums:
             return None
         # return percent_truthy_in_list([x > -1 for x in self.part_nums]) / 100
-        files = [t for t in self._trees if t.is_file()]
-        return len(self.part_nums) / len(files) if files else None
+        return len(self.part_nums) / len(self._trees)
 
     @lazy
     def part_nums_match_curr(self):
@@ -325,9 +411,9 @@ class TreeNodeList:
         return get_uniqueness(self.part_nums)
 
     @lazy
-    def series_nums_are_sequential(self):
+    def series_nums_are_contiguous(self):
 
-        return are_nums_sequential(self.series_nums, sort=True, skips_ok=True)
+        return are_nums_contiguous(self.series_nums, sort=True, skips_ok=True)
 
     @lazy
     def series_nums_completion(self):
@@ -335,8 +421,7 @@ class TreeNodeList:
         if not self.have_series_nums:
             return None
         # return percent_truthy_in_list([x > -1 for x in self.series_nums]) / 100
-        files = [t for t in self._trees if t.is_file()]
-        return len(self.series_nums) / len(files) if files else None
+        return len(self.series_nums) / len(self._trees)
 
     @lazy
     def series_nums_match_curr(self):
@@ -357,99 +442,10 @@ class TreeNodeList:
         return get_uniqueness(self.series_nums)
 
     @lazy
-    def score_multi_disc(self):
-        """Likelihood the TreeNodeList is a multi-disc book, from 0-1"""
-        if not self.have_disc_nums:
-            return 0.0
-        return round(percent_truthy_in_list([x > -1 for x in self.disc_nums]) / 100, 2)
+    def start_nums_are_contiguous(self):
+        """Returns True if all start numbers are contiguous"""
 
-    @lazy
-    def score_multi_part(self):
-        """Likelihood the TreeNodeList is a multi-part book, from 0-1"""
-        part_or_track_nums = self.id3_track_nums if self.have_track_nums else self.part_nums
-        base_score = 0.0
-
-        should_check_track_nums = (
-            self.have_track_nums and (self.track_nums_uniqueness or 0) > 0.9 and self.track_nums_are_sequential
-        )
-        should_check_part_nums = (
-            self.have_part_nums and (self.part_nums_uniqueness or 0) > 0.9 and self.part_nums_are_sequential
-        )
-        should_check_start_nums = (
-            self.have_start_nums and (self.start_nums_uniqueness or 0) > 0.9 and self.start_nums_are_sequential
-        )
-
-        if should_check_track_nums:
-            base_score = 0.5
-            if len(self.missing_track_nums) / len(part_or_track_nums) < 0.1:
-                base_score += 0.5
-        elif should_check_part_nums or should_check_start_nums:
-            base_score = 0.5
-            file_sizes = [t.size for t in self._trees]
-            largest_file_size = max(file_sizes)
-            base_score += -0.5 + int(is_gt_50mb(largest_file_size))
-        return round(clamp(base_score, 0.0, 1.0), 2)
-
-    @lazy
-    def score_series(self):
-        """Likelihood the TreeNodeList is a series, from 0-1"""
-        from src.lib.parsers import is_maybe_multiple_books_or_series
-
-        # Convert percent_truthy_in_list results from 0-100 to 0-1
-        multi_string_agg = (
-            percent_truthy_in_list([is_maybe_multiple_books_or_series(t.name) for t in self._trees]) / 100
-        )
-        part_num_agg = percent_truthy_in_list([x > -1 for x in self.part_nums]) / 100
-        series_num_agg = percent_truthy_in_list([x > -1 for x in self.series_nums]) / 100
-        start_num_agg = percent_truthy_in_list([x > -1 for x in self.start_nums]) / 100
-
-        num_checks = max([multi_string_agg, series_num_agg, start_num_agg])
-        if part_num_agg:
-            # Penalize if there are part numbers, as they are often used to indicate a multi-part book, not a series
-            num_checks -= part_num_agg / 2
-
-        # Penalize for series num uniqueness
-        if (u := self.series_nums_uniqueness or 1) < 1:
-            num_checks -= 1 - u
-
-        id3_checks = 0.0
-
-        album_similarity = self.album_similarity(distinct=True) or None
-        albumartist_similarity = self.albumartist_similarity(distinct=True) or None
-        artist_similarity = self.artist_similarity(distinct=True) or None
-        track_num_similarity = self.track_nums_similarity(distinct=True) or None
-
-        if albumartist_similarity is not None:
-            # Adjust for albumartist
-            id3_checks += -0.5 + albumartist_similarity
-        if artist_similarity is not None:
-            # Adjust for artist
-            id3_checks += -0.5 + artist_similarity
-        if album_similarity is not None:
-            # Adjust for album (penalize if it's similar, boost if it's not)
-            if album_similarity == 1:
-                # Significantly penalize if the album is identical
-                id3_checks = -2.0
-            else:
-                id3_checks -= 2.0 * (album_similarity or 0)
-        if self.have_track_nums:
-            # Adjust for track numbers (penalize if they're unique, boost if they're similar)
-            id3_checks += 2.0 * (-0.5 + (track_num_similarity or 0))
-        if self.track_nums_uniqueness is not None:
-            # Adjust for track numbers uniqueness (penalize if it's unique, boost if it's not)
-            # If track uniqueness is 1, significantly penalize
-            if self.track_nums_uniqueness == 1:
-                id3_checks = -2.0
-            else:
-                id3_checks += -2.0 * (self.track_nums_uniqueness or 0)
-
-        return round(clamp(num_checks + id3_checks, 0.0, 1.0), 3)
-
-    @lazy
-    def start_nums_are_sequential(self):
-        """Returns True if all start numbers are sequential"""
-
-        return are_nums_sequential(self.start_nums, sort=True, skips_ok=True)
+        return are_nums_contiguous(self.start_nums, sort=True, skips_ok=True)
 
     @lazy
     def start_nums_completion(self):
@@ -457,8 +453,7 @@ class TreeNodeList:
         if not self.have_start_nums:
             return None
         # return percent_truthy_in_list([x > -1 for x in self.start_nums]) / 100
-        files = [t for t in self._trees if t.is_file()]
-        return len(self.start_nums) / len(files) if files else None
+        return len(self.start_nums) / len(self._trees)
 
     @lazy
     def start_nums_match_curr(self):
@@ -485,10 +480,10 @@ class TreeNodeList:
         return get_uniqueness(self.start_nums)
 
     @lazy
-    def track_nums_are_sequential(self):
-        """Returns True if all track numbers are sequential"""
+    def track_nums_are_contiguous(self):
+        """Returns True if all track numbers are contiguous"""
 
-        return are_nums_sequential(self.id3_track_nums, sort=True, skips_ok=True)
+        return are_nums_contiguous(self.id3_track_nums, sort=True, skips_ok=True)
 
     @lazy
     def track_nums_completion(self):
@@ -496,8 +491,7 @@ class TreeNodeList:
         if not self.have_track_nums:
             return None
         # return percent_truthy_in_list([x > -1 for x in self.id3_track_nums]) / 100
-        files = [t for t in self._trees if t.is_file()]
-        return len(self.id3_track_nums) / len(files) if files else None
+        return len(self.id3_track_nums) / len(self._trees)
 
     @lazy
     def track_nums_match_curr(self):

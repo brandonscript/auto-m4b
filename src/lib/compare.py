@@ -6,7 +6,7 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Literal, overload, TypeVar
 
-SimilarityComparisonMethod = Literal["median", "avg", "min", "max"] | None
+from lib.typing import SimilarityComparisonMethod
 
 
 @overload
@@ -262,7 +262,7 @@ def cached_similarity(cache_attr: str):
             self,
             comparison: SimilarityComparisonMethod | None = None,
             distinct: bool = True,
-            include_curr: bool = False,
+            include_curr: bool = True,
         ) -> T:
             cache = getattr(self, cache_attr, None)
             if not cache:
@@ -281,7 +281,7 @@ def cached_similarity(cache_attr: str):
             ):
                 return cache["result"]
 
-            result = func(self, comparison, distinct, include_curr)
+            result = func(self, comparison, distinct, include_curr=include_curr)
             cache["result"] = result
             return result
 

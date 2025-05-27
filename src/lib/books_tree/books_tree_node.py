@@ -1,14 +1,14 @@
 from pathlib import Path
-from typing import Literal, Self, TYPE_CHECKING
+from typing import Self, TYPE_CHECKING
 
 from lazy.lazy import lazy
 
-from lib.books_tree.books_tree_utils import (
+from src.lib.books_tree.books_tree_utils import (
     get_all_nums_in_string,
     get_part_num,
 )
-from lib.parsers import get_disc_num, get_series_num
 from src.lib.id3_tags import Id3Tags
+from src.lib.parsers import get_disc_num, get_series_num
 from src.lib.term import print_warning
 
 if TYPE_CHECKING:
@@ -60,21 +60,17 @@ class TreeNode:
         self.all_nums = [n for (n, _) in get_all_nums_in_string(Path(self._tree.name).stem)]
 
     def __repr__(self):
-        return f"{{d: {self.disc_num}, p: {self.part_num}, s: {self.series_num}, ^: {self.start_num}}}"
+
+        disc = f"💽 {self.disc_num}" if self.disc_num > -1 else ""
+        part = f"🎉 {self.part_num}" if self.part_num > -1 else ""
+        series = f"📺 {self.series_num}" if self.series_num > -1 else ""
+        start = f"🔥 {self.start_num}" if self.start_num > -1 else ""
+
+        info = " ".join((str(v) for v in [disc, part, series, start] if v)).strip()
+        return f"{self._tree.rel_path} {info}"
 
     def __str__(self):
         return self.__repr__()
-
-    def is_maybe(self, structure: Literal["multi_disc", "multi_part", "series", "unknown"]) -> bool:
-        match structure:
-            case "multi_disc":
-                return self.has_disc_num
-            case "multi_part":
-                return self.has_track_num or self.has_part_num
-            case "series":
-                return self.has_series_num or self.has_start_num
-            case "unknown":
-                return not any((self.is_maybe("multi_disc"), self.is_maybe("multi_part"), self.is_maybe("series")))
 
     @lazy
     def has_disc_num(self):

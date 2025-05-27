@@ -6,7 +6,6 @@ import bidict
 from mutagen.mp3 import HeaderNotFoundError
 from pydantic import BaseModel, computed_field, Field, field_validator
 
-from lib.term import print_debug
 from src.lib.ffprobe_utils import ffprobe_file
 from src.lib.misc import fix_ffprobe
 from src.lib.typing import AdditionalTags, Id3TagDict, TagSource
@@ -242,8 +241,6 @@ class Id3Tags(BaseModel):
                     raise HeaderNotFoundError(f"Error: Previously failed to extract id3 tags from {file}")
                 return cls(updated=current_time, BAD=True)
             return cls(**cached_result, updated=current_time)  # type: ignore
-
-        print_debug(f"Id3Tags.from_file: {file}")
 
         # Try to extract tags
         try:

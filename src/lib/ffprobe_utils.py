@@ -4,8 +4,8 @@ from typing import Any, cast
 
 import ffmpeg
 
-from lib.typing import BadFileError
 from src.lib.term import print_debug, print_error, print_warning
+from src.lib.typing import BadFileError
 
 
 def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, throw: bool = False):
@@ -27,7 +27,7 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
         err_str = str(cast(ffmpeg.Error, e).stderr) if isinstance(e, ffmpeg.Error) else str(e)
 
         # Some mock files are not readable by ffprobe, so we return None
-        if "pytest" in sys.argv and "mock_" in err_str and "Invalid data found when processing input" in err_str:
+        if "pytest" in sys.modules and "mock_" in err_str and "Invalid data" in err_str:
             return None
 
         write_err_file(file, e, "ffprobe")

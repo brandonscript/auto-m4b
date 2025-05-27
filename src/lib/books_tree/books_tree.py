@@ -7,13 +7,12 @@ from typing import Any, cast, Literal, overload, Self, TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel, Field
 
-from lib.books_tree.books_tree_summary import TreeNodeSummary
-from lib.books_tree.books_tree_utils import _match_filter_func, filter_matches
-from lib.id3_tags import Id3Tags
+from src.lib.books_tree.books_tree_summary import TreeNodeSummary
+from src.lib.books_tree.books_tree_utils import _match_filter_func, filter_matches
+from src.lib.id3_tags import Id3Tags
 from src.lib.misc import (
     any_in,
     any_matching,
-    cached_property_max_age,
     flatlist,
     isorted,
 )
@@ -499,7 +498,7 @@ class BooksTree(BaseModel):
 
         return BooksTree.cast(next_file, root=self.root, match_filter=self.match_filter)
 
-    @cached_property_max_age(ttl=30)
+    @property
     def i(self) -> TreeNodeSummary:
         if self.is_root:
             return None  # type: ignore
@@ -593,6 +592,15 @@ class BooksTree(BaseModel):
                 [*self._files, *self._dirs.values(), *sum([d.children_recursive for d in self._dirs.values()], [])]
             )
         )
+
+    @property
+    def children_without_structure_r(self) -> list["BooksTree"]:
+        return [c for c in self.children_recursive if not c.structure or c.has_structure("unknown")]
+
+    @property
+    def children_structures_r(self) -> list[BookStructure2]:
+        """A list (set) of all structures found in all children."""
+        return list(set([s for c in self.children_recursive for s in c.structure]))
 
     @property
     @filter_matches
@@ -744,7 +752,222 @@ class BooksTree(BaseModel):
     def type(self):
         return "dir" if self.is_dir() else "file" if self.is_file() else "unknown"
 
+    @property
+    def score_container(self):
+        from src.lib.scorers import score_container
+
+        return score_container(self)
+
+    @property
+    def score_flat(self):
+        from src.lib.scorers import score_flat
+
+        return score_flat(self)
+
+    @property
+    def score_mixed(self):
+        from src.lib.scorers import score_mixed
+
+        return score_mixed(self)
+
+    @property
+    def score_multi_disc(self):
+        from src.lib.scorers import score_multi_disc
+
+        return score_multi_disc(self)
+
+    @property
+    def score_multi_parent(self):
+        from src.lib.scorers import score_multi_parent
+
+        return score_multi_parent(self)
+
+    @property
+    def score_multi_part(self):
+        from src.lib.scorers import score_multi_part
+
+        return score_multi_part(self)
+
+    @property
+    def score_series_book(self):
+        from src.lib.scorers import score_series_book
+
+        return score_series_book(self)
+
+    @property
+    def score_series_parent(self):
+        from src.lib.scorers import score_series_parent
+
+        return score_series_parent(self)
+
+    @property
+    def score_single(self):
+        from src.lib.scorers import score_single
+
+        return score_single(self)
+
+    @property
+    def score_standalone_file(self):
+        from src.lib.scorers import score_standalone_file
+
+        return score_standalone_file(self)
+
     def determine_structure(
+        self,
+        *,
+        parent: "BooksTree | None" = None,
+    ) -> tuple[BookStructure2, ...]:
+        """Determines the structure for a tree of audio files and directories."""
+
+        # Trying a multi-pass approach
+        # 1. Find all flat dirs
+        # 2. Find all standalone files
+        # 3. Find all multi-disc dirs
+
+        if not self.parent:
+            self.parent = parent
+
+        if not parent:
+            parent = self
+
+        root = parent.root or parent
+
+        depth = len(self.path.relative_to(root.path).parts) if root else 0
+
+        is_root = depth == 0
+
+        if self.is_match:
+            ...
+
+        if (self.is_root and not is_root) or (not self.is_root and is_root):
+            raise ValueError(
+                f"Root status of the current path and the root path do not match: {self.is_root=}, {is_root=}"
+            )
+
+        if is_root:
+            self.set_structures("_root_")
+            if not self.dirs and not self.files:
+                return self.structure
+
+            [d.determine_structure(parent=self) for d in self.dirs.values()]
+            [f.determine_structure(parent=self) for f in self.files]
+            # Note: Disable this assertion when debugging with _match_filter_func()
+            if self.children_without_structure_r:
+                raise ValueError(
+                    f"Expected structure to be determined for: {'\n'.join([str(c) for c in self.children_without_structure_r])}"
+                )
+            [c.determine_if_book_root() for c in self.children_recursive]
+            return self.structure
+
+        if self.is_match:
+            ...
+
+        this_file = [self] if self.is_file() else []
+        this_dir = [self] if self.is_dir() else []
+
+        # File pass #1: standalone, single
+        for f in this_file + self.files_recursive:
+            standalone_gt_single = f.score_standalone_file > f.score_single
+
+            if f.score_single < 0.5 and f.score_standalone_file < 0.5:
+                continue
+
+            if standalone_gt_single:
+                f.add_structures("standalone_file")
+            else:
+                f.add_structures("single")
+
+        # Dir pass #1: single, multi-disc, multi-part, flat
+        for d in this_dir + self.dirs_recursive:
+            if self.is_match:
+                ...
+            # if all files in dir are 'single', set dir to 'single' too
+            if d.files and all(f.has_structure("single") for f in d.files):
+                d.set_structures("single")
+                if (p := d.parent) and not p.is_root:
+                    p.add_structures("nested", recursive=True)
+            elif d.score_multi_disc > 0.75:
+                if not self.structure:
+                    self.set_structures("multi_disc", "multi_parent")
+                d.add_structures("multi_disc", recursive=True)
+            elif d.score_multi_part > 0.75:
+                if not self.structure:
+                    self.set_structures("multi_part", "multi_parent")
+                d.add_structures("multi_part", recursive=True)
+            elif d.score_flat > 0.75:
+                d.add_structures("flat", recursive=True)
+            elif d.score_series_parent > 0.75:
+                d.set_structures("series_parent")
+                [cc.add_structures("series_book", recursive=True) for cc in d.children_recursive]
+                [f.add_structures("standalone_file") for f in d.files if f.score_standalone_file > 0.5]
+
+        # Dir pass #2: mixed (too complex to determine)
+        for c in this_file + this_dir + self.children_without_structure_r:
+            if c.structure:
+                continue
+
+            if self.score_container > 0.25 and self.score_container > self.score_mixed:
+                c.set_structures("container")
+            elif self.score_mixed > self.score_container:
+                c.set_structures("mixed")
+
+        # # Dir pass #3: series
+        # for c in this_file + this_dir + self.children_without_structure_r:
+
+        #     if self.is_match:
+        #         ...
+
+        #     if c.has_any_structure("container", "mixed", "multi_parent"):
+        #         continue
+
+        #     if c.score_series_book < 0.4 and c.score_series_parent < 0.4:
+        #         continue
+
+        #     if (self.i.children_recursive.all_path_nums_completion or 0) < 0.7:
+        #         continue
+
+        #     parent_gt_book = c.score_series_parent > c.score_series_book
+        #     book_gte_parent = c.score_series_book >= c.score_series_parent
+
+        #     this_is_series_parent = c.score_series_parent and parent_gt_book
+        #     parent_is_series_parent = c.parent and c.score_series_book and book_gte_parent
+
+        #     if not this_is_series_parent and not parent_is_series_parent:
+        #         continue
+
+        #     if this_is_series_parent:
+        #         c.set_structures("series_parent")
+        #         [cc.add_structures("series_book", recursive=True) for cc in c.children_recursive]
+        #     elif parent_is_series_parent and c.parent:
+        #         c.parent.add_structures("series_parent")
+        #         c.add_structures("series_book", recursive=True)
+
+        #     [f.add_structures("standalone_file") for f in c.files if f.score_standalone_file > 0.5]
+
+        # Determine containers and nested for remaining dirs
+        for d in this_dir + [c for c in self.children_without_structure_r if c.is_dir()]:
+            if (len(d.dirs) == 1 and not d.files) and list(d.dirs.values())[0].has_any_structure(
+                "flat", "multi_parent"
+            ):
+                d.set_structures("nested", recursive=True)
+                continue
+            if d.structure or d.score_container <= 0 or d.has_structure("mixed"):
+                continue
+            if len(d.children_structures_r) > 1:
+                d.set_structures("container")
+
+                # d.add_structures("multi_parent", recursive=True)
+
+        # for d in [d for d in self.dirs_recursive if d.score_container > 0.5]:
+        #     d.set_structures("container")
+
+        # if _is_empty := self.is_dir() and not any((self.dirs, self.files)):
+        #     self.set_structures("empty")
+        #     return self.structure
+
+        return self.structure
+
+    def determine_structure_old(
         self,
         *,
         parent: "BooksTree | None" = None,
@@ -791,9 +1014,15 @@ class BooksTree(BaseModel):
             self.set_structures("empty")
             return self.structure
 
-        if self.is_file() and self.i.is_likely("standalone_file"):
-            self.set_structures("standalone_file")
+        if self.is_file() and self.score_standalone_file > 0.9:
+            self.add_structures("standalone_file")
             return self.structure
+
+        # standalone_score = score_standalone_file(self)
+        # multi_parent_score = score_multi_parent(self)
+        # multi_disc_score = score_multi_disc(self)
+        # multi_part_score = score_multi_part(self)
+        # series_book_score = score_series_book(self)
 
         has_multiple_files = len(self.files) > 1
         has_multiple_dirs = len(self.dirs) > 1
@@ -801,20 +1030,30 @@ class BooksTree(BaseModel):
         parent_is_container = bool((p := self.parent) and p.has_structure("container"))
         parent_is_series_parent = bool((p := self.parent) and p.has_structure("series_parent"))
 
-        album_similarity = self.i.children_recursive.albumartist_similarity() or 0
-        artist_similarity = self.i.children_recursive.album_similarity() or 0
-        albumartist_similarity = self.i.children_recursive.artist_similarity() or 0
+        # album_similarity = self.i.children_recursive.album_similarity() or 0
+        # author_similarity = self.i.children_recursive.author_similarity() or 0
 
         is_known_multi = self.determine_multi_structure() if not self.is_root else False
         is_series_parent_or_book = self.determine_series_structure() if not self.is_root else False
 
-        if self.has_any_structure("series_parent", "multi_parent", "multi_disc", "multi_part"):
+        if self.has_structure("container") and self.score_container <= 0:
+            self.remove_structures("container")
+
+        if self.is_match:
+            ...
+
+        # if flat_score > 0.5:
+        #     self.add_structures("flat", recursive=True)
+        #     return self.structure
+
+        if self.has_any_structure("series_parent", "multi_parent", "multi_disc", "multi_part", "container"):
+
+            # [d.determine_structure(parent=self) for d in self.dirs.values()]
+            # [f.determine_structure(parent=self) for f in self.files]
+            [c.determine_structure(parent=self) for c in self.children]
             if self.is_match:
                 ...
-
-            [d.determine_structure(parent=self) for d in self.dirs.values()]
-            [f.determine_structure(parent=self) for f in self.files]
-            return self.structure
+            # return self.structure
 
         has_mixed_content = (
             has_files_and_dirs or has_multiple_dirs and not any((is_known_multi, is_series_parent_or_book))
@@ -835,16 +1074,19 @@ class BooksTree(BaseModel):
                 self.add_structures("flat", recursive=True)
             return self.structure
 
-        if (
-            _is_basic_flat := self.is_dir()
-            and self.files
-            and not self.dirs
-            and (not has_mixed_content or parent_is_container)
-        ) or (_is_flat_series_book := self.is_dir() and parent_is_series_parent and self.files and not self.dirs):
+        if _is_flat_series_book := self.is_dir() and parent_is_series_parent and self.score_flat > 0.5:
+            if self.is_match:
+                ...
             if len(self.files) == 1:
                 self.add_structures("single", recursive=True)
             else:
                 self.add_structures("flat", recursive=True)
+            return self.structure
+
+        if _is_simple_flat := self.score_flat > 0.75:
+            if self.is_match:
+                ...
+            self.add_structures("flat", recursive=True)
             return self.structure
 
         if _is_already_single_standalone := self.is_file() and self.has_any_structure("single", "standalone_file"):
@@ -854,6 +1096,8 @@ class BooksTree(BaseModel):
             self.depth == 1 or parent_is_container or parent_is_series_parent
         ):
             self.add_structures("standalone_file")
+            # if parent_is_series_parent:
+            #     self.add_structures("series_book")
 
         # DEBUG only: bypass the structure determination if the current path does not match the filter
         # if not _match_filter_func([self.path], self.match_filter, root=root):
@@ -861,62 +1105,102 @@ class BooksTree(BaseModel):
 
         if has_mixed_content:
 
-            if album_similarity > 0.95 and (artist_similarity > 0.95 or albumartist_similarity > 0.95):
-                self.set_structures("flat", recursive=True)
-                # TODO: Might want another category for single title, but in mixed content
-                # or, we just flatten it anyway if it's 'flat' but not really
-                return self.structure
+            # if album_similarity > 0.95 and (author_similarity > 0.95):
+            #     self.set_structures("flat", recursive=True)
+            #     # TODO: Might want another category for single title, but in mixed content
+            #     # or, we just flatten it anyway if it's 'flat' but not really
+            #     return self.structure
 
-            for f in [f for f in self.files if f.i.is_likely("standalone_file")]:
-                f.set_structures("standalone_file")
+            # for f in [f for f in self.files if f.i.is_maybe("standalone_file")]:
+            #     f.set_structures("standalone_file")
 
-            if self.i.is_likely("container"):
-                self.set_structures("container")
-            else:
-                self.set_structures("mixed")
+            if not self.structure:
+                if self.score_container > 0.5:
+                    self.set_structures("container")
+                else:
+                    self.set_structures("mixed")
 
-            [d.determine_structure(parent=self) for d in self.dirs.values()]
-            [f.determine_structure(parent=self) for f in self.files]
+            # [d.determine_structure(parent=self) for d in self.dirs.values()]
+            # [f.determine_structure(parent=self) for f in self.files]
+            if self.is_match:
+                ...
+            [c.determine_structure(parent=self) for c in self.children if not c.structure]
+            if self.is_match:
+                ...
 
             if _is_likely_container := all(
                 (
                     c.has_any_structure("standalone_file", "single", "flat", "series_parent", "multi_parent")
                     for c in self.children
                 )
-            ):
+            ) and not self.has_structure_like("series_"):
                 self.set_structures("container")
 
-            elif (has_multiple_dirs or (has_files_and_dirs and (has_multiple_files or has_multiple_dirs))) and (
-                (
-                    (self.i.dirs.pathname_similarity(distinct=True) or 0) > 0.8
-                    or (self.i.files.pathname_similarity(distinct=True) or 0) > 0.9
-                    or (self.i.files_recursive.pathname_similarity(distinct=True) or 0) > 0.8
-                    or ((self.i.files.pathname_similarity("max") or 0) - (self.i.files.pathname_similarity("min") or 1))
-                    > 0.2
-                )
+            if (
+                self.children_recursive
+                and (unknowns := [c for c in self.children_recursive if not c.structure])
+                and len(unknowns) / len(self.children_recursive) > 0.1
             ):
                 # If we have mixed file types, that's fine, but if they are very similar, we can't be
                 # sure if we should treat it as a container or not – treat it as mixed
+                if self.is_match:
+                    ...
                 self.clear_structure(recursive=True)
                 self.set_structures("mixed", recursive=True)
                 return self.structure
 
+            # elif (has_multiple_dirs or (has_files_and_dirs and (has_multiple_files or has_multiple_dirs))) and (
+            #     (
+            #         (self.i.dirs.pathname_similarity(distinct=True) or 0) > 0.8
+            #         or (self.i.files.pathname_similarity(distinct=True) or 0) > 0.9
+            #         or (self.i.files_recursive.pathname_similarity(distinct=True) or 0) > 0.8
+            #         or ((self.i.files.pathname_similarity("max") or 0) - (self.i.files.pathname_similarity("min") or 1))
+            #         > 0.2
+            #     )
+            # ):
+
         return self.structure
 
     def determine_series_structure(self):
-        if self.is_match:
-            ...
 
         if self == self.parent:
             return False
 
-        if not self.parent or not any((self.i.is_likely("series_book"), self.i.is_likely("series_parent"))):
+        series_book_score = self.score_series_book
+        series_parent_score = self.score_series_parent
+        child_series_book_scores = [(c, c.score_series_book) for c in self.children if c.score_series_book > 0.5]
+        if self.is_match:
+            ...
+        child_series_parent_scores = [x for x in [(c, c.score_series_parent) for c in self.children] if x[1] > 0.5]
+
+        if self.is_match:
+            ...
+
+        if child_series_parent_scores:
+            self.set_structures("container")
+            [c.set_structures("series_parent") for c, _ in child_series_parent_scores]
+            return False
+
+        if (
+            series_parent_score > series_book_score
+            and child_series_book_scores
+            and self.parent
+            and not self.parent.has_structure_like("series_")
+        ):
+            self.add_structures("series_parent")
+
+        if series_book_score > series_parent_score:
+            for c, _ in child_series_book_scores:
+                c.add_structures("series_book", recursive=True)
+                return True
+
+        if not self.parent or not any((series_book_score > 0, series_parent_score > 0)):
             return False
 
         if (
             self.parent.has_any_structure("multi_disc", "multi_part", "multi_parent")
-            or self.i.is_likely("multi_disc")
-            or self.i.is_likely("multi_part")
+            or self.score_multi_disc > 0.5
+            or self.score_multi_part > 0.5
         ):
             return False
 
@@ -929,9 +1213,9 @@ class BooksTree(BaseModel):
         # - If the children don't have series numbers, but are all files with dissimilar names, and
         #   sufficiently sized to be standalones, this is likely a series parent.
 
-        siblings_match = (self.i.siblings.have_series_nums and self.i.siblings.series_nums_match_each_other) or (
-            self.i.siblings.have_start_nums and self.i.siblings.start_nums_match_each_other
-        )
+        siblings_match = (
+            self.i.this_and_siblings.have_series_nums and self.i.this_and_siblings.series_nums_match_each_other
+        ) or (self.i.this_and_siblings.have_start_nums and self.i.this_and_siblings.start_nums_match_each_other)
 
         # siblings_id3_albums_match = (
         #     self.i.siblings.have_id3_albums and self.i.siblings.id3_albums_match_each_other
@@ -939,7 +1223,7 @@ class BooksTree(BaseModel):
         if self.is_match:
             ...
 
-        if self.i.is_likely("series_parent"):
+        if series_parent_score > 0:
             if self.is_match:
                 ...
 
@@ -949,7 +1233,7 @@ class BooksTree(BaseModel):
                 # It's a series_book if:
                 #   - it has a series no., and the children do not (or they match)
                 #   - its parent does not have a series no.
-                if not c.i.is_likely("series_book"):
+                if not c.score_series_book > 0:
                     # raise ValueError(
                     #     f"Expected '{c}' is_likely_series_book to be True (all children of suspected series parent should be suspected series books)"
                     # )
@@ -969,6 +1253,7 @@ class BooksTree(BaseModel):
 
     # def determine_multi_structure(self, *, parent: "BooksTree | None"):
     def determine_multi_structure(self):
+        from src.lib.scorers import score_flat, score_multi_disc, score_multi_parent, score_multi_part
 
         if self.is_match:
             ...
@@ -976,47 +1261,68 @@ class BooksTree(BaseModel):
         if self == self.parent:
             return False
 
-        if not self.parent or not any(
-            (self.i.is_likely("multi_disc"), self.i.is_likely("multi_part"), self.i.is_likely("multi_parent"))
-        ):
+        if score_flat(self) > 0.5:
             return False
 
-        if self.i.is_likely("multi_parent"):
-            children_struct = "multi_disc" if self.i.children.are_maybe("multi_disc") else "multi_part"
+        multi_disc_score = score_multi_disc(self)
+        multi_part_score = score_multi_part(self)
+        multi_parent_score = score_multi_parent(self)
+
+        if not self.parent or not any((multi_disc_score > 0, multi_part_score > 0, multi_parent_score > 0)):
+            return False
+
+        if multi_parent_score > 0.5:
+            if self.is_match:
+                ...
+            children_struct = "multi_disc" if multi_disc_score > 0.5 else "multi_part"
             self.add_structures("multi_parent", children_struct)
             [c.add_structures(children_struct) for c in self.children_recursive]
             return True
 
         if self.has_any_structure("multi_disc", "multi_part"):
+            if self.parent.is_root or not any((multi_disc_score > 0, multi_part_score > 0)):
+                self.parent.set_structures("multi_parent")
             return True
 
-        if self.i.is_likely("multi_disc"):
+        if multi_disc_score > 0.5:
             # It's multi_disc or multi_part if:
             #   - it has a disc or part no., and the children do not (or they match)
             #   - its parent does not have a disc or part no.
-            #   - siblings have disc or part nos. that are sequential
+            #   - siblings have disc or part nos. that are contiguous
+
+            if self.is_match:
+                ...
 
             if (
                 not self.parent.is_root
-                and self.i.siblings.disc_nums_are_sequential
+                and self.i.this_and_siblings.disc_nums_are_contiguous
                 and not self.parent.has_any_structure("multi_disc", "multi_parent")
             ):
                 self.parent.set_structures("multi_parent")
                 self.parent.add_structures("multi_disc", recursive=True)
             self.add_structures("multi_disc", recursive=True)
 
+            if self.parent.is_root or self.parent.has_structure("container"):
+                self.add_structures("multi_parent")
+
             return True
 
-        elif self.i.is_likely("multi_part"):
+        elif multi_part_score > 0.5:
+
+            if self.is_match:
+                ...
 
             if (
                 not self.parent.is_root
-                and self.i.siblings.part_nums_are_sequential
+                and self.i.this_and_siblings.part_nums_are_contiguous
                 and not self.parent.has_any_structure("multi_part", "multi_parent")
             ):
                 self.parent.set_structures("multi_parent")
                 self.parent.add_structures("multi_part", recursive=True)
             self.add_structures("multi_part", recursive=True)
+
+            if self.parent.is_root or self.parent.has_structure("container"):
+                self.add_structures("multi_parent")
 
             return True
 
@@ -1097,7 +1403,8 @@ class BooksTree(BaseModel):
         if any_in(structure, ["flat", "single", "standalone_file"]) and any_matching(
             self.structure, ["multi_", "series_parent", "container", "mixed"]
         ):
-            raise ValueError(f"Tried to add {structure} to {self.path} which has {self.structure}")
+            # raise ValueError(f"Tried to add {structure} to {self.path} which has {self.structure}")
+            print_debug(f"Tried to add {structure} to {self.path} which has {self.structure}")
 
         # After all the checks, set the structure
         for s in structure:

@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from lib.compare import calculate_gcs_percentage, find_greatest_common_string
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
+from src.lib.compare import calculate_gcs_percentage, find_greatest_common_string
 from src.lib.fs_utils import (
     filter_ignored,
     find_cover_art_file,
@@ -430,6 +430,6 @@ class test_get_similarity:
         ],
     )
     def test_similarity_of_strings(self, strings: list[str], expected: int | float):
-        from lib.compare import get_similarity
+        from src.lib.compare import get_similarity
 
         assert get_similarity(strings) == pytest.approx(expected, rel=0.01)

@@ -139,3 +139,4 @@ def copy_kwargs_omit_first_arg(
 OnComplete = Literal["archive", "delete", "test_do_nothing"]
 
 NumericIterable = TypeVar("NumericIterable", bound=Iterable[int | float] | list[int | float])
+SimilarityComparisonMethod = Literal["median", "avg", "min", "max"] | None

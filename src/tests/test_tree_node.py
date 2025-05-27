@@ -20,9 +20,9 @@ class test_tree_node:
         assert i.parent is None
 
         # Common
-        for x in [i.children, i.files, i.dirs, i.siblings, i.this_and_siblings]:
+        for x in [i.children, i.files, i.dirs, i.this_and_siblings]:
             assert x.disc_nums == []
-            assert x.disc_nums_are_sequential == None
+            assert x.disc_nums_are_contiguous == None
             assert x.part_nums == []
             assert x.series_nums == []
             assert x.id3_disc_nums == []
@@ -73,17 +73,11 @@ class test_tree_node:
         assert len(i.files_recursive.id3_titles) == 38
         assert all(len(t) > 2 for t in i.files_recursive.id3_titles)
 
-        # Dirs / Dirs recursive
-        for _name, x in [("dirs", i.dirs), ("dirs_recursive", i.dirs_recursive)]:
-            assert x.__repr__() == "{d: —, p: —, s: —, ^: 1, ~: -1}"
-            assert x.start_nums == [1]
-            assert x.all_path_nums == [[1]]
-            # There are no id3 tags for dirs
-
-        # Siblings
-        assert i.siblings.__repr__() == "{d: —, p: —, s: —, ^: —, ~: -1}"
-        assert i.siblings.start_nums == []
-        assert i.siblings.all_path_nums == []
+        # Dirs
+        assert i.dirs.__repr__() == "{d: —, p: —, s: —, ^: 1, ~: -1}"
+        assert i.dirs.start_nums == [1]
+        assert i.dirs.all_path_nums == [[1]]
+        # There are no id3 tags for dirs
 
         # This and siblings
         assert i.this_and_siblings.__repr__() == "{d: —, p: —, s: —, ^: —, ~: -1}"
@@ -91,9 +85,9 @@ class test_tree_node:
         assert i.this_and_siblings.all_path_nums == [[3]]  # Dir has "_mp3" in it
 
         # Determinations
-        assert i.children.score_multi_part == 1.0
-        assert i.children.score_multi_disc == 0
-        assert i.children.score_series < 0.5
+        assert i.score_multi_part == 1.0
+        assert i.score_multi_disc == 0
+        assert i.score_series_book < 0.5
         assert i.is_likely("multi_disc") == False
         assert i.is_likely("multi_parent") == False
         assert i.is_likely("multi_part") == True

@@ -5,8 +5,8 @@ import pytest
 from mutagen.id3._util import ID3NoHeaderError
 from mutagen.mp3 import HeaderNotFoundError
 
-from lib.id3_tags import extract_id3_tags
 from src.lib.audiobook import Audiobook
+from src.lib.id3_tags import extract_id3_tags
 from src.lib.id3_utils import map_kid3_keys, write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState
 from src.lib.misc import increment

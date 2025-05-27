@@ -7,10 +7,10 @@ import time
 from pathlib import Path
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING, Union
 
-from lib.scorers import (
+from src.lib.misc import fix_ffprobe
+from src.lib.scorers import (
     MetadataScore,
 )
-from src.lib.misc import fix_ffprobe
 
 fix_ffprobe()
 

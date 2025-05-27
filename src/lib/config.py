@@ -16,8 +16,7 @@ from multiprocessing import cpu_count
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TypeVar
 
-from lib.constants import AUDIO_EXTS, DEFAULT_SLEEP_TIME, DEFAULT_WAIT_TIME, IGNORE_FILES, OTHER_EXTS
-from lib.typing import OnComplete
+from src.lib.constants import AUDIO_EXTS, DEFAULT_SLEEP_TIME, DEFAULT_WAIT_TIME, IGNORE_FILES, OTHER_EXTS
 from src.lib.misc import (
     get_git_root,
     is_boolish,
@@ -35,7 +34,7 @@ from src.lib.misc import (
     to_json,
 )
 from src.lib.term import nl, print_amber, print_debug, print_error
-from src.lib.typing import OverwriteMode
+from src.lib.typing import OnComplete, OverwriteMode
 
 AUDIO_EXTS = AUDIO_EXTS
 

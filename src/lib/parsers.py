@@ -12,16 +12,15 @@ import cachetools.func
 from nltk import pos_tag, word_tokenize
 from spacy.ml import Doc
 
-from lib.misc import get_numbers_in_string
-from lib.nlp import english_words, inflect, nlp
-from lib.patterns import book_series_pattern, multi_disc_pattern
-from lib.typing import MEMO_TTL
 from src.lib.misc import (
     any_in,
+    get_numbers_in_string,
     isorted,
     re_group,
 )
+from src.lib.nlp import english_words, inflect, nlp
 from src.lib.patterns import *
+from src.lib.patterns import book_series_pattern, multi_disc_pattern
 from src.lib.term import print_debug
 from src.lib.typing import AuthorNarrator, MEMO_TTL, NameParserTarget
 
@@ -137,7 +136,7 @@ def contains_partno_or_ch(s: str, s2: str | None = None) -> bool:
     if not s2:
         # If there is no second to compare it to, we want to be conservative
         # and only return True if we don't think this is a series
-        return bool(s_matches_part_number and not is_maybe_multiple_books_or_series(s))
+        return bool(s_matches_part_number and not is_maybe_series_book(s))
 
     s2_matches_part_number = partno_or_ch_match_pattern2.search(s2)
     s2_start_num = get_start_num(s2)
@@ -627,7 +626,29 @@ def try_parse_num(s: str, fallback: Any = None) -> int | float | None:
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
-def is_maybe_multiple_books_or_series(s: str | Path) -> bool:
+def is_maybe_series_parent(s: str | Path) -> bool:
+    from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+
+    if Path(s).is_file():
+        return False
+
+    series_book_children = 0.0
+    if Path(s).is_dir():
+        series_book_children = (
+            percent_truthy_in_list(
+                [
+                    is_maybe_series_book(c.name) and (c.is_dir() or is_gt_75mb(c.stat().st_size))
+                    for c in Path(s).iterdir()
+                ]
+            )
+            / 100
+        )
+    series_in_name = bool(series_parent_pattern.search(str(s)))
+    return not is_maybe_multi_disc(s) and (series_book_children > 0.5 or series_in_name)
+
+
+@cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
+def is_maybe_series_book(s: str | Path) -> bool:
     s = str(s)
     return not is_maybe_multi_disc(s) and bool(book_series_pattern.search(s))
 
@@ -644,9 +665,7 @@ def is_maybe_multi_disc(s: str | Path) -> bool:
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
 def is_maybe_multi_part(s: str) -> bool:
-    return (
-        not is_maybe_multi_disc(s) and not is_maybe_multiple_books_or_series(s) and bool(multi_part_pattern.search(s))
-    )
+    return not is_maybe_multi_disc(s) and not is_maybe_series_book(s) and bool(multi_part_pattern.search(s))
 
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)

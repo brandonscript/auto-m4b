@@ -43,6 +43,7 @@ startswith_num_pattern = re.compile(r"(?P<num>^\d+)")
 
 multi_disc_pattern = re.compile(r"(?:^|(?<=[\W_-]))(dis[ck]|cd)(\b|\s|[_.-])*#?(\b|\s|[_.-])*(?:\b|[\W_-])*(?P<num>\d+)", re.I)
 book_series_pattern = re.compile(r"(^\d+|(?:^|(?<=[\W_-]))(bo{0,2}k|vol(?:ume)?|#)(?:\b|[\W_-])*(?P<num>\d+)|(?<=[\W_-])Series.*/.+)", re.I)
+series_parent_pattern = re.compile(rf"(?:(?<=\W)|^){_div}series{_div}.*$", re.I)
 multi_part_pattern = re.compile(r"(?:^|(?<=[\W_-]))(pa?r?t|ch(?:\.|apter))(?:\b|[\W_-])*(\d+)", re.I)
 
 only_non_alphanum_pattern = rex.compile(r"^[^\p{L}]+$")

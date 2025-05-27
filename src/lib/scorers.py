@@ -7,9 +7,10 @@ from columnar import columnar
 from rapidfuzz import fuzz
 from rapidfuzz.distance import LCSseq, Levenshtein
 
-from lib.cleaners import clean_string, strip_author_narrator, strip_part_number
-from lib.misc import get_numbers_in_string
-from lib.parsers import (
+from lib.compare import get_similarity
+from src.lib.cleaners import clean_string, strip_author_narrator, strip_part_number
+from src.lib.misc import get_numbers_in_string
+from src.lib.parsers import (
     contains_partno_or_ch,
     find_greatest_common_string,
     get_title_partno_score,
@@ -20,11 +21,13 @@ from lib.parsers import (
     parse_year,
     to_words,
 )
-from lib.patterns import common_str_pattern, startswith_num_pattern
+from src.lib.patterns import common_str_pattern, startswith_num_pattern
+from src.lib.term import print_debug
 
 if TYPE_CHECKING:
-    from lib.audiobook import Audiobook
-    from lib.typing import AdditionalTags, ScoredProp, TagSource
+    from src.lib.audiobook import Audiobook
+    from src.lib.books_tree.books_tree import BooksTree
+    from src.lib.typing import AdditionalTags, ScoredProp, TagSource
 
 
 class MetadataScore:
@@ -906,7 +909,7 @@ class MetadataProps:
         str(self)
 
     def table(self):
-        from lib.id3_utils import custom_sort
+        from src.lib.id3_utils import custom_sort
 
         data = [
             [f" - {k}", v]
@@ -933,3 +936,568 @@ class MetadataProps:
     def __str__(self):
 
         return f"MetadataScore\n" f"{self.table()}\n"
+
+
+def score_container(tree: "BooksTree") -> float:
+
+    try:
+        from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+
+        if tree.is_file() or tree.is_root:
+            return 0.0
+
+        dissimilar_files = (tree.i.files.pathname_similarity(distinct=True) or 0) < 0.8
+        dissimilar_dirs = (tree.i.dirs.pathname_similarity(distinct=True) or 0) < 0.8
+        has_multiple_files = len(tree.files) > 1
+        has_files_and_dirs = bool(tree.parent and (tree.parent.files or tree.parent.dirs))
+        standalones = (
+            len([f for f in tree.files if score_standalone_file(f) > 0.4]) / len(tree.files) if tree.files else 0.0
+        )
+        files_gt_75mb = percent_truthy_in_list([is_gt_75mb(f.size) for f in tree.files]) / 100
+        pathnames_similarity = (tree.i.files.pathname_similarity(distinct=True) or 0) < 0.8
+
+        container_score = (
+            percent_truthy_in_list(
+                [
+                    dissimilar_files,
+                    dissimilar_dirs,
+                    has_multiple_files,
+                    has_files_and_dirs,
+                    pathnames_similarity,
+                    standalones > 0,
+                ]
+            )
+            / 100
+        )
+
+        if files_gt_75mb == 0:
+            # If there are no likely standalone files, strongly penalize container score
+            container_score -= 0.5
+
+        if tree.is_match:
+            ...
+
+        return round(container_score, 3)
+    except Exception as e:
+        print_debug(f"Error scoring container: {e}")
+        return 0.0
+
+
+def score_flat(tree: "BooksTree") -> float:
+    try:
+        if tree.is_match:
+            ...
+
+        if not tree.parent or tree.is_root:
+            return 0.0
+
+        multi_disc_score = score_multi_disc(tree)
+
+        if tree.is_file():
+
+            if tree.parent.is_root or (tree.parent and tree.parent.dirs) or multi_disc_score > 0.5:
+                return 0.0
+
+            completion = float(
+                tree.i.this_and_siblings.track_nums_completion
+                or tree.i.this_and_siblings.start_nums_completion
+                or tree.i.this_and_siblings.part_nums_completion
+                or 0
+            )
+            contiguous = float(
+                tree.i.this_and_siblings.track_nums_are_contiguous
+                or tree.i.this_and_siblings.start_nums_are_contiguous
+                or tree.i.this_and_siblings.part_nums_are_contiguous
+                or 0
+            )
+            return round(completion + contiguous, 3)
+
+        if tree.dirs or multi_disc_score > 0.5:
+            return 0.0
+
+        album_similarity = tree.i.children_recursive.album_similarity() or 0
+        author_similarity = tree.i.children_recursive.author_similarity() or 0
+        pathname_similarity = tree.i.children_recursive.pathname_similarity(distinct=True) or 0
+
+        if (tree.parent.is_root or tree.parent.has_structure("container")) and (
+            album_similarity > 0.9 and author_similarity > 0.9
+        ):
+            return 1.0
+
+        if tree.is_match:
+            ...
+
+        completion = float(
+            tree.i.children.part_nums_completion
+            or tree.i.children.disc_nums_completion
+            or tree.i.children.series_nums_completion
+            or tree.i.children.all_path_nums_completion
+            or 0
+        )
+        contiguous = float(
+            tree.i.children.track_nums_are_contiguous
+            or tree.i.children.start_nums_are_contiguous
+            or tree.i.children.part_nums_are_contiguous
+            or tree.i.children.all_path_nums_are_contiguous
+            or 0
+        )
+        return round((completion + contiguous + pathname_similarity) / 3, 3)
+    except Exception as e:
+        print_debug(f"Error scoring flat: {e}")
+        return 0.0
+
+
+def score_standalone_file(tree: "BooksTree") -> float:
+    try:
+        from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+
+        if not tree.is_file():
+            return 0.0
+
+        if (p := tree.parent) and (
+            p.is_root
+            or p.has_structure("container")
+            or p.has_structure("multi_parent")
+            or p.has_structure("series_parent")
+        ):
+            return 1.0
+
+        if tree.is_match:
+            ...
+
+        parent_has_files_and_dirs = bool(p and (p.files or p.dirs))
+        parent_has_multiple_dirs = bool(p and len(p.dirs) > 1)
+        parent_has_mixed_content = parent_has_files_and_dirs or parent_has_multiple_dirs
+
+        dissimilar_siblings = (tree.i.this_and_siblings.pathname_similarity(distinct=True) or 0) < 0.8
+        contiguous_siblings = (
+            tree.i.this_and_siblings.track_nums_are_contiguous
+            or tree.i.this_and_siblings.start_nums_are_contiguous
+            or tree.i.this_and_siblings.part_nums_are_contiguous
+        )
+        suffixes = list(set([f.path.suffix for f in p.files])) if p else []
+        has_mixed_file_types = len(suffixes) > 1 if p else False
+        all_sizes_gt_75mb = all(is_gt_75mb(f.size) for f in p.files) if p else False
+        has_m4b_files = ".m4b" in suffixes if p else False
+
+        standalone_score = (
+            percent_truthy_in_list(
+                [
+                    dissimilar_siblings,
+                    not contiguous_siblings,
+                    has_mixed_file_types,
+                    all_sizes_gt_75mb,
+                    has_m4b_files,
+                    parent_has_mixed_content,
+                ]
+            )
+            / 100
+        )
+
+        if tree.is_match:
+            ...
+
+        if tree.i.this_and_siblings.have_albums and (
+            (siblings_album_similarity := tree.i.this_and_siblings.album_similarity(distinct=True) or 0) < 0.9
+        ):
+            standalone_score += 1 - siblings_album_similarity
+
+        if tree.i.this_and_siblings.have_authors and (
+            (siblings_author_similarity := tree.i.this_and_siblings.author_similarity(distinct=True) or 0) < 0.7
+        ):
+            standalone_score += 1 - siblings_author_similarity
+
+        # if it has a track number/total other than None, 1, or 1/1, subtract 1.5
+        if tree.i.this.has_track_num and (tree.i.this.id3_track_num > 1 or not tree.i.this.id3_track_total > 1):
+            standalone_score -= 1.5
+
+        # if it has a disc number/total other than None, 1, or 1/1, subtract 1.5
+        if tree.i.this.has_disc_num and (tree.i.this.id3_disc_num > 1 or not tree.i.this.id3_disc_total > 1):
+            standalone_score -= 1.5
+
+        return round(standalone_score, 3)
+    except Exception as e:
+        print_debug(f"Error scoring standalone_file: {e}")
+        return 0.0
+
+
+def score_series_book(tree: "BooksTree") -> float:
+    """Slightly different from other scorers, this ignores non-standalone files (i.e., will return False for a flat series book's files)"""
+    try:
+        from src.lib.misc import is_gt_75mb, is_gt_100mb, percent_truthy_in_list
+        from src.lib.parsers import is_maybe_series_book, is_maybe_series_parent
+
+        if not tree.parent or tree.parent.is_root or tree.is_root:
+            return 0.0
+
+        siblings_series_books = (
+            percent_truthy_in_list(
+                [
+                    is_maybe_series_book(t.name)
+                    and (t.is_dir() or is_gt_75mb(t.size))
+                    or t.has_structure("series_book")
+                    for t in tree.i.this_and_siblings._trees
+                ]
+            )
+            / 100
+        )
+        siblings_series_parents = (
+            percent_truthy_in_list(
+                [
+                    is_maybe_series_parent(t.name) or t.has_structure("series_parent")
+                    for t in tree.i.this_and_siblings._trees
+                ]
+            )
+            / 100
+        )
+        parent_ok = bool(tree.parent and tree.parent)
+        has_container_root = bool(tree.container_root)
+
+        if not parent_ok or not has_container_root:
+            return 0.0
+
+        if tree.is_match:
+            ...
+
+        if tree.is_file():
+            standalone_score = score_standalone_file(tree)
+            return standalone_score * int(is_maybe_series_book(tree.name))
+
+        bad_siblings_paths = 0 - int((tree.i.this_and_siblings.pathname_similarity(distinct=True) or 0) < 0.7) / 2
+        parent_as_series_parent_score = float(tree.parent.has_structure("series_parent")) / (1 if not tree.dirs else 2)
+        ok_file_sizes = percent_truthy_in_list([not is_gt_100mb(s.size) for s in tree.children or []]) / 100
+        standalone_children = (
+            percent_truthy_in_list([s.is_file() and score_standalone_file(s) > 0.5 for s in tree.files or []]) / 100
+        )
+
+        # If any of the children are standalone files, it is not a series book
+        if standalone_children > 0.1 or ok_file_sizes > 0.8:
+            return 0.0
+
+        # If the parent is a series parent, it is a series book
+        if parent_as_series_parent_score > 0.5:
+            return parent_as_series_parent_score
+
+        ok_siblings = sum((bad_siblings_paths, ok_file_sizes))
+        if tree.i.this_and_siblings.have_albums:
+            ok_siblings += float((tree.i.this_and_siblings.album_similarity(distinct=True) or 0) > 0.9) / 2
+
+        if tree.i.this_and_siblings.have_authors:
+            ok_siblings += float((tree.i.this_and_siblings.author_similarity(distinct=True) or 0) > 0.9) / 2
+
+        series_book_score = ok_siblings + siblings_series_books - siblings_series_parents
+
+        return round(series_book_score, 3)
+    except Exception as e:
+        print_debug(f"Error scoring series_book: {e}")
+        return 0.0
+
+
+def score_series_parent(tree: "BooksTree") -> float:
+    try:
+        from src.lib.misc import is_gt_50mb, percent_truthy_in_list
+        from src.lib.parsers import is_maybe_series_book, is_maybe_series_parent
+
+        if tree.is_root or tree.is_file() or (len(tree.dirs) == 1 and not tree.files):
+            return 0.0
+
+        series_parent_score = 0.0
+        child_series_books_ratio = 0.0
+        series_parent_children = [c for c in tree.children if c.score_series_parent > 0.5]
+        series_book_score = 2 if tree.has_structure("series_book") else score_series_book(tree)
+        series_book_children = [
+            c for c in tree.children if c.has_structure("series_book") or score_series_book(c) > 0.5
+        ]
+        if tree.is_match:
+            ...
+        # Penalize children that are not dirs or likely standalone files
+        series_book_children = [c for c in series_book_children if c.is_dir() or score_standalone_file(c) > 0.5]
+        if tree.children and (child_series_books_ratio := len(series_book_children) / len(tree.children)):
+            if child_series_books_ratio > 0.5:
+                series_parent_score = child_series_books_ratio
+
+        if is_maybe_series_parent(tree.path) and (not (p := tree.parent) or not p.has_structure_like("series_parent")):
+            if tree.is_match:
+                ...
+            series_parent_score += 0.5
+
+        if series_parent_children:
+            return -1 * max((c.score_series_parent for c in series_parent_children))
+
+        if series_book_score >= series_parent_score:
+            return 0.5 - score_flat(tree)
+
+        id3_checks = 0.0
+        if tree.i.children.have_albums:
+            d = tree.i.children.album_similarity() or 0
+            # Strongly penalize if child albums all match
+            id3_checks -= d if d < 0.95 else 2
+
+        if tree.i.children.have_authors:
+            id3_checks += int((tree.i.children.author_similarity() or 0) > 0.9) / 3
+
+        ok_children = id3_checks
+
+        if (
+            not bool(id3_checks)
+            # and not self.this.has_series_num
+            # and not self.this.has_start_num
+            and (tree.i.children.have_series_nums or tree.i.children.have_start_nums)
+        ):
+            series_book_children = -0.5 + (
+                percent_truthy_in_list([is_maybe_series_book(t.name) for t in tree.children]) / 100
+            )
+            path_similarity = -0.5 + (tree.i.children.pathname_similarity(distinct=True, include_curr=True) or 0.5)
+            child_sizes = -0.5 + percent_truthy_in_list([is_gt_50mb(p.size) for p in tree.children]) / 100
+            series_completion = 0
+            series_uniqueness = 0
+            if tree.i.children.have_series_nums:
+                series_completion = -0.5 + float((tree.i.children.series_nums_completion or 1) > 0.95)
+                series_uniqueness = float(((tree.i.children.series_nums_uniqueness or 1) > 0.2) / 2)
+            start_completion = 0
+            if tree.i.children.have_start_nums:
+                start_completion = -0.5 + float((tree.i.children.start_nums_completion or 1) > 0.95)
+            part_completion = 0
+            if tree.i.children.have_part_nums:
+                part_completion = -0.5 + float((tree.i.children.part_nums_completion or 1) > 0.5)
+            part_uniqueness = -0.5 + float(
+                not tree.i.children.have_part_nums or (tree.i.children.part_nums_uniqueness or 0) < 0.1
+            )
+            if tree.is_match:
+                ...
+
+            ok_children = float(
+                sum(
+                    (
+                        series_book_children,
+                        path_similarity,
+                        child_sizes,
+                        series_completion,
+                        part_completion,
+                        start_completion,
+                        series_uniqueness,
+                        part_uniqueness,
+                        -1 * score_flat(tree),
+                    )
+                )
+            )
+
+        series_parent_score = ok_children + child_series_books_ratio
+        if bool(re.search(r"(?:\b|_)series(?:\b|_)", tree.name.lower(), re.I)):
+            series_parent_score += 1
+        if tree.i.this.has_series_num or tree.i.this.has_start_num or tree.i.this.has_disc_num:
+            # Penalize if the parent candidate has numbers, not very likely to be a series parent
+            series_parent_score -= 0.5
+
+        return round(series_parent_score, 3)
+    except Exception as e:
+        print_debug(f"Error scoring series_parent: {e}")
+        return 0.0
+
+
+def score_single(tree: "BooksTree") -> float:
+    """
+    Only determines if a file is a single file, not dirs that contain them.
+    """
+    try:
+
+        if not tree.is_file() or (p := tree.parent) and p.is_root:
+            return 0.0
+
+        if not (_only_file_in_parent := p and len(p.files) == 1 and not p.dirs):
+            return 0.0
+
+        return round(get_similarity([tree.name, tree.parent.name]), 3) if tree.parent else 1.0
+    except Exception as e:
+        print_debug(f"Error scoring single: {e}")
+        return 0.0
+
+
+def score_mixed(tree: "BooksTree") -> float:
+    """Only determines mixed for dirs, not files"""
+    try:
+        from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+
+        if not tree.children_recursive or tree.is_file():
+            return 0.0
+
+        if tree.is_match:
+            ...
+
+        if tree.structure:
+            return 0.0
+
+        cri = tree.i.children_recursive
+
+        dissimilar_children = 1.0 - (tree.i.children.pathname_similarity(distinct=True) or 0)
+        children_gt_75mb = percent_truthy_in_list([is_gt_75mb(c.size) for c in tree.files]) / 100
+        standalone_ratio = dissimilar_children + children_gt_75mb
+        if children_gt_75mb == 0:
+            # If there are no likely standalone files, strongly boost mixed (negative standalone ratio)
+            standalone_ratio -= 1.0
+
+        container = max(score_container(tree), 0)
+        complexity = tree_complexity(tree)
+        incomplete_path_nums = 0.0 if not cri.all_path_nums else 1.0 - (cri.all_path_nums_completion or 0)
+
+        return round(complexity + incomplete_path_nums - container - standalone_ratio, 3)
+    except Exception as e:
+        print_debug(f"Error scoring mixed: {e}")
+        return 0.0
+
+
+def score_multi_parent(tree: "BooksTree") -> float:
+    try:
+        if not tree.parent or tree.is_root or tree.is_file():
+            return 0.0
+
+        multi_disc_score = 0.0
+        multi_part_score = 0.0
+
+        if tree.i.this_and_siblings.have_disc_nums:
+            completion = len(tree.i.this_and_siblings.disc_nums) / len(tree.i.this_and_siblings._trees)
+            contiguous = float(tree.i.this_and_siblings.disc_nums_are_contiguous or 0)
+            multi_disc_score = 1 - (completion + contiguous)
+        elif tree.i.children.have_disc_nums:
+            completion = len(tree.i.children.disc_nums) / len(tree.i.children._trees)
+            contiguous = float(tree.i.children.disc_nums_are_contiguous or 0)
+            multi_disc_score = completion + contiguous
+
+        if tree.i.this_and_siblings.have_part_nums:
+            completion = len(tree.i.this_and_siblings.part_nums) / len(tree.i.this_and_siblings._trees)
+            contiguous = float(tree.i.this_and_siblings.part_nums_are_contiguous or 0)
+            multi_part_score = 1 - (completion + contiguous)
+        elif tree.i.children.have_part_nums:
+            completion = len(tree.i.children.part_nums) / len(tree.i.children._trees)
+            contiguous = float(tree.i.children.part_nums_are_contiguous or 0)
+            multi_part_score = completion + contiguous
+
+        if tree.is_match:
+            ...
+
+        if not multi_disc_score:
+            return round(multi_part_score, 3)
+
+        if not multi_part_score:
+            return round(multi_disc_score, 3)
+
+        return round(max(multi_disc_score, multi_part_score), 3)
+    except Exception as e:
+        print_debug(f"Error scoring multi_parent: {e}")
+        return 0.0
+
+
+def score_multi_disc(tree: "BooksTree") -> float:
+    try:
+        if not tree.parent or tree.is_root:
+            return 0.0
+
+        if tree.is_match:
+            ...
+
+        if tree.is_file():
+            return tree.i.this_and_siblings.disc_nums_completion or 0.0
+
+        return tree.i.children.disc_nums_completion or tree.i.this_and_siblings.disc_nums_completion or 0.0
+    except Exception as e:
+        print_debug(f"Error scoring multi_disc: {e}")
+        return 0.0
+
+
+def score_multi_part(tree: "BooksTree") -> float:
+    try:
+        if not tree.parent or tree.is_root:
+            return 0.0
+
+        if tree.is_match:
+            ...
+
+        if tree.has_structure("series_parent"):
+            return 0.1
+
+        if tree.is_file():
+            sibling_dirs = [s for s in tree.i.this_and_siblings._trees if s.is_dir()]
+            sibling_dir_boost = len(sibling_dirs) / 5
+            return (tree.i.this_and_siblings.part_nums_completion or 0.0) + sibling_dir_boost
+
+        parent_num_penalty = (
+            1
+            if not tree.parent.is_root
+            and not tree.i.this_and_siblings.have_part_nums
+            or not tree.i.this_and_siblings.part_nums_are_contiguous
+            else 0
+        )
+
+        children_dir_boost = len(tree.dirs) / 5
+        return (tree.i.children.part_nums_completion or 0.0) + children_dir_boost - parent_num_penalty
+    except Exception as e:
+        print_debug(f"Error scoring multi_part: {e}")
+        return 0.0
+
+
+def tree_complexity(tree: "BooksTree") -> float:
+    """
+    Calculates the complexity of the tree structure based on:
+    1. Depth of nesting
+    2. Mixing of files at different levels
+    3. Irregularity in the structure
+    4. Number of branches/forks
+
+    Returns a float between 0 and 1, where:
+    - 0 means perfectly flat structure (all files in one directory)
+    - 1 means highly complex structure with mixed levels and irregular nesting
+    """
+    if not tree.children_recursive:
+        return 0.0
+
+    # Get all nodes in the tree
+    all_nodes = tree.children_recursive
+    if not all_nodes:
+        return 0.0
+
+    # Calculate base metrics
+    max_depth = max(node.depth for node in all_nodes)
+    total_files = len([n for n in all_nodes if n.is_file()])
+    total_dirs = len([n for n in all_nodes if n.is_dir()])
+
+    if total_files == 0:
+        return 0.0
+
+    # Calculate file distribution across depths
+    files_by_depth = {}
+    for node in all_nodes:
+        if node.is_file():
+            depth = node.depth
+            files_by_depth[depth] = files_by_depth.get(depth, 0) + 1
+
+    # Calculate mixing score (how evenly files are distributed across depths)
+    depth_variance = 0
+    if len(files_by_depth) > 1:
+        mean_files_per_depth = total_files / len(files_by_depth)
+        depth_variance = sum((count - mean_files_per_depth) ** 2 for count in files_by_depth.values()) / len(
+            files_by_depth
+        )
+        depth_variance = min(1.0, depth_variance / (total_files**2))  # Normalize to 0-1
+
+    # Calculate branching factor
+    avg_children_per_dir = total_files / total_dirs if total_dirs > 0 else 0
+    branching_factor = min(1.0, avg_children_per_dir / 10)  # Normalize assuming 10 is max reasonable
+
+    # Calculate depth penalty
+    depth_penalty = min(1.0, max_depth / 5)  # Normalize assuming 5 is max reasonable depth
+
+    # Calculate irregularity (how many different depths have files)
+    irregularity = min(1.0, len(files_by_depth) / max_depth) if max_depth > 0 else 0
+
+    # Combine all factors with weights
+    complexity = (
+        depth_penalty * 0.3  # 30% weight to depth
+        + depth_variance * 0.3  # 30% weight to file distribution
+        + branching_factor * 0.2  # 20% weight to branching
+        + irregularity * 0.2  # 20% weight to irregularity
+    )
+
+    if tree.is_match:
+        ...
+
+    return round(complexity, 3)

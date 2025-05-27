@@ -11,7 +11,6 @@ from pytest import CaptureFixture
 from rapidfuzz import process
 from tinta import Tinta
 
-from lib.typing import OnComplete
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.config import cfg
@@ -21,7 +20,7 @@ from src.lib.inbox_state import InboxState
 from src.lib.misc import re_group
 from src.lib.strings import en
 from src.lib.term import CATS_ASCII_LINES, is_banner
-from src.lib.typing import ENV_DIRS
+from src.lib.typing import ENV_DIRS, OnComplete
 from src.tests.helpers.pytest_dumps import TEST_DIRS
 
 cfg.PID_FILE.unlink(missing_ok=True)
