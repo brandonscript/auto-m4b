@@ -1,7 +1,7 @@
 import functools
 import re
 from pathlib import Path
-from typing import cast, TYPE_CHECKING
+from typing import cast, Literal, TYPE_CHECKING
 
 from columnar import columnar
 from rapidfuzz import fuzz
@@ -9,7 +9,7 @@ from rapidfuzz.distance import LCSseq, Levenshtein
 
 from lib.compare import get_similarity
 from src.lib.cleaners import clean_string, strip_author_narrator, strip_part_number
-from src.lib.misc import get_numbers_in_string
+from src.lib.misc import any_in, get_numbers_in_string
 from src.lib.parsers import (
     contains_partno_or_ch,
     find_greatest_common_string,
@@ -938,49 +938,122 @@ class MetadataProps:
         return f"MetadataScore\n" f"{self.table()}\n"
 
 
-def score_container(tree: "BooksTree") -> float:
+def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixed"] | None, float, float]:
+    """Tries to determine if a directory is a container or mixed
+
+    Returns:
+        tuple[Literal["container", "mixed"], float, float]:
+            - The type of structure (container or mixed)
+            - The score for the container
+            - The score for the mixed
+    """
 
     try:
-        from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+        from src.lib.misc import is_gt_50mb, is_gt_75mb, percent_truthy_in_list
 
-        if tree.is_file() or tree.is_root:
-            return 0.0
+        if tree.is_file() or tree.is_root or not tree.children_recursive or tree.structure:
+            return (None, 0.0, 0.0)
 
-        dissimilar_files = (tree.i.files.pathname_similarity(distinct=True) or 0) < 0.8
-        dissimilar_dirs = (tree.i.dirs.pathname_similarity(distinct=True) or 0) < 0.8
+        cri = tree.i.children_recursive
+
+        files_sim = tree.i.files.pathname_similarity(distinct=True) or 0.0
+        dirs_sim = tree.i.dirs.pathname_similarity(distinct=True) or 0.0
+        children_sim = 1.0 - (tree.i.children.pathname_similarity(distinct=True) or 0.0)
+        pathnames_sim = tree.i.files.pathname_similarity(distinct=True) or 0.0
+
         has_multiple_files = len(tree.files) > 1
         has_files_and_dirs = bool(tree.parent and (tree.parent.files or tree.parent.dirs))
-        standalones = (
-            len([f for f in tree.files if score_standalone_file(f) > 0.4]) / len(tree.files) if tree.files else 0.0
-        )
+        standalones = -0.5 + percent_truthy_in_list([score_standalone_file(f) > 0.4 for f in tree.files]) / 100
+        files_gt_50mb = percent_truthy_in_list([is_gt_50mb(f.size) for f in tree.files]) / 100
         files_gt_75mb = percent_truthy_in_list([is_gt_75mb(f.size) for f in tree.files]) / 100
-        pathnames_similarity = (tree.i.files.pathname_similarity(distinct=True) or 0) < 0.8
+        dirs_gt_75mb = percent_truthy_in_list([is_gt_75mb(c.size) for c in tree.dirs.values()]) / 100
 
-        container_score = (
-            percent_truthy_in_list(
-                [
-                    dissimilar_files,
-                    dissimilar_dirs,
-                    has_multiple_files,
-                    has_files_and_dirs,
-                    pathnames_similarity,
-                    standalones > 0,
-                ]
-            )
-            / 100
-        )
+        known_structures = tree.known_structures_r
+        missing_structures = len(tree.children_without_structure_r) / len(tree.children_recursive)
+        incomplete_path_nums = (0.0 if not cri.all_path_nums else (-1.0 + (cri.all_path_nums_completion or 0.0))) / 4
 
-        if files_gt_75mb == 0:
-            # If there are no likely standalone files, strongly penalize container score
+        mixed_score = 0.0
+        container_score = 0.0
+
+        # container_score = (
+        #     percent_truthy_in_list(
+        #         [
+        #             dissimilar_files,
+        #             dissimilar_dirs,
+        #             has_multiple_files,
+        #             has_files_and_dirs,
+        #             pathnames_similarity,
+        #             standalones > 0,
+        #         ]
+        #     )
+        #     / 100
+        # )
+
+        small_child_score = (1 - files_gt_50mb) + (1 - dirs_gt_75mb)
+        large_child_score = (files_gt_75mb + files_gt_50mb) / 2 + dirs_gt_75mb
+        size_diff = large_child_score - small_child_score
+
+        container_score += size_diff + standalones - missing_structures + incomplete_path_nums
+        mixed_score -= size_diff - standalones + missing_structures - incomplete_path_nums
+
+        if any_in(known_structures, ["multi_parent", "flat", "standalone_file", "series_parent"]):
+            container_score += 0.5
+            mixed_score -= 0.5
+
+        if missing_structures > 0:
+            container_score -= missing_structures
+            mixed_score += missing_structures
+
+        # If more smaller files than larger files, and files are dissimilar, boost mixed
+        if size_diff < 0 and files_sim < 0.8:
             container_score -= 0.5
+            mixed_score += 0.5
 
-        if tree.is_match:
-            ...
+        container_score = round(container_score, 3)
+        mixed_score = round(mixed_score, 3)
 
-        return round(container_score, 3)
+        if container_score > mixed_score:
+            return ("container", container_score, mixed_score)
+        elif mixed_score > container_score:
+            return ("mixed", container_score, mixed_score)
+        else:
+            return (None, container_score, mixed_score)
+
+        # try:
+        #     from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+
+        #     if not tree.children_recursive or tree.is_file():
+        #         return 0.0
+
+        #     if tree.is_match:
+        #         ...
+
+        #     if tree.structure:
+        #         return 0.0
+
+        #     cri = tree.i.children_recursive
+
+        #     dissimilar_children = 1.0 - (tree.i.children.pathname_similarity(distinct=True) or 0)
+        #     children_gt_75mb = percent_truthy_in_list([is_gt_75mb(c.size) for c in tree.files]) / 100
+        #     standalone_ratio = dissimilar_children + children_gt_75mb
+        #     if children_gt_75mb == 0:
+        #         # If there are no likely standalone files, strongly boost mixed (negative standalone ratio)
+        #         standalone_ratio -= 1.0
+
+        #     container = max(score_container(tree), 0)
+        #     complexity = tree_complexity(tree)
+        #     incomplete_path_nums = 0.0 if not cri.all_path_nums else 1.0 - (cri.all_path_nums_completion or 0)
+
+        #     return round(complexity + incomplete_path_nums - container - standalone_ratio, 3)
+        # except Exception as e:
+        #     print_debug(f"Error scoring mixed: {e}")
+        #     return 0.0
+
+        # return round(container_score, 3)
+
     except Exception as e:
-        print_debug(f"Error scoring container: {e}")
-        return 0.0
+        print_debug(f"Error scoring container/mixed: {e}")
+        return (None, 0.0, 0.0)
 
 
 def score_flat(tree: "BooksTree") -> float:
@@ -1313,37 +1386,37 @@ def score_single(tree: "BooksTree") -> float:
         return 0.0
 
 
-def score_mixed(tree: "BooksTree") -> float:
-    """Only determines mixed for dirs, not files"""
-    try:
-        from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+# def score_mixed(tree: "BooksTree") -> float:
+#     """Only determines mixed for dirs, not files"""
+#     try:
+#         from src.lib.misc import is_gt_75mb, percent_truthy_in_list
 
-        if not tree.children_recursive or tree.is_file():
-            return 0.0
+#         if not tree.children_recursive or tree.is_file():
+#             return 0.0
 
-        if tree.is_match:
-            ...
+#         if tree.is_match:
+#             ...
 
-        if tree.structure:
-            return 0.0
+#         if tree.structure:
+#             return 0.0
 
-        cri = tree.i.children_recursive
+#         cri = tree.i.children_recursive
 
-        dissimilar_children = 1.0 - (tree.i.children.pathname_similarity(distinct=True) or 0)
-        children_gt_75mb = percent_truthy_in_list([is_gt_75mb(c.size) for c in tree.files]) / 100
-        standalone_ratio = dissimilar_children + children_gt_75mb
-        if children_gt_75mb == 0:
-            # If there are no likely standalone files, strongly boost mixed (negative standalone ratio)
-            standalone_ratio -= 1.0
+#         dissimilar_children = 1.0 - (tree.i.children.pathname_similarity(distinct=True) or 0)
+#         children_gt_75mb = percent_truthy_in_list([is_gt_75mb(c.size) for c in tree.files]) / 100
+#         standalone_ratio = dissimilar_children + children_gt_75mb
+#         if children_gt_75mb == 0:
+#             # If there are no likely standalone files, strongly boost mixed (negative standalone ratio)
+#             standalone_ratio -= 1.0
 
-        container = max(score_container(tree), 0)
-        complexity = tree_complexity(tree)
-        incomplete_path_nums = 0.0 if not cri.all_path_nums else 1.0 - (cri.all_path_nums_completion or 0)
+#         container = max(score_container(tree), 0)
+#         complexity = tree_complexity(tree)
+#         incomplete_path_nums = 0.0 if not cri.all_path_nums else 1.0 - (cri.all_path_nums_completion or 0)
 
-        return round(complexity + incomplete_path_nums - container - standalone_ratio, 3)
-    except Exception as e:
-        print_debug(f"Error scoring mixed: {e}")
-        return 0.0
+#         return round(complexity + incomplete_path_nums - container - standalone_ratio, 3)
+#     except Exception as e:
+#         print_debug(f"Error scoring mixed: {e}")
+#         return 0.0
 
 
 def score_multi_parent(tree: "BooksTree") -> float:

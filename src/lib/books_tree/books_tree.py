@@ -598,7 +598,7 @@ class BooksTree(BaseModel):
         return [c for c in self.children_recursive if not c.structure or c.has_structure("unknown")]
 
     @property
-    def children_structures_r(self) -> list[BookStructure2]:
+    def known_structures_r(self) -> list[BookStructure2]:
         """A list (set) of all structures found in all children."""
         return list(set([s for c in self.children_recursive for s in c.structure]))
 
@@ -753,22 +753,16 @@ class BooksTree(BaseModel):
         return "dir" if self.is_dir() else "file" if self.is_file() else "unknown"
 
     @property
-    def score_container(self):
-        from src.lib.scorers import score_container
+    def score_container_mixed(self):
+        from src.lib.scorers import score_container_mixed
 
-        return score_container(self)
+        return score_container_mixed(self)
 
     @property
     def score_flat(self):
         from src.lib.scorers import score_flat
 
         return score_flat(self)
-
-    @property
-    def score_mixed(self):
-        from src.lib.scorers import score_mixed
-
-        return score_mixed(self)
 
     @property
     def score_multi_disc(self):
@@ -906,10 +900,13 @@ class BooksTree(BaseModel):
             if c.structure:
                 continue
 
-            if self.score_container > 0.25 and self.score_container > self.score_mixed:
-                c.set_structures("container")
-            elif self.score_mixed > self.score_container:
-                c.set_structures("mixed")
+            container_or_mixed, _, _ = self.score_container_mixed
+            if container_or_mixed == "container":
+                c.set_structures(container_or_mixed)
+            elif container_or_mixed == "mixed":
+                c.set_structures("mixed", recursive=True)
+            else:
+                c.set_structures("unknown")
 
         # # Dir pass #3: series
         # for c in this_file + this_dir + self.children_without_structure_r:
@@ -950,13 +947,13 @@ class BooksTree(BaseModel):
                 "flat", "multi_parent"
             ):
                 d.set_structures("nested", recursive=True)
-                continue
-            if d.structure or d.score_container <= 0 or d.has_structure("mixed"):
-                continue
-            if len(d.children_structures_r) > 1:
-                d.set_structures("container")
+                # continue
+            # if d.structure or d.score_container_mixed <= 0 or d.has_structure("mixed"):
+            #     continue
+            # if len(d.known_structures_r) > 1:
+            #     d.set_structures("container")
 
-                # d.add_structures("multi_parent", recursive=True)
+            # d.add_structures("multi_parent", recursive=True)
 
         # for d in [d for d in self.dirs_recursive if d.score_container > 0.5]:
         #     d.set_structures("container")
@@ -1036,7 +1033,7 @@ class BooksTree(BaseModel):
         is_known_multi = self.determine_multi_structure() if not self.is_root else False
         is_series_parent_or_book = self.determine_series_structure() if not self.is_root else False
 
-        if self.has_structure("container") and self.score_container <= 0:
+        if self.has_structure("container") and self.score_container_mixed <= 0:
             self.remove_structures("container")
 
         if self.is_match:
@@ -1115,7 +1112,7 @@ class BooksTree(BaseModel):
             #     f.set_structures("standalone_file")
 
             if not self.structure:
-                if self.score_container > 0.5:
+                if self.score_container_mixed > 0.5:
                     self.set_structures("container")
                 else:
                     self.set_structures("mixed")
