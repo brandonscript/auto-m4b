@@ -512,7 +512,7 @@ def has_audio_files(book: Audiobook):
 def flatten_nested_book(book: Audiobook):
     from src.lib.fs_utils import flatten_files_in_dir
 
-    if book.tree.has_structure("nested") or (is_messy := book.is_flat_but_messy):
+    if book.tree.has_structure("nested") or (is_messy := book.is_flatish):
         smart_print(
             en.BOOK_IS_FLAT_BUT_MESSY if is_messy else en.BOOK_NEEDS_FLATTENING,
             end="",

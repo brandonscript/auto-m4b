@@ -143,6 +143,8 @@ class InboxState(Hasher):
         recheck_failed: bool = False,
         skip_failed_sync: bool = False,
         set_ready: bool = False,
+        *,
+        scan_id3: bool = True,
     ):
         from src.lib.config import cfg
 
@@ -158,7 +160,7 @@ class InboxState(Hasher):
         super().scan()
 
         if not self.tree:
-            self.tree = BooksTree(cfg.inbox_dir, scan_id3=True)
+            self.tree = BooksTree(cfg.inbox_dir, scan_id3=scan_id3)
         self.tree.scan()
         # self._tree.scan()
 

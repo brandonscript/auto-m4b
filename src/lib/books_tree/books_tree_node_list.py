@@ -1,6 +1,5 @@
-from collections.abc import Callable
 from pathlib import Path
-from typing import cast, TYPE_CHECKING, TypeVar
+from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 
 from lazy.lazy import lazy
 
@@ -14,7 +13,7 @@ from lib.compare import (
     unique_items,
 )
 from lib.misc import percent_truthy_in_list
-from lib.typing import SimilarityComparisonMethod
+from lib.typing import SimilarityComparable, SimilarityComparisonMethod
 from src.lib.books_tree.books_tree_utils import (
     are_nums_contiguous,
     get_all_nums_in_string,
@@ -31,6 +30,7 @@ if TYPE_CHECKING:
     from src.lib.books_tree.books_tree_node import TreeNode
 
 T = TypeVar("T")
+F = TypeVar("F", bound=Any)
 
 
 class TreeNodeList:
@@ -41,12 +41,12 @@ class TreeNodeList:
             ...
 
         self._trees = trees
-        self._node = cast("TreeNode", curr)
+        self.node = cast("TreeNode", curr)
         if not self._trees:
-            self._id3 = []
+            self.id3_tags = []
             return
 
-        self._id3 = [p.id3_tags for p in self._trees if p.id3_tags]
+        self.id3_tags = [p.id3_tags for p in self._trees if p.id3_tags]
 
         self._album_similarity_cache = {}
         self._albumartist_similarity_cache = {}
@@ -65,9 +65,9 @@ class TreeNodeList:
         part_nums = f"🎉 {pa[0]}-{pa[-1]}" if len(pa) > 1 else pa[0] if pa else ""
         series_nums = f"📺 {se[0]}-{se[-1]}" if len(se) > 1 else se[0] if se else ""
         start_nums = f"🔥 {st[0]}-{st[-1]}" if len(st) > 1 else st[0] if st else ""
-        path_sim = f"🚴‍♀️ {self.pathname_similarity(distinct=True)}"
-        album_sim = f"📘 {self.album_similarity(distinct=True)}" if self.have_albums else ""
-        author_sim = f"🧑‍🎨 {self.author_similarity(distinct=True)}" if self._have_artists else ""
+        path_sim = f"🚴‍♀️ {self.similarity('pathnames', distinct=True, fallback=0.0)}"
+        album_sim = f"📘 {self.similarity('id3_albums', distinct=True, fallback=0.0)}" if self.have_albums else ""
+        author_sim = f"🧑‍🎨 {self.similarity('id3_artists', distinct=True, fallback=0.0)}" if self._have_artists else ""
         return " ".join(
             (str(v) for v in (disc_nums, part_nums, series_nums, start_nums, path_sim, album_sim, author_sim) if v)
         )
@@ -81,7 +81,7 @@ class TreeNodeList:
 
     @lazy
     def part_nums(self):
-        if self._node._tree.is_match:
+        if self.node._tree.is_match:
             ...
         return only_gte_0([get_part_num(t.name) for t in self._trees])
 
@@ -176,19 +176,19 @@ class TreeNodeList:
 
     @lazy
     def id3_albums(self):
-        return [a for a in (id3.album for id3 in self._id3 if id3) if a]
+        return [a for a in (id3.album for id3 in self.id3_tags if id3) if a]
 
     @lazy
     def id3_albumartists(self):
-        return [aa for aa in (id3.albumartist for id3 in self._id3 if id3) if aa]
+        return [aa for aa in (id3.albumartist for id3 in self.id3_tags if id3) if aa]
 
     @lazy
     def id3_artists(self):
-        return [a for a in (id3.artist for id3 in self._id3 if id3) if a]
+        return [a for a in (id3.artist for id3 in self.id3_tags if id3) if a]
 
     @lazy
     def id3_disc_nums(self):
-        return only_gte_0([id3.disc_num for id3 in self._id3 if id3 and id3.disc_num is not None])
+        return only_gte_0([id3.disc_num for id3 in self.id3_tags if id3 and id3.disc_num is not None])
 
     @lazy
     def id3_disc_total(self):
@@ -196,89 +196,78 @@ class TreeNodeList:
 
     @lazy
     def id3_titles(self):
-        return [t for t in (id3.title for id3 in self._id3 if id3) if t]
+        return [t for t in (id3.title for id3 in self.id3_tags if id3) if t]
 
     @lazy
     def id3_track_nums(self):
-        return only_gte_0([id3.track_num for id3 in self._id3 if id3 and id3.track_num is not None])
+        return only_gte_0([id3.track_num for id3 in self.id3_tags if id3 and id3.track_num is not None])
 
     @lazy
     def id3_track_total(self):
         return max(self.id3_track_nums) if self.id3_track_nums else None
 
-    def _calculate_similarity(
+    @lazy
+    def pathnames(self):
+        return [p.name for p in self._trees]
+
+    @overload
+    def similarity(
         self,
-        prop: str,
+        prop: SimilarityComparable,
         comparison: SimilarityComparisonMethod | None = None,
+        *,
         distinct: bool = True,
         include_curr: bool = True,
+        fallback: None = None,
+    ) -> float | None: ...
+
+    @overload
+    def similarity(
+        self,
+        prop: SimilarityComparable,
+        comparison: SimilarityComparisonMethod | None = None,
         *,
-        get_values: Callable[[], list[str]] | None = None,
-    ) -> float | None:
+        distinct: bool = True,
+        include_curr: bool = True,
+        fallback: F,
+    ) -> float | F: ...
+
+    @cached_similarity
+    def similarity(
+        self,
+        prop: SimilarityComparable,
+        comparison: SimilarityComparisonMethod | None = None,
+        *,
+        distinct: bool = True,
+        include_curr: bool = True,
+        fallback: F | None = None,
+    ) -> float | F:
         """Base method for calculating similarity between values of a property"""
-        if get_values:
-            values = get_values()
-        else:
-            values = getattr(self, prop)
-        if include_curr and (curr := getattr(self._node, prop, None)) and curr:
+
+        if self.node._tree.is_match:
+            ...
+
+        if prop is None:
+            raise ValueError("TreeNodeList.similarity: prop cannot be None")
+
+        if not self.id3_tags:
+            ...
+
+        if prop == "id3_authors":
+            a = self.similarity(
+                "id3_artists", comparison, distinct=distinct, include_curr=include_curr, fallback=fallback
+            )
+            aa = self.similarity(
+                "id3_albumartists", comparison, distinct=distinct, include_curr=include_curr, fallback=fallback
+            )
+            return max(a or fallback or 0.0, aa or fallback or 0.0)
+
+        values = getattr(self, prop)
+        if include_curr and (curr := getattr(self.node, prop, None)) and curr:
             values.insert(0, curr)
         if len(values) < 2:
-            return None
-        return get_similarity(values, comparison=comparison, distinct=distinct)
-
-    @cached_similarity("_album_similarity_cache")
-    def album_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        return self._calculate_similarity("id3_albums", comparison, distinct, include_curr)
-
-    @cached_similarity("_albumartist_similarity_cache")
-    def _albumartist_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        return self._calculate_similarity("id3_albumartists", comparison, distinct, include_curr)
-
-    @cached_similarity("_artist_similarity_cache")
-    def _artist_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        return self._calculate_similarity("id3_artists", comparison, distinct, include_curr)
-
-    @cached_similarity("_author_similarity_cache")
-    def author_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        a = self._albumartist_similarity(comparison, distinct, include_curr)
-        aa = self._artist_similarity(comparison, distinct, include_curr)
-        if not a and not aa:
-            return None
-        return max(a or 0.0, aa or 0.0)
-
-    @cached_similarity("_disc_nums_similarity_cache")
-    def disc_nums_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        return self._calculate_similarity("id3_disc_nums", comparison, distinct, include_curr)
-
-    @cached_similarity("_title_similarity_cache")
-    def title_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        return self._calculate_similarity("id3_titles", comparison, distinct, include_curr)
-
-    @cached_similarity("_track_nums_similarity_cache")
-    def track_nums_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        return self._calculate_similarity("id3_track_nums", comparison, distinct, include_curr)
-
-    @cached_similarity("_pathname_similarity_cache")
-    def pathname_similarity(
-        self, comparison: SimilarityComparisonMethod | None = None, distinct: bool = True, include_curr: bool = True
-    ):
-        return self._calculate_similarity(
-            "name", comparison, distinct, include_curr, get_values=lambda: [p.name for p in self._trees]
-        )
+            return cast(F, fallback)
+        return cast(F, get_similarity(values, comparison=comparison, distinct=distinct, fallback=fallback))
 
     @lazy
     def disc_nums_are_contiguous(self):
@@ -289,7 +278,7 @@ class TreeNodeList:
     def disc_nums_completion(self):
         """Return the ratio of disc numbers / total disc numbers, from 0-1"""
 
-        if self._node._tree.is_match:
+        if self.node._tree.is_match:
             ...
 
         if not self.have_disc_nums:
@@ -300,7 +289,7 @@ class TreeNodeList:
     @lazy
     def disc_nums_match_curr(self):
 
-        return list_items_match_value(self.disc_nums, self._node.disc_num)
+        return list_items_match_value(self.disc_nums, self.node.disc_num)
 
     @lazy
     def disc_nums_match_each_other(self):
@@ -397,7 +386,7 @@ class TreeNodeList:
     @lazy
     def part_nums_match_curr(self):
 
-        return list_items_match_value(self.part_nums, self._node.part_num)
+        return list_items_match_value(self.part_nums, self.node.part_num)
 
     @lazy
     def part_nums_match_each_other(self):
@@ -427,7 +416,7 @@ class TreeNodeList:
     def series_nums_match_curr(self):
         """Returns True if all series numbers match the current's series or start number"""
 
-        return list_items_match_value(self.series_nums, self._node.series_num)
+        return list_items_match_value(self.series_nums, self.node.series_num)
 
     @lazy
     def series_nums_match_each_other(self):
@@ -459,7 +448,7 @@ class TreeNodeList:
     def start_nums_match_curr(self):
         """Returns True if all start numbers match the current's series or start number"""
 
-        return list_items_match_value(self.start_nums, self._node.start_num)
+        return list_items_match_value(self.start_nums, self.node.start_num)
 
     @lazy
     def start_nums_match_each_other(self):
@@ -497,7 +486,7 @@ class TreeNodeList:
     def track_nums_match_curr(self):
         """Returns True if all track numbers match the current's track number"""
 
-        return list_items_match_value(self.id3_track_nums, self._node.id3_track_num)
+        return list_items_match_value(self.id3_track_nums, self.node.id3_track_num)
 
     @lazy
     def track_nums_match_each_other(self):

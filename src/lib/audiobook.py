@@ -85,7 +85,7 @@ class Audiobook(BaseModel):
                 # raise InboxStateError(
                 #     f"Book not found in inbox state, cannot attach tree to Audiobook instance: {path}"
                 # )
-        tree = tree or BooksTree(path_or_tree)
+        tree = tree or BooksTree(path_or_tree, scan_id3=False)
 
         super().__init__(path=path, tree=tree)
 
@@ -222,14 +222,13 @@ class Audiobook(BaseModel):
         return hash_path_audio_files(getattr(self, for_dir + "_dir"))
 
     @property
-    def is_flat_but_messy(self):
-        if not self.tree.has_structure("flat") or not self.tree.dirs:
+    def is_flatish(self):
+        if not self.tree.has_structure_like("flat") or not self.tree.dirs:
             return False
         has_deep_files = len(self.tree.files_f) < len(self.tree.files_recursive_f)
-        same_album = (self.tree.i.files_recursive.album_similarity() or 0) > 0.9
-        same_artist = (self.tree.i.files_recursive.artist_similarity() or 0) > 0.9
-        same_albumartist = (self.tree.i.files_recursive.albumartist_similarity() or 0) > 0.9
-        return has_deep_files and same_album and (same_artist or same_albumartist)
+        same_album = (self.tree.i.files_recursive.similarity("id3_albums", fallback=0.0)) > 0.9
+        same_author = (self.tree.i.files_recursive.similarity("id3_authors", fallback=0.0)) > 0.9
+        return has_deep_files and same_album and same_author
 
     @property
     def is_maybe_series_book(self):

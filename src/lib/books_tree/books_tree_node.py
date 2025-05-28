@@ -21,6 +21,7 @@ class TreeNode:
     series_num: int = -1
     start_num: int = -1
     all_nums: list[int | float] = []
+    pathname: str = ""
     id3_title: str | None = None
     id3_album: str | None = None
     id3_albumartist: str | None = None
@@ -53,6 +54,7 @@ class TreeNode:
             self.id3_title = self._id3.title
             self.id3_track_num = self._id3.track_num or -1
             self.id3_track_total = self._id3.track_total or -1
+        self.pathname = self._tree.name
         self.disc_num = get_disc_num(self._tree.name)
         self.part_num = get_part_num(self._tree.name)
         self.series_num = get_series_num(self._tree.name)

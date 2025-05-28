@@ -80,7 +80,7 @@ class BooksTree(BaseModel):
         # size: int = 0,
         scan: bool | None = None,
         determine_structure: bool = True,
-        scan_id3: bool = False,
+        scan_id3: bool = True,
     ):
         super().__init__()
         if isinstance(path, BooksTree):
@@ -95,7 +95,7 @@ class BooksTree(BaseModel):
         self.root = (
             root
             if isinstance(root, BooksTree)
-            else BooksTree(root, scan=False, match_filter=match_filter) if root is not None else None
+            else BooksTree(root, scan=False, match_filter=match_filter, scan_id3=False) if root is not None else None
         )
 
         self._files: list["BooksTree"] = []
@@ -136,7 +136,7 @@ class BooksTree(BaseModel):
 
     # Pydantic built-ins/overrides
     def model_post_init(self, __context):
-        self.root = None if self.root is None else BooksTree(self.root, scan=False)
+        self.root = None if self.root is None else BooksTree(self.root, scan=False, scan_id3=False)
 
     @classmethod
     def cast(
@@ -145,9 +145,10 @@ class BooksTree(BaseModel):
         *,
         root: "Path | BooksTree | None",
         match_filter: list[Path] | str | None = None,
+        scan_id3: bool = False,
     ):
         """Casts a path to a TreePath without scanning it"""
-        return BooksTree(path, root=root, scan=False, match_filter=match_filter)
+        return BooksTree(path, root=root, scan=False, match_filter=match_filter, scan_id3=scan_id3)
 
     def _scan(
         self,
@@ -219,11 +220,12 @@ class BooksTree(BaseModel):
 
         self._last_scan = time.time()
 
-        if scan_id3 and self.is_root:
-            for f in [f for f in self.files_recursive if not f.id3_tags]:
-                f.id3_tags = Id3Tags.from_file(f.path)
-        elif self.is_file() and not self.id3_tags:
-            self.id3_tags = Id3Tags.from_file(self.path)
+        if scan_id3:
+            if self.is_root:
+                for f in [f for f in self.files_recursive if not f.id3_tags]:
+                    f.id3_tags = Id3Tags.from_file(f.path)
+            elif self.is_file() and not self.id3_tags:
+                self.id3_tags = Id3Tags.from_file(self.path)
 
         if determine_structure:
             self.determine_structure()
@@ -595,10 +597,10 @@ class BooksTree(BaseModel):
 
     @property
     def children_without_structure_r(self) -> list["BooksTree"]:
-        return [c for c in self.children_recursive if not c.structure or c.has_structure("unknown")]
+        return [c for c in self.children_recursive if not c.structure]
 
     @property
-    def known_structures_r(self) -> list[BookStructure2]:
+    def list_structures_r(self) -> list[BookStructure2]:
         """A list (set) of all structures found in all children."""
         return list(set([s for c in self.children_recursive for s in c.structure]))
 
@@ -689,6 +691,9 @@ class BooksTree(BaseModel):
     @requires_scan
     def determine_if_book_root(self):
 
+        if self.is_match:
+            ...
+
         if self.is_root or self.has_only_structure("container"):
             self._is_book_root = False
             return self._is_book_root
@@ -697,11 +702,17 @@ class BooksTree(BaseModel):
             self._is_book_root = True
             return self._is_book_root
 
-        if self.has_structure("single") and self.parent and self.parent.not_has_structure("single"):
+        if self.has_structure("single") and (p := self.parent) and p.not_has_structure("single"):
             self._is_book_root = True
             return self._is_book_root
 
-        if self.depth == 1 and self.has_any_structure("flat", "mixed", "nested"):
+        if self.has_structure("flatish"):
+            self._is_book_root = False
+            return self._is_book_root
+
+        if self.has_any_structure("flat", "mixed", "nested") and (
+            self.depth == 1 or (p := self.parent) and p.has_any_structure("container", "series_parent", "multi_parent")
+        ):
             self._is_book_root = True
             return self._is_book_root
 
@@ -794,17 +805,17 @@ class BooksTree(BaseModel):
 
         return score_series_parent(self)
 
+    # @property
+    # def score_single(self):
+    #     from src.lib.scorers import score_single
+
+    # return score_single(self)
+
     @property
-    def score_single(self):
-        from src.lib.scorers import score_single
+    def score_single_standalone_file(self):
+        from src.lib.scorers import score_single_standalone_file
 
-        return score_single(self)
-
-    @property
-    def score_standalone_file(self):
-        from src.lib.scorers import score_standalone_file
-
-        return score_standalone_file(self)
+        return score_single_standalone_file(self)
 
     def determine_structure(
         self,
@@ -856,44 +867,58 @@ class BooksTree(BaseModel):
         if self.is_match:
             ...
 
+        if self.structure:
+            return self.structure
+
         this_file = [self] if self.is_file() else []
         this_dir = [self] if self.is_dir() else []
 
         # File pass #1: standalone, single
         for f in this_file + self.files_recursive:
-            standalone_gt_single = f.score_standalone_file > f.score_single
 
-            if f.score_single < 0.5 and f.score_standalone_file < 0.5:
+            std_or_single, standalone_score, single_score = f.score_single_standalone_file
+            # standalone_gt_single = f.score_standalone_file > f.score_single
+
+            if not std_or_single or (standalone_score < 0.5 and single_score < 0.5):
                 continue
 
-            if standalone_gt_single:
-                f.add_structures("standalone_file")
-            else:
-                f.add_structures("single")
+            f.add_structures(std_or_single)
 
         # Dir pass #1: single, multi-disc, multi-part, flat
         for d in this_dir + self.dirs_recursive:
             if self.is_match:
                 ...
+            # If dir is empty, set it to 'empty'
+            if not d.files and not d.dirs:
+                d.set_structures("empty")
+                continue
+
+            def check_nested(d: BooksTree):
+                if (p := d.parent) and not p.is_root and len(p.dirs) == 1:
+                    p.add_structures("nested", recursive=True)
+
             # if all files in dir are 'single', set dir to 'single' too
             if d.files and all(f.has_structure("single") for f in d.files):
                 d.set_structures("single")
-                if (p := d.parent) and not p.is_root:
-                    p.add_structures("nested", recursive=True)
+                check_nested(d)
             elif d.score_multi_disc > 0.75:
                 if not self.structure:
                     self.set_structures("multi_disc", "multi_parent")
                 d.add_structures("multi_disc", recursive=True)
+                check_nested(d)
             elif d.score_multi_part > 0.75:
                 if not self.structure:
                     self.set_structures("multi_part", "multi_parent")
                 d.add_structures("multi_part", recursive=True)
+                check_nested(d)
             elif d.score_flat > 0.75:
                 d.add_structures("flat", recursive=True)
+                [cc.add_structures("flatish", recursive=True) for cc in d.children_recursive if cc.is_dir()]
+                check_nested(d)
             elif d.score_series_parent > 0.75:
                 d.set_structures("series_parent")
                 [cc.add_structures("series_book", recursive=True) for cc in d.children_recursive]
-                [f.add_structures("standalone_file") for f in d.files if f.score_standalone_file > 0.5]
+                [f.add_structures("standalone_file") for f in d.files if f.score_single_standalone_file[1] > 0.5]
 
         # Dir pass #2: mixed (too complex to determine)
         for c in this_file + this_dir + self.children_without_structure_r:
@@ -962,6 +987,9 @@ class BooksTree(BaseModel):
         #     self.set_structures("empty")
         #     return self.structure
 
+        if self.is_match:
+            ...
+
         return self.structure
 
     def determine_structure_old(
@@ -1011,7 +1039,7 @@ class BooksTree(BaseModel):
             self.set_structures("empty")
             return self.structure
 
-        if self.is_file() and self.score_standalone_file > 0.9:
+        if self.is_file() and self.score_single_standalone_file[1] > 0.9:
             self.add_structures("standalone_file")
             return self.structure
 
@@ -1033,7 +1061,7 @@ class BooksTree(BaseModel):
         is_known_multi = self.determine_multi_structure() if not self.is_root else False
         is_series_parent_or_book = self.determine_series_structure() if not self.is_root else False
 
-        if self.has_structure("container") and self.score_container_mixed <= 0:
+        if self.has_structure("container") and self.score_container_mixed[1] <= 0:
             self.remove_structures("container")
 
         if self.is_match:

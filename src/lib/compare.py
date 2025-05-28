@@ -6,7 +6,8 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Literal, overload, TypeVar
 
-from lib.typing import SimilarityComparisonMethod
+from lib.term import print_error
+from lib.typing import SimilarityComparable, SimilarityComparisonMethod
 
 
 @overload
@@ -51,12 +52,39 @@ def calc_similarity(
     return flattened
 
 
+F = TypeVar("F")
+
+
+@overload
 def get_similarity(
     values: Iterable[Any],
     precision: int = 3,
     comparison: SimilarityComparisonMethod = None,
+    *,
     distinct: bool = True,
-) -> float:
+    fallback: float = 0.0,
+) -> float: ...
+
+
+@overload
+def get_similarity(
+    values: Iterable[Any],
+    precision: int = 3,
+    comparison: SimilarityComparisonMethod = None,
+    *,
+    distinct: bool = True,
+    fallback: F,
+) -> float | F: ...
+
+
+def get_similarity(
+    values: Iterable[Any],
+    precision: int = 3,
+    comparison: SimilarityComparisonMethod = None,
+    *,
+    distinct: bool = True,
+    fallback: F | float = 0.0,
+) -> float | F:
     """Uses the Levenshtein distance to calculate the similarity of a list of strings.
     Determines the average similarity of strings/paths (0-1), rounded to the specified precision.
     Optionally computes the median similarity instead of the average.
@@ -67,7 +95,7 @@ def get_similarity(
     highest = comparison == "max"
 
     if not values:
-        return 0.0
+        return fallback
 
     # if there are no values to compare to, return 1
     if len(list(values)) < 2:
@@ -99,7 +127,7 @@ def get_similarity(
     flat_scores = [score for _, score, _ in scores]
 
     if not flat_scores:
-        return 0.0
+        return fallback
 
     if lowest:
         # Return the lowest score
@@ -253,38 +281,37 @@ def calculate_gcs_percentage(strs: list[str] | list[Path], *, precision: int = 3
 T = TypeVar("T")
 
 
-def cached_similarity(cache_attr: str):
+def cached_similarity(func: Callable[..., T]) -> Callable[..., T]:
     """Decorator to handle caching of similarity calculations"""
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        @wraps(func)
-        def wrapper(
-            self,
-            comparison: SimilarityComparisonMethod | None = None,
-            distinct: bool = True,
-            include_curr: bool = True,
-        ) -> T:
-            cache = getattr(self, cache_attr, None)
+    @wraps(func)
+    def decorator(
+        self,
+        prop: SimilarityComparable,
+        comparison: SimilarityComparisonMethod | None = None,
+        **kwargs: Any,
+    ) -> T:
+        try:
+            cache = getattr(self, f"_{prop}_similarity_cache", None)
+            fallback = kwargs.pop("fallback", None)
             if not cache:
                 cache = {
                     "comparison": comparison,
-                    "distinct": distinct,
-                    "include_curr": include_curr,
+                    **kwargs,
                 }
-                setattr(self, cache_attr, cache)
-
-            if (
-                cache["comparison"] == comparison
-                and cache["distinct"] == distinct
-                and cache["include_curr"] == include_curr
+                setattr(self, f"_{prop}_similarity_cache", cache)
+            elif (
+                _kwargs_match := all(False if not k in cache else cache[k] == v for k, v in (kwargs or {}).items())
+                and cache["comparison"] == comparison
                 and "result" in cache
             ):
-                return cache["result"]
+                return cache["result"] or fallback
 
-            result = func(self, comparison, distinct, include_curr=include_curr)
+            result = func(self, prop, comparison, **kwargs, fallback=fallback)
             cache["result"] = result
             return result
-
-        return wrapper
+        except Exception as e:
+            print_error(f"Error calculating similarity for {prop}: {e}")
+            raise e
 
     return decorator

@@ -44,6 +44,7 @@ BookStructure2 = Literal[
     "standalone_file",  # a standalone audio file in the root/top-level directory or a container with multiple unrelated (and large) audio files
     "single",  # a directory with a single audio file (which is probably a standalone_file)
     "flat",  # a directory with only audio files in it, no subdirectories
+    "flatish",  # like a flat directory, but slightly messy (i.e., some files may be in a subdir, but can be flattened)
     "multi_disc",  # a directory containing audio files from one disc of a multi-disc book; its parent must be a multi_parent
     "multi_part",  # nearly identical to multi_disc, but labeled as parts instead of discs
     "multi_parent",  # a directory with subdirectories, each containing audio files that are part of a single book; its children must be multi_disc or multi_part
@@ -140,3 +141,13 @@ OnComplete = Literal["archive", "delete", "test_do_nothing"]
 
 NumericIterable = TypeVar("NumericIterable", bound=Iterable[int | float] | list[int | float])
 SimilarityComparisonMethod = Literal["median", "avg", "min", "max"] | None
+SimilarityComparable = Literal[
+    "id3_albums",
+    "id3_albumartists",
+    "id3_artists",
+    "id3_authors",
+    "id3_disc_nums",
+    "id3_titles",
+    "id3_track_nums",
+    "pathnames",
+]

@@ -425,16 +425,39 @@ class test_tree_structures:
         for c in tree.children_f:
             xt.is_book_root(c)
 
-    def test_flat_with_match_filter(self, authors_guide_to_murder__flat_mp3: Audiobook):
-        tree = BooksTree(TEST_DIRS.inbox)
-        flat_dir_names = [d.name for d in MOCKED.flat_dirs]
-        flat_dirs = [d for name, d in tree.dirs.items() if name in flat_dir_names]
-        flat_files = flatlist([d.files for d in flat_dirs])
-        flat_all = [*flat_dirs, *flat_files]
-        for d in flat_all:
-            assert d.has_only_structure("flat"), xt.msg.structure_is(d, "flat")
-        for c in tree.children_f:
-            xt.is_book_root(c)
+    def test_flatish_with_tags(self, authors_guide_to_murder__flat_mp3: Audiobook):
+        tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder")
+        book = tree.get(cast(str, authors_guide_to_murder__flat_mp3.key))
+        assert book
+        assert book.has_structure("flat"), xt.msg.structure_is(book, ("flat"))
+        xt.is_book_root(book)
+
+        assert len(book.children_recursive_f) == 39, f"Expected 39 children, got {len(book.children_recursive_f)}"
+        assert len(book.files_recursive_f) == 38, f"Expected 38 files, got {len(book.files_recursive_f)}"
+        assert len(book.dirs_recursive_f) == 1, f"Expected 1 dir, got {len(book.dirs_recursive_f)}"
+
+        first_file = book.files_recursive_f[0]
+        first_dir = book.dirs_recursive_f[0]
+        for f in book.files_recursive_f:
+            assert f.has_structure_like("flat"), xt.msg.structure_is(f, ("flat"))
+            xt.is_not_book_root(f)
+        assert first_file.has_structure("flatish"), xt.msg.structure_is(first_file, ("flatish"))
+        assert first_dir.has_structure("flatish"), xt.msg.structure_is(first_dir, ("flatish"))
+
+    def test_flatish_without_tags(self, authors_guide_to_murder__flat_mp3: Audiobook):
+        tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder", scan_id3=False)
+        book = tree.get(cast(str, authors_guide_to_murder__flat_mp3.key))
+        assert book
+        assert book.has_only_structure("container"), xt.msg.structure_is(book, ("container"))
+        xt.is_not_book_root(book)
+
+        assert len(book.children_recursive_f) == 39, f"Expected 39 children, got {len(book.children_recursive_f)}"
+        assert len(book.files_recursive_f) == 38, f"Expected 38 files, got {len(book.files_recursive_f)}"
+        assert len(book.dirs_recursive_f) == 1, f"Expected 1 dir, got {len(book.dirs_recursive_f)}"
+
+        for c in book.children_recursive_f:
+            assert c.has_structure_like("unknown"), xt.msg.structure_is(c, ("unknown"))
+            xt.is_not_book_root(c)
 
     def test_container_dir(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.container_dirs[0]])
