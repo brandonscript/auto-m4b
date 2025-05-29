@@ -1,12 +1,14 @@
 import re
+from collections.abc import Sequence
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 
 import cachetools
 import cachetools.func
 import regex as rex
 
+from lib.term import print_debug
 from src.lib.misc import re_group
 from src.lib.parsers import try_parse_num
 from src.lib.patterns import (
@@ -116,17 +118,52 @@ def filter_matches(func):
         paths = func(self, *args, **kwargs)
         if not paths:
             return paths
-        return _match_filter_func(paths, self.match_filter, root=self.root or self)
+        return match_filter_paths(paths, self.match_filter, root=self.root or self)
 
     return wrapper
 
 
-def _match_filter_func(
-    paths: "list[Path | BooksTree] | dict[str, BooksTree]",
+PT = TypeVar("PT", bound="BooksTree | Path")
+
+
+@overload
+def match_filter_paths(
+    paths: "list[PT]",
     match_filter: list[Path] | str | None,
     *,
     root: "BooksTree | Path",
-):
+) -> "list[PT]": ...
+
+
+@overload
+def match_filter_paths(
+    paths: "Sequence[PT]",
+    match_filter: list[Path] | str | None,
+    *,
+    root: "BooksTree | Path",
+) -> "Sequence[PT]": ...
+
+
+@overload
+def match_filter_paths(
+    paths: "dict[str, PT]",
+    match_filter: list[Path] | str | None,
+    *,
+    root: "BooksTree | Path",
+) -> "dict[str, PT]": ...
+
+
+def match_filter_paths(
+    paths: "list[PT] | Sequence[PT] | dict[str, PT]",
+    match_filter: list[Path] | str | None,
+    *,
+    root: "BooksTree | Path",
+) -> "list[PT] | Sequence[PT] | dict[str, PT]":
+    """
+    Filters a list of paths or dict of paths by a match filter.
+    If the match filter is a list, it is relative to the root.
+    If the match filter is a string, it is a regex pattern.
+    """
     from src.lib.config import cfg
     from src.lib.fs_utils import try_relative_to
 
@@ -136,10 +173,11 @@ def _match_filter_func(
         return paths
 
     if root is None:
-        raise ValueError("match_filter: root should never be None")
+        print_debug("match_filter: root should never be None (for paths)", paths)
+        root = cfg.inbox_dir
 
     rel_match_filter = cast(
-        list["Path | BooksTree"] | str,
+        list[PT] | str,
         (
             [try_relative_to(str(p), root or Path()) for p in match_filter]
             if isinstance(match_filter, list)
@@ -147,7 +185,7 @@ def _match_filter_func(
         ),
     )
 
-    def _is_wanted_path(t: "BooksTree | Path | str | None"):
+    def _is_wanted_path(t: "PT | str | None"):
         if not (rel_path := try_relative_to(str(t), root or Path())):
             return False
         if isinstance(rel_match_filter, str):
@@ -163,6 +201,16 @@ def _match_filter_func(
         if isinstance(paths, dict)
         else [p for p in paths if _is_wanted_path(p)]
     )
+
+
+def match_filter_path(
+    path: "PT", match_filter: list[Path] | str | None = None, *, root: "BooksTree | Path | None" = None
+) -> PT | None:
+    from src.lib.config import cfg
+
+    if matched := match_filter_paths([path], match_filter, root=root or cfg.inbox_dir):
+        return cast(PT, matched[0])
+    return None
 
 
 def get_common_nums_in_strings(

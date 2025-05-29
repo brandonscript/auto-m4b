@@ -667,7 +667,7 @@ class test_tree_structures:
             assert d.has_only_structures("mixed"), xt.msg.structure_is(d, ("mixed"))
             xt.is_not_book_root(d)
 
-    def test_multi_nested_sanderson(self, secret_project_series__nested_flat_mixed: Audiobook):
+    def test_multi_nested_series(self, secret_project_series__nested_flat_mixed: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox)
         container = tree.dirs[secret_project_series__nested_flat_mixed.basename]
         xt.is_not_book_root(container)

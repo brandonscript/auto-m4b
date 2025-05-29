@@ -8,7 +8,7 @@ from typing import Any, cast, Literal, overload, Self, TYPE_CHECKING, TypeVar
 from pydantic import BaseModel, Field
 
 from src.lib.books_tree.books_tree_summary import TreeNodeSummary
-from src.lib.books_tree.books_tree_utils import _match_filter_func, filter_matches
+from src.lib.books_tree.books_tree_utils import filter_matches, match_filter_path, match_filter_paths
 from src.lib.id3_tags import Id3Tags
 from src.lib.misc import (
     any_in,
@@ -185,9 +185,12 @@ class BooksTree(BaseModel):
             rel_path = at_path.relative_to(root.path)
             parts = rel_path.parts
             subtree = self
+            audio_files = match_filter_paths(audio_files, self.match_filter, root=root)
             for i, part in enumerate(parts):
                 if part not in subtree._dirs:
                     parent_p = Path(root.path, *parts[: i + 1])
+                    if not match_filter_path(parent_p, self.match_filter, root=root):
+                        continue
                     subtree._dirs[part] = BooksTree.cast(parent_p, root=root, match_filter=self.match_filter)
                 subtree = subtree._dirs[part]
             subtree._files = isorted(
@@ -212,8 +215,8 @@ class BooksTree(BaseModel):
         # Add files from the current level to self.files
         self._files = isorted(
             [
-                BooksTree.cast(f, root=root)
-                for f in only_audio_files(filter_ignored(rglob))
+                BooksTree.cast(f, root=root, match_filter=self.match_filter)
+                for f in match_filter_paths(only_audio_files(filter_ignored(rglob)), self.match_filter, root=root)
                 if f.parent == self.path and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
         )
@@ -754,7 +757,7 @@ class BooksTree(BaseModel):
     def is_match(self):
         if not self.match_filter or not self.root:
             return False
-        return bool(_match_filter_func([self.path], self.match_filter, root=self.root))
+        return bool(match_filter_paths([self.path], self.match_filter, root=self.root))
 
     def get_files_in_dirs(self):
         return [f for d in self._dirs.values() for f in d._files]
@@ -891,25 +894,33 @@ class BooksTree(BaseModel):
                 if (p := d.parent) and not p.is_root and len(p.dirs) == 1:
                     p.add_structures("nested", recursive=True)
 
+            is_single = d.files and all(f.has_structure("single") for f in d.files)
+            is_multi_disc = d.score_multi_disc > 0.75
+            is_multi_part = d.score_multi_part > 0.75
+            is_flat = d.score_flat > 0.75 and all(
+                d.score_flat > x for x in (d.score_multi_disc, d.score_multi_part, d.score_series_parent)
+            )
+            is_series_parent = d.score_series_parent > 0.75 and d.score_series_parent > d.score_series_book
+
             # if all files in dir are 'single', set dir to 'single' too
-            if d.files and all(f.has_structure("single") for f in d.files):
+            if is_single:
                 d.set_structures("single")
                 check_nested(d)
-            elif d.score_multi_disc > 0.75:
+            elif is_multi_disc:
                 if not self.structure:
                     self.set_structures("multi_disc", "multi_parent")
                 d.add_structures("multi_disc", recursive=True)
                 check_nested(d)
-            elif d.score_multi_part > 0.75:
+            elif is_multi_part:
                 if not self.structure:
                     self.set_structures("multi_part", "multi_parent")
                 d.add_structures("multi_part", recursive=True)
                 check_nested(d)
-            elif d.score_flat > 0.75:
+            elif is_flat:
                 d.add_structures("flat", recursive=True)
                 [cc.add_structures("flatish", recursive=True) for cc in d.children_recursive if cc.is_dir()]
                 check_nested(d)
-            elif d.score_series_parent > 0.75:
+            elif is_series_parent:
                 d.set_structures("series_parent")
                 [cc.add_structures("series_book", recursive=True) for cc in d.children_recursive]
                 [f.add_structures("standalone_file") for f in d.files if f.score_single_standalone_file[1] > 0.5]
