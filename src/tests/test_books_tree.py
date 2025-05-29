@@ -519,10 +519,6 @@ class test_tree_structures:
             nb, ("mixed")
         )
 
-        # for c in multi_book_mixed.children_recursive:
-        #     assert c.has_only_structure("mixed"), xt.msg.structure_is(c, "mixed")
-        #     xt.is_not_book_root(c)
-
     def test_mixed_chums(self, missing_chums__mixed_mp3: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[missing_chums__mixed_mp3.path])
         mixed_chums = tree.dirs[missing_chums__mixed_mp3.path.name]

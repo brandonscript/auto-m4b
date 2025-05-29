@@ -805,12 +805,6 @@ class BooksTree(BaseModel):
 
         return score_series_parent(self)
 
-    # @property
-    # def score_single(self):
-    #     from src.lib.scorers import score_single
-
-    # return score_single(self)
-
     @property
     def score_single_standalone_file(self):
         from src.lib.scorers import score_single_standalone_file
@@ -933,59 +927,13 @@ class BooksTree(BaseModel):
             else:
                 c.set_structures("unknown")
 
-        # # Dir pass #3: series
-        # for c in this_file + this_dir + self.children_without_structure_r:
-
-        #     if self.is_match:
-        #         ...
-
-        #     if c.has_any_structure("container", "mixed", "multi_parent"):
-        #         continue
-
-        #     if c.score_series_book < 0.4 and c.score_series_parent < 0.4:
-        #         continue
-
-        #     if (self.i.children_recursive.all_path_nums_completion or 0) < 0.7:
-        #         continue
-
-        #     parent_gt_book = c.score_series_parent > c.score_series_book
-        #     book_gte_parent = c.score_series_book >= c.score_series_parent
-
-        #     this_is_series_parent = c.score_series_parent and parent_gt_book
-        #     parent_is_series_parent = c.parent and c.score_series_book and book_gte_parent
-
-        #     if not this_is_series_parent and not parent_is_series_parent:
-        #         continue
-
-        #     if this_is_series_parent:
-        #         c.set_structures("series_parent")
-        #         [cc.add_structures("series_book", recursive=True) for cc in c.children_recursive]
-        #     elif parent_is_series_parent and c.parent:
-        #         c.parent.add_structures("series_parent")
-        #         c.add_structures("series_book", recursive=True)
-
-        #     [f.add_structures("standalone_file") for f in c.files if f.score_standalone_file > 0.5]
-
-        # Determine containers and nested for remaining dirs
+        # Determine uncaught nested for remaining dirs
         for d in this_dir + [c for c in self.children_without_structure_r if c.is_dir()]:
-            if (len(d.dirs) == 1 and not d.files) and list(d.dirs.values())[0].has_any_structure(
-                "flat", "multi_parent"
-            ):
-                d.set_structures("nested", recursive=True)
-                # continue
-            # if d.structure or d.score_container_mixed <= 0 or d.has_structure("mixed"):
-            #     continue
-            # if len(d.known_structures_r) > 1:
-            #     d.set_structures("container")
-
-            # d.add_structures("multi_parent", recursive=True)
-
-        # for d in [d for d in self.dirs_recursive if d.score_container > 0.5]:
-        #     d.set_structures("container")
-
-        # if _is_empty := self.is_dir() and not any((self.dirs, self.files)):
-        #     self.set_structures("empty")
-        #     return self.structure
+            if (
+                inner_dir := (list(d.dirs.values())[0] if len(d.dirs) == 1 and not d.files else None)
+            ) and inner_dir.has_any_structure("flat", "multi_parent"):
+                d.add_structures(*inner_dir.structure)
+                d.add_structures("nested", recursive=True)
 
         if self.is_match:
             ...

@@ -976,20 +976,6 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
         mixed_score = 0.0
         container_score = 0.0
 
-        # container_score = (
-        #     percent_truthy_in_list(
-        #         [
-        #             dissimilar_files,
-        #             dissimilar_dirs,
-        #             has_multiple_files,
-        #             has_files_and_dirs,
-        #             pathnames_similarity,
-        #             standalones > 0,
-        #         ]
-        #     )
-        #     / 100
-        # )
-
         small_child_score = (1 - files_gt_50mb) + (1 - dirs_gt_75mb)
         large_child_score = (files_gt_75mb + files_gt_50mb) / 2 + dirs_gt_75mb
         size_diff = large_child_score - small_child_score
@@ -1019,38 +1005,6 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
             return ("mixed", container_score, mixed_score)
         else:
             return (None, container_score, mixed_score)
-
-        # try:
-        #     from src.lib.misc import is_gt_75mb, percent_truthy_in_list
-
-        #     if not tree.children_recursive or tree.is_file():
-        #         return 0.0
-
-        #     if tree.is_match:
-        #         ...
-
-        #     if tree.structure:
-        #         return 0.0
-
-        #     cri = tree.i.children_recursive
-
-        #     dissimilar_children = 1.0 - (tree.i.children.pathname_similarity(distinct=True) or 0)
-        #     children_gt_75mb = percent_truthy_in_list([is_gt_75mb(c.size) for c in tree.files]) / 100
-        #     standalone_ratio = dissimilar_children + children_gt_75mb
-        #     if children_gt_75mb == 0:
-        #         # If there are no likely standalone files, strongly boost mixed (negative standalone ratio)
-        #         standalone_ratio -= 1.0
-
-        #     container = max(score_container(tree), 0)
-        #     complexity = tree_complexity(tree)
-        #     incomplete_path_nums = 0.0 if not cri.all_path_nums else 1.0 - (cri.all_path_nums_completion or 0)
-
-        #     return round(complexity + incomplete_path_nums - container - standalone_ratio, 3)
-        # except Exception as e:
-        #     print_debug(f"Error scoring mixed: {e}")
-        #     return 0.0
-
-        # return round(container_score, 3)
 
     except Exception as e:
         print_debug(f"Error scoring container/mixed: {e}")
@@ -1208,7 +1162,6 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         # At this point, we've ruled out that it's a single -
         # it can only be a standalone file or part of a multi_parent.
 
-        # elif not only_child_in_parent:
         related_to_siblings += tree.i.this_and_siblings.similarity("id3_albums", distinct=True, fallback=0.0)
         related_to_siblings += tree.i.this_and_siblings.similarity("id3_authors", distinct=True, fallback=0.0)
         related_to_siblings += tree.i.this_and_siblings.similarity("pathnames", distinct=True, fallback=0.0)
@@ -1220,13 +1173,6 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         )
         related_to_siblings /= 4
 
-        # album_similarity_to_parent_files = (
-        #     tree.i.this._calculate_similarity(
-        #         distinct=True, get_values=lambda: [t.album if (t := tree.id3_tags) else "", *[t.album if (t := f.id3_tags) else "" for f in p.files]]
-        #     )
-        #     or 0
-        # )
-
         if tree.is_match:
             ...
 
@@ -1234,12 +1180,6 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         parent_has_multiple_dirs = bool(p and len(p.dirs) > 1)
         parent_has_mixed_content = parent_has_files_and_dirs or parent_has_multiple_dirs
 
-        # dissimilar_siblings = -0.5 + (tree.i.this_and_siblings.pathname_similarity(distinct=True) or 0) / 2
-        # contiguous_siblings = (
-        #     tree.i.this_and_siblings.track_nums_are_contiguous
-        #     or tree.i.this_and_siblings.start_nums_are_contiguous
-        #     or tree.i.this_and_siblings.part_nums_are_contiguous
-        # )
         suffixes = list(set([f.path.suffix for f in p.files])) if p else []
         has_mixed_file_types = len(suffixes) > 1 if p else False
         all_sizes_gt_75mb = all(is_gt_75mb(f.size) for f in p.files) if p else False
@@ -1259,26 +1199,6 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
 
         if tree.is_match:
             ...
-
-        # standalone_score =
-
-        # if tree.i.this_and_siblings.have_albums and (
-        #     (siblings_album_similarity := tree.i.this_and_siblings.album_similarity(distinct=True) or 0) < 0.9
-        # ):
-        #     standalone_score += 1 - siblings_album_similarity
-
-        # if tree.i.this_and_siblings.have_authors and (
-        #     (siblings_author_similarity := tree.i.this_and_siblings.author_similarity(distinct=True) or 0) < 0.7
-        # ):
-        #     standalone_score += 1 - siblings_author_similarity
-
-        # # if it has a track number/total other than None, 1, or 1/1, subtract 1.5
-        # if tree.i.this.has_track_num and (tree.i.this.id3_track_num > 1 or not tree.i.this.id3_track_total > 1):
-        #     standalone_score -= 1.5
-
-        # # if it has a disc number/total other than None, 1, or 1/1, subtract 1.5
-        # if tree.i.this.has_disc_num and (tree.i.this.id3_disc_num > 1 or not tree.i.this.id3_disc_total > 1):
-        #     standalone_score -= 1.5
 
         return ("standalone_file", round(standalone_score, 3), 0.0)
     except Exception as e:
@@ -1417,15 +1337,7 @@ def score_series_parent(tree: "BooksTree") -> float:
 
         base_score = id3_checks
 
-        if (
-            not bool(id3_checks)
-            # and not self.this.has_series_num
-            # and not self.this.has_start_num
-            and (tree.i.children.have_series_nums or tree.i.children.have_start_nums)
-        ):
-            # series_book_children = -0.5 + (
-            #     percent_truthy_in_list([is_maybe_series_book(t.name) for t in tree.children]) / 100
-            # )
+        if not bool(id3_checks) and (tree.i.children.have_series_nums or tree.i.children.have_start_nums):
             path_sim = tree.i.children.similarity("pathnames", distinct=True, include_curr=True, fallback=0.0)
             standalones_score = (
                 0.0
@@ -1488,57 +1400,6 @@ def score_series_parent(tree: "BooksTree") -> float:
     except Exception as e:
         print_debug(f"Error scoring series_parent: {e}")
         return 0.0
-
-
-# def score_single(tree: "BooksTree") -> float:
-#     """
-#     Only determines if a file is a single file, not dirs that contain them.
-#     """
-#     try:
-
-#         if not tree.is_file() or (p := tree.parent) and p.is_root:
-#             return 0.0
-
-#         if not (_only_file_in_parent := p and len(p.files) == 1 and not p.dirs):
-#             return 0.0
-
-#         return round(get_similarity([tree.name, tree.parent.name]), 3) if tree.parent else 1.0
-#     except Exception as e:
-#         print_debug(f"Error scoring single: {e}")
-#         return 0.0
-
-
-# def score_mixed(tree: "BooksTree") -> float:
-#     """Only determines mixed for dirs, not files"""
-#     try:
-#         from src.lib.misc import is_gt_75mb, percent_truthy_in_list
-
-#         if not tree.children_recursive or tree.is_file():
-#             return 0.0
-
-#         if tree.is_match:
-#             ...
-
-#         if tree.structure:
-#             return 0.0
-
-#         cri = tree.i.children_recursive
-
-#         dissimilar_children = 1.0 - (tree.i.children.pathname_similarity(distinct=True) or 0)
-#         children_gt_75mb = percent_truthy_in_list([is_gt_75mb(c.size) for c in tree.files]) / 100
-#         standalone_ratio = dissimilar_children + children_gt_75mb
-#         if children_gt_75mb == 0:
-#             # If there are no likely standalone files, strongly boost mixed (negative standalone ratio)
-#             standalone_ratio -= 1.0
-
-#         container = max(score_container(tree), 0)
-#         complexity = tree_complexity(tree)
-#         incomplete_path_nums = 0.0 if not cri.all_path_nums else 1.0 - (cri.all_path_nums_completion or 0)
-
-#         return round(complexity + incomplete_path_nums - container - standalone_ratio, 3)
-#     except Exception as e:
-#         print_debug(f"Error scoring mixed: {e}")
-#         return 0.0
 
 
 def score_multi_parent(tree: "BooksTree") -> float:
