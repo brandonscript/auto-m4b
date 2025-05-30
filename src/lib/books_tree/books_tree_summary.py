@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from lib.term import print_debug
+
 if TYPE_CHECKING:
     from src.lib.books_tree import BooksTree
     from src.lib.books_tree.books_tree_node import TreeNode
@@ -15,15 +17,27 @@ class TreeNodeSummary:
     files: "TreeNodeList"
     files_recursive: "TreeNodeList"
     dirs: "TreeNodeList"
-    # dirs_recursive: "TreeNodeList"
-    # siblings: "TreeNodeList"
     this_and_siblings: "TreeNodeList"
+    this_and_siblings_recursive: "TreeNodeList"
 
     def __init__(self, tree: "BooksTree"):
         from src.lib.books_tree.books_tree_node import TreeNode
         from src.lib.books_tree.books_tree_node_list import TreeNodeList
 
         self._tree = tree
+
+        if tree.is_root:
+            print_debug(f"[TreeNodeSummary]: cannot get summary for root, this will return an empty summary")
+            self.this = TreeNode.empty(tree)
+            self.parent = None
+            self.children = TreeNodeList([], self.this)
+            self.children_recursive = TreeNodeList([], self.this)
+            self.files = TreeNodeList([], self.this)
+            self.files_recursive = TreeNodeList([], self.this)
+            self.dirs = TreeNodeList([], self.this)
+            self.this_and_siblings = TreeNodeList([], self.this)
+            self.this_and_siblings_recursive = TreeNodeList([], self.this)
+
         self.this = TreeNode(tree)
         self.parent = TreeNode(tree.parent) if tree.parent and not tree.parent.is_root else None
         self.children = TreeNodeList(tree.children, self.this)
@@ -31,9 +45,10 @@ class TreeNodeSummary:
         self.files = TreeNodeList(tree.files, self.this)
         self.files_recursive = TreeNodeList(tree.files_recursive, self.this)
         self.dirs = TreeNodeList(list(tree.dirs.values()), self.this)
-        # self.dirs_recursive = TreeNodeList(tree.dirs_recursive, self.this)
-        # self.siblings = TreeNodeList(tree.siblings or [], self.this)
         self.this_and_siblings = TreeNodeList([tree, *(tree.siblings or [])], self.this)
+        self.this_and_siblings_recursive = TreeNodeList(
+            [tree, *(tree.siblings or [])] + [c for c in tree.children_recursive if c != tree], self.this
+        )
 
     def __repr__(self):
         return f"{self.this._tree.rel_path}"

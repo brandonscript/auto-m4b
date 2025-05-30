@@ -404,7 +404,23 @@ class test_tree_structures:
             xt.is_not_root(c)
             xt.has_root(c)
 
-    def test_standalone_files(self):
+    def test_standalone_files_with_tags(
+        self,
+        basic_no_cover__standalone_mp3: Audiobook,
+        basic_no_cover__standalone_m4b: Audiobook,
+    ):
+        # tree = inbox_books_tree(match_filter=".*")
+        # tree = inbox_books_tree(match_filter="^(basic_no_cover__standalone|mock_book_container.*(?<!0[12]\\.mp3)$)")
+        tree = inbox_books_tree(match_filter="^(basic_no_cover__standalone|mock_book_container)")
+        standalones = [f for f in tree.files_recursive_f if not re.search(r"0[12]\.mp3$", f.path.name)]
+        assert len(standalones) == 5
+        for f in standalones:
+            found = tree.get_path(f.path)
+            assert id(f) == id(found), f"Expected both objects to be the same, got {id(f)} and {id(found)}"
+            assert f.has_structure("standalone_file"), xt.msg.structure_has(f, "standalone_file")
+            xt.is_book_root(f)
+
+    def test_standalone_files_without_tags(self):
 
         tree = inbox_books_tree(match_filter="^(mock_book_(container|standalone))")
         assert tree.files_recursive_f

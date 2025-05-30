@@ -2,7 +2,8 @@ import os
 import statistics
 from collections.abc import Callable, Iterable
 from functools import wraps
-from itertools import zip_longest
+from itertools import combinations, zip_longest
+from math import log10
 from pathlib import Path
 from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 
@@ -196,6 +197,60 @@ def get_similarity(
     # Average the scores
     else:
         return calc_avg(flat_scores)
+
+
+def get_size_similarity(
+    sizes: list[int | float],
+    *,
+    precision: int = 3,
+    zero_point: float = 6.05,
+    curve_strength: float = 4,
+    byte_multiplier: int = 1,
+) -> float:
+    """
+    Computes a similarity score from 0 to 1 based on a logarithmic scale.
+    1.0 = identical sizes, 0.0 = vastly different sizes.
+    The score decreases logarithmically as the absolute differences increase,
+    creating a natural scaling that's more sensitive to small differences
+    and less sensitive to large ones.
+
+    zero_point: is the power of 10 in bytes at which the score should be 0. e.g.,
+    - 1 will make 10b score 0
+    - 2 will make 100b score 0
+    - 3 will make 1kb score 0
+    - 4 will make 10kb score 0
+    - 5 will make 100kb score 0
+    - 6 will make 1mb score 0
+    - 7 will make 10mb score 0
+    ... etc.
+
+    curve_strength: is used to control the rate at which the score approaches 1 as it increases from the 0
+    score point. The higher the value, the faster the score approaches 1. This number should never be less
+    than 3, otherwise it will cause near 0-byte values to score quite low.
+
+    byte_multiplier: is the factor by which sizes are multiplied before calculating the similarity.
+    This is useful for cases where sizes are in different units, such as bytes, kilobytes, megabytes, etc.
+    For example, if sizes are in bytes, a byte_multiplier of 1000 will scale the sizes to kilobytes.
+    """
+
+    if not sizes:
+        return 0.0
+    if len(sizes) == 1 or all(size == sizes[0] for size in sizes):
+        return 1.0
+
+    curve_strength = max(3, curve_strength)
+
+    sizes = [size * byte_multiplier for size in sizes]
+
+    # Calculate the maximum absolute difference between any two sizes, ensuring it's at least 1
+    max_diff = max(1, max(abs(a - b) for a, b in combinations(sizes, 2)))
+
+    log_diff = log10(max_diff)
+
+    # / 6 then ** 5, then cap to 0.999 (1 is identical)
+    score = min(0.999, max(0.0, 1.0 - (log_diff / zero_point) ** curve_strength))
+
+    return round(score, precision)
 
 
 def get_list_similarity(

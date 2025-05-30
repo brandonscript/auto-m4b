@@ -7,10 +7,7 @@ from mutagen.mp3 import HeaderNotFoundError
 from pydantic import BaseModel, computed_field, Field, field_validator
 
 from src.lib.ffprobe_utils import ffprobe_file
-from src.lib.misc import fix_ffprobe
 from src.lib.typing import AdditionalTags, Id3TagDict, TagSource
-
-fix_ffprobe()
 
 CacheValue = Union[Id3TagDict, Literal["__BAD__"]]
 

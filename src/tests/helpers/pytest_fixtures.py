@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 import sys
 import time
@@ -582,10 +583,12 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     for i in range(1, 4):
         testutils.make_mock_file(MOCKED.nested_dir / "inner_dir" / f"mock_book_nested - part_{i}.mp3")
 
+    STANDALONE_FILES = MOCKED.standalone_files
+
     # make a deeply nested container dir
     list(map(testutils.make_mock_file, [f for f in MOCKED.container_dirs if "." in f.name]))
     for f in [*MOCKED.container_dir_d1_standalone_files, *MOCKED.container_dir_d2_standalone_files]:
-        testutils.make_mock_file(f, size=51 * 1024)
+        STANDALONE_FILES.append(f)
 
     # make a multi-series directory
     names = ["Dawn", "High Noon", "Dusk"]
@@ -646,8 +649,9 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     testutils.make_mock_file(MOCKED.mixed_dir / "03 - mixed drinks.mp3")
 
     # make standalone files
-    for f in MOCKED.standalone_files:
-        testutils.make_mock_file(f, size=51 * 1024)
+    for f in STANDALONE_FILES:
+        rand_between_51_and_100 = random.randint(51 * 1024, 100 * 1024)
+        testutils.make_mock_file(f, size=rand_between_51_and_100)
 
     # make a single files
     testutils.make_mock_file(MOCKED.single_dir_m4b / "mock_book_single_m4b.m4b")

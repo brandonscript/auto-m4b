@@ -226,9 +226,9 @@ class BooksTree(BaseModel):
         if scan_id3:
             if self.is_root:
                 for f in [f for f in self.files_recursive if not f.id3_tags]:
-                    f.id3_tags = Id3Tags.from_file(f.path)
+                    f.id3_tags = t if (t := Id3Tags.from_file(f.path)) and not t.BAD else None
             elif self.is_file() and not self.id3_tags:
-                self.id3_tags = Id3Tags.from_file(self.path)
+                self.id3_tags = t if (t := Id3Tags.from_file(self.path)) and not t.BAD else None
 
         if determine_structure:
             self.determine_structure()
@@ -505,8 +505,6 @@ class BooksTree(BaseModel):
 
     @property
     def i(self) -> TreeNodeSummary:
-        if self.is_root:
-            return None  # type: ignore
         return TreeNodeSummary(self)
 
     @property

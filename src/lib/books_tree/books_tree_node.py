@@ -31,7 +31,7 @@ class TreeNode:
     id3_track_num: int = -1
     id3_track_total: int = -1
     _curr: Self | None = None
-    _id3: Id3Tags | None = None
+    id3_tags: Id3Tags | None = None
 
     def __init__(self, tree: "BooksTree", curr: Self | None = None):
         from src.lib.config import cfg
@@ -44,16 +44,16 @@ class TreeNode:
 
         self._tree = tree
         self._curr = curr
-        self._id3 = tree.id3_tags
-        if self._id3:
-            self.id3_album = self._id3.album
-            self.id3_albumartist = self._id3.albumartist
-            self.id3_artist = self._id3.artist
-            self.id3_disc_num = self._id3.disc_num or -1
-            self.id3_disc_total = self._id3.disc_total or -1
-            self.id3_title = self._id3.title
-            self.id3_track_num = self._id3.track_num or -1
-            self.id3_track_total = self._id3.track_total or -1
+        self.id3_tags = tree.id3_tags
+        if self.id3_tags:
+            self.id3_album = self.id3_tags.album
+            self.id3_albumartist = self.id3_tags.albumartist
+            self.id3_artist = self.id3_tags.artist
+            self.id3_disc_num = self.id3_tags.disc_num or -1
+            self.id3_disc_total = self.id3_tags.disc_total or -1
+            self.id3_title = self.id3_tags.title
+            self.id3_track_num = self.id3_tags.track_num or -1
+            self.id3_track_total = self.id3_tags.track_total or -1
         self.pathname = self._tree.name
         self.disc_num = get_disc_num(self._tree.name)
         self.part_num = get_part_num(self._tree.name)
@@ -73,6 +73,20 @@ class TreeNode:
 
     def __str__(self):
         return self.__repr__()
+
+    @classmethod
+    def empty(cls, tree: "BooksTree"):
+        empty = cls.__new__(cls)
+        empty._tree = tree
+        empty._curr = None
+        empty.id3_tags = None
+        empty.pathname = "__root__"
+        empty.disc_num = -1
+        empty.part_num = -1
+        empty.series_num = -1
+        empty.start_num = -1
+        empty.all_nums = []
+        return empty
 
     @lazy
     def has_disc_num(self):

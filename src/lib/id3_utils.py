@@ -2,17 +2,9 @@ import datetime
 import re
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING, Union
-
-from src.lib.misc import fix_ffprobe
-from src.lib.scorers import (
-    MetadataScore,
-)
-
-fix_ffprobe()
 
 import bidict
 import ffmpeg
@@ -27,13 +19,15 @@ from src.lib.parsers import (
     get_year_from_date,
     parse_narrator,
 )
+from src.lib.scorers import (
+    MetadataScore,
+)
 from src.lib.term import (
     nl,
     PATH_COLOR,
     print_debug,
     print_error,
     print_list_item,
-    print_warning,
     smart_print,
 )
 from src.lib.typing import AdditionalTags, BadFileError, Id3TagDict, TagSource
@@ -315,51 +309,6 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         smart_print(Tinta().mint(" ✓\n").to_str())
 
     nl()
-
-
-FFPROBE_REPAIRS = 0
-
-
-def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, throw: bool = False):
-    from src.lib.config import cfg
-
-    global FFPROBE_REPAIRS
-
-    if file is None:
-        return None
-
-    if file and not file.exists():
-        raise FileNotFoundError(f"Error: Cannot extract id3 tag, '{file}' does not exist")
-    try:
-        options = options or {}
-        probe_result = ffmpeg.probe(str(file), cmd="ffprobe", **options)
-    except Exception as e:
-        from src.lib.logger import write_err_file
-
-        err_str = str(cast(ffmpeg.Error, e).stderr) if isinstance(e, ffmpeg.Error) else str(e)
-
-        # Some mock files are not readable by ffprobe, so we return None
-        if "pytest" in sys.argv and "mock_" in err_str and "Invalid data found when processing input" in err_str:
-            return None
-
-        if "No such file or directory: 'ffprobe'" in err_str and FFPROBE_REPAIRS <= 3:
-            fix_ffprobe()
-            FFPROBE_REPAIRS += 1
-            return ffprobe_file(file, options=options, throw=throw)
-
-        write_err_file(file, e, "ffprobe")
-        base_msg = f"Error: Could run ffprobe on file '{file}' with options {options}."
-        if throw:
-            raise BadFileError(base_msg) from e
-        if "ffprobe version" in err_str:
-            print_warning(f"{base_msg}\n{err_str}")
-        else:
-            print_error(f"{base_msg}\nTry running `./scripts/fix-ffprobe.sh`...")
-        if cfg.DEBUG:
-            print_debug(err_str)
-        return None
-
-    return cast(dict, probe_result)
 
 
 def ffmpeg_file(file: Path, *, options: dict[str, Any] | None = None, throw: bool = False):

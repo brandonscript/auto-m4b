@@ -43,11 +43,9 @@ class TreeNodeList:
 
         self._trees = trees
         self.node = cast("TreeNode", curr)
-        if not self._trees:
-            self.id3_tags = []
-            return
-
-        self.id3_tags = [p.id3_tags for p in self._trees if p.id3_tags]
+        self.id3_tags = (
+            [t for t in (p.id3_tags for p in self._trees if p.id3_tags) if t and not t.BAD] if self._trees else []
+        )
 
         self._album_similarity_cache = {}
         self._albumartist_similarity_cache = {}
@@ -82,8 +80,6 @@ class TreeNodeList:
 
     @lazy
     def part_nums(self):
-        if self.node._tree.is_match:
-            ...
         return only_gte_0([get_part_num(t.name) for t in self._trees])
 
     @lazy
@@ -241,14 +237,8 @@ class TreeNodeList:
     ) -> float | F:
         """Base method for calculating similarity between values of a property"""
 
-        if self.node._tree.is_match:
-            ...
-
         if prop is None:
             raise ValueError("TreeNodeList.similarity: prop cannot be None")
-
-        if not self.id3_tags:
-            ...
 
         if prop == "id3_authors":
             a = self.similarity(
@@ -275,11 +265,9 @@ class TreeNodeList:
     def disc_nums_completion(self):
         """Return the ratio of disc numbers / total disc numbers, from 0-1"""
 
-        if self.node._tree.is_match:
-            ...
-
         if not self.have_disc_nums:
             return None
+
         return len(self.disc_nums) / len(self._trees)
 
     @lazy

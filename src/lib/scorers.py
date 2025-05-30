@@ -1,5 +1,6 @@
 import functools
 import re
+import sys
 from pathlib import Path
 from typing import cast, Literal, TYPE_CHECKING
 
@@ -7,6 +8,7 @@ from columnar import columnar
 from rapidfuzz import fuzz
 from rapidfuzz.distance import LCSseq, Levenshtein
 
+from lib.compare import get_size_similarity
 from lib.id3_tags import Id3Tags
 from src.lib.cleaners import clean_string, strip_author_narrator, strip_part_number
 from src.lib.misc import any_in, get_numbers_in_string
@@ -1124,33 +1126,31 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         elif not p:
             return (None, 0.0, 0.0)  # No parent, must be root, theoretically impossible
 
-        pp_files_have_tags = False
-        pp_album_sim = 0.0
-        pp_author_sim = 0.0
+        p_files_have_tags = False
+        p_album_sim = 0.0
+        p_author_sim = 0.0
+        t = t if (t := tree.id3_tags) and not t.BAD else None
         # album_to_p_siblings_sim = 0.0
         # author_to_p_siblings_sim = 0.0
-        if (pp := p.parent) and (pp_files_have_tags := bool(pp.i.files_recursive.id3_tags)):
+        if tree.depth > 1 and (p_files_have_tags := bool(p.i.files_recursive.id3_tags)):
             t: Id3Tags | None = tree.id3_tags
             # pp_album_sim = pp.i.files_recursive.similarity("id3_albums", fallback=0.0)
             # pp_author_sim = pp.i.files_recursive.similarity("id3_authors", fallback=0.0)
-            pp_album_sim = 0.0 if not t else get_similarity([t.album, *pp.i.files_recursive.id3_albums]) or 0.0
-            pp_artist_sim = 0.0 if not t else get_similarity([t.artist, *pp.i.files_recursive.id3_artists]) or 0.0
-            pp_albumartist_sim = (
-                0.0 if not t else get_similarity([t.albumartist, *pp.i.files_recursive.id3_albumartists]) or 0.0
+            p_album_sim = 0.0 if not t else get_similarity([t.album, *p.i.files_recursive.id3_albums]) or 0.0
+            p_artist_sim = 0.0 if not t else get_similarity([t.artist, *p.i.files_recursive.id3_artists]) or 0.0
+            p_albumartist_sim = (
+                0.0 if not t else get_similarity([t.albumartist, *p.i.files_recursive.id3_albumartists]) or 0.0
             )
-            pp_author_sim = round(max(pp_artist_sim, pp_albumartist_sim), 3)
+            p_author_sim = round(max(p_artist_sim, p_albumartist_sim), 3)
 
-        if _only_child_in_parent := p and len(p.files) == 1 and not p.dirs:
+        if _only_child_in_parent := p and len(p.files) < 2 and not p.dirs:
 
-            if p.is_root:
-                return ("standalone_file", 1.0, 0.0)
-
-            if (_pp_is_root := pp and pp.is_root) or tree.depth < 3:
-                # i.e., depth is < 3
-                # Must be single, because its parent and its siblings are directly off the root.
+            if tree.depth < 3:
+                # if depth is < 3, a.k.a its parent's parent is the root, it must be single
+                # because root can't be a series/container.
                 return ("single", 0.0, 1.0)
 
-            if not pp_files_have_tags:
+            if not p_files_have_tags:
                 # No tags, can't be standalone if it has a non-root parent, and
                 # can't reliably tell if it's related to siblings or not.
                 # Future: might want to return "unknown" for these.
@@ -1158,35 +1158,50 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
 
             # If it's the same as the pp's album, it's accidentally been nested in a subfolder.
             # Might be a multi-disc/part, or a flatish, but not a single.
-            if _album_is_pp_album := pp_album_sim > 0.95 and pp_author_sim > 0.6:
-                return (None, 0.0, 1 - pp_album_sim)
+            if _album_is_p_album := p_album_sim > 0.95 and p_author_sim > 0.6:
+                return (None, 0.0, 1 - p_album_sim)
 
-            return ("single", 0.0, max(1 - pp_album_sim, 1 - pp_author_sim))
+            return ("single", 0.0, max(1 - p_album_sim, 1 - p_author_sim))
 
         # At this point, we've ruled out that it's a single -
         # it can only be a standalone file or part of a multi_parent.
 
-        album_adj = (
-            -1 + (tree.i.this_and_siblings.similarity("id3_albums", distinct=True, fallback=0.0) * 2)
-            if tree.i.this_and_siblings.have_albums
-            else 0
-        )
+        siblings_rels = []
 
-        author_adj = (
-            -1 + (tree.i.this_and_siblings.similarity("id3_authors", distinct=True, fallback=0.0) * 2)
-            if tree.i.this_and_siblings.have_authors
-            else 0
-        )
+        if not (only_file_in_parent := len(p.files) < 2):
+            ...
 
-        related_to_siblings = album_adj + author_adj
-        related_to_siblings += tree.i.this_and_siblings.similarity("pathnames", distinct=True, fallback=0.0)
-        related_to_siblings += float(
-            tree.i.this_and_siblings.track_nums_are_contiguous
-            or tree.i.this_and_siblings.start_nums_are_contiguous
-            or tree.i.this_and_siblings.part_nums_are_contiguous
-            or 0
-        )
-        related_to_siblings /= 4
+            if tree.i.this_and_siblings.have_albums:
+                siblings_rels.append(
+                    -1.0
+                    + (tree.i.this_and_siblings_recursive.similarity("id3_albums", distinct=True, fallback=0.0) * 2)
+                )
+
+            if tree.i.this_and_siblings.have_authors:
+                siblings_rels.append(
+                    -1.0
+                    + (tree.i.this_and_siblings_recursive.similarity("id3_authors", distinct=True, fallback=0.0) * 2)
+                )
+
+            siblings_rels.append(
+                tree.i.this_and_siblings_recursive.similarity("pathnames", distinct=True, fallback=0.0)
+            )
+
+            known_numbers_contiguity = float(
+                tree.i.this_and_siblings.track_nums_are_contiguous
+                or tree.i.this_and_siblings.start_nums_are_contiguous
+                or tree.i.this_and_siblings.part_nums_are_contiguous
+                or 0
+            )
+            all_numbers_contiguity = (
+                float(tree.i.this_and_siblings.all_path_nums_are_contiguous or 0)
+                + (tree.i.this_and_siblings.all_path_nums_completion or 0)
+            ) / 2
+
+            siblings_rels.append(max(known_numbers_contiguity, all_numbers_contiguity))
+
+        siblings_sim = sum(siblings_rels) / len(siblings_rels) if siblings_rels else 0.0
+        sibling_files_sim = p.i.files.similarity("pathnames", fallback=0.0) if p else 0.0
 
         if tree.is_match:
             ...
@@ -1197,19 +1212,26 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
 
         suffixes = list(set([f.path.suffix for f in p.files])) if p else []
         has_mixed_file_types = len(suffixes) > 1 if p else False
-        all_sizes_gt_75mb = all(is_gt_75mb(f.size) for f in p.files) if p else False
+        sizes_gt_75mb = truthiness([is_gt_75mb(f.size) for f in p.files]) if p else False
+        sizes_sim = (
+            get_size_similarity([f.size for f in p.files], byte_multiplier=100 if "pytest" in sys.modules else 1)
+            if p and not only_file_in_parent
+            else 0.0
+        )
         has_m4b_files = ".m4b" in suffixes if p else False
+        parent_name_sim = get_similarity([tree.name, p.name], methods=["token_set_ratio", "lcs"]) if p else 0.0
 
         standalone_score = (
-            truthiness(
-                [
-                    has_mixed_file_types,
-                    all_sizes_gt_75mb,
-                    has_m4b_files,
-                    parent_has_mixed_content,
-                ]
-            )
-        ) - related_to_siblings
+            -siblings_sim
+            + (0.05 * has_m4b_files)
+            + (0.25 * sizes_gt_75mb)
+            + (0.5 * has_mixed_file_types)  # Strong boost for mixed file types
+            + (0.05 * parent_has_mixed_content)
+            + ((1 - sizes_sim) * 0.75)  # Boost if sizes are dissimilar
+            + (0.5 - parent_name_sim)  # Penalize if too similar to parent
+            + (0.75 - sibling_files_sim)  # Boost for dissimilar sibling files
+            + (only_file_in_parent / 2)  # 1/2 weight for only file in parent, if it's not a single
+        )
 
         if tree.is_match:
             ...

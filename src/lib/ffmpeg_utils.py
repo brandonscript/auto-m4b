@@ -2,11 +2,6 @@ from pathlib import Path
 from typing import Any, Literal, overload
 
 import cachetools.func
-
-from src.lib.misc import fix_ffprobe
-
-fix_ffprobe()
-
 import ffmpeg
 from ffmpeg import probe as ffprobe
 
