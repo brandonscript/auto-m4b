@@ -83,8 +83,8 @@ def to_bool(v: Any) -> bool:
     return v not in [None, False, ""] or str(v).lower() not in ["false", "f", "no", "n"]
 
 
-def percent_truthy_in_list(l: list[bool], precision: int = 2) -> float:
-    """Returns the percentage of truthy values in a list of booleans, or truthy values if the list
+def truthiness(l: list[bool], precision: int = 2) -> float:
+    """Returns the percentage between 0-1 of truthy values in a list of booleans, or truthy values if the list
     contains non-boolean values. "", None, False, "false", "f", "no", "n" (case insensitive) are
     considered falsy values. All others are considered truthy. Rounds % to precision."""
 
@@ -93,7 +93,7 @@ def percent_truthy_in_list(l: list[bool], precision: int = 2) -> float:
 
     total = len(l)
     truthy = sum([to_bool(v) for v in l])
-    return round((truthy / total) * 100, precision)
+    return round((truthy / total), precision)
 
 
 L = TypeVar(
@@ -569,3 +569,20 @@ class _cached_property_max_age(property, Generic[T_co]):
             self.cache[instance] = self.fget(instance)
             self.time_cache[instance] = now
         return self.cache[instance]
+
+
+TEn = TypeVar("TEn")
+
+
+def ensure_list(v: TEn | list[TEn]) -> list[TEn]:
+    if (
+        isinstance(v, list)
+        or isinstance(v, tuple)
+        or isinstance(v, set)
+        or isinstance(v, Generator)
+        or isinstance(v, map)
+        or isinstance(v, Iterable)
+        or isinstance(v, Sequence)
+    ):
+        return list(v)
+    return [v]

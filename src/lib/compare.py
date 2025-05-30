@@ -4,49 +4,97 @@ from collections.abc import Callable, Iterable
 from functools import wraps
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Literal, overload, TypeVar
+from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 
+from rapidfuzz import fuzz, process
+from rapidfuzz.distance import LCSseq, Levenshtein
+
+from lib.misc import ensure_list, isorted
 from lib.term import print_error
-from lib.typing import SimilarityComparable, SimilarityComparisonMethod
+from lib.typing import SimilarityComparable, SimilarityComparisonMethod, SimilarityFuncMethod
+
+if TYPE_CHECKING:
+    from rapidfuzz.process import _Scorer
 
 
-@overload
-def calc_similarity(lst: list[str], flatten: Literal[True]) -> list[tuple[tuple[str, str], int | float, int]]: ...
+def sim_func(*methods: SimilarityFuncMethod | None):
+    if "extract" in methods:
+        return "extract"  # Signal special handling
+    base_funcs = []
+    for method in methods:
+        if method == "ratio":
+            base_funcs.append(lambda s1, s2, *args, **kwargs: fuzz.ratio(s1, s2, *args, **kwargs) / 100)
+        elif method == "token_set_ratio":
+            base_funcs.append(lambda s1, s2, *args, **kwargs: fuzz.token_set_ratio(s1, s2, *args, **kwargs) / 100)
+        elif method == "token_sort_ratio":
+            base_funcs.append(lambda s1, s2, *args, **kwargs: fuzz.token_sort_ratio(s1, s2, *args, **kwargs) / 100)
+        elif method == "lcs":
+            base_funcs.append(LCSseq.normalized_similarity)
+        elif method == "lev":
+            base_funcs.append(Levenshtein.normalized_similarity)
+        else:
+            raise ValueError(f"Unsupported method: {method}")
 
+    if not base_funcs:
+        return fuzz.ratio
 
-@overload
-def calc_similarity(lst: list[str], flatten: Literal[False]) -> dict[str, list[tuple[str, int | float, int]]]: ...
+    def calc(s1: Any, s2: Any, *args: Any, **kwargs: Any) -> float:
+        return sum(func(str(s1), str(s2), *args, **kwargs) for func in base_funcs) / len(base_funcs)
+
+    return calc
 
 
 def calc_similarity(
-    lst: list[str], flatten=True
-) -> dict[str, list[tuple[str, int | float, int]]] | list[tuple[tuple[str, str], int | float, int]]:
-    """
-    Calculates the similarity of a list of strings.
-    Returns (if flatten=True) a list of tuples of ((key, value), similarity score, index)
-    Returns (if flatten=False) a dictionary of unique strings and their similarity scores against all other strings in the list
-    """
-    from rapidfuzz import process
+    lst: list[str],
+    *,
+    precision: int = 3,
+    methods: list[SimilarityFuncMethod] = ["extract", "ratio", "lcs", "lev"],
+) -> list[tuple[tuple[str, str], int | float, int]]:
+    if not lst:
+        return []
 
-    scores = {
-        key: process.extract(key, [item for next_idx, item in enumerate(lst) if idx != next_idx])
-        for idx, key in enumerate(lst)
-    }
+    if len(lst) == 1:
+        default_score = 1.0
+        return [((lst[0], lst[0]), default_score, 0)]
 
-    if not flatten:
-        return scores
+    methods = ensure_list(methods)
 
-    # Create a set to track which comparisons we've already seen
-    seen_comparisons = set()
+    sim_fn = sim_func(*methods)
+
+    if sim_fn == "extract":
+        methods.remove("extract")
+        sim_fn = sim_func(*methods)
+        q = lst[0]
+        choices = lst[1:]
+        if not choices:
+            return []
+        matches = process.extract(q, choices, scorer=cast("_Scorer", sim_fn), limit=len(choices))
+        return [((q, m), round(score, precision), lst.index(m)) for m, score, _ in matches]
+
+    # Fallback to standard pairwise comparison logic
+    seen_pairs = set()
+    scores = {}
+
+    for idx, key in enumerate(lst):
+        key_scores = []
+        for jdx, other in enumerate(lst):
+            if idx == jdx:
+                continue
+            pair = tuple(sorted((key, other)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            score = round(sim_fn(key, other), precision)
+            key_scores.append((other, score, jdx))
+        scores[key] = key_scores
+
     flattened = []
-
+    added_pairs = set()
     for key, comparisons in scores.items():
         for comp_str, score, comp_idx in comparisons:
-            # Create a unique identifier for this comparison pair
-            # Sort the strings to ensure consistent ordering regardless of direction
             pair = tuple(sorted([key, comp_str]))
-            if pair not in seen_comparisons:
-                seen_comparisons.add(pair)
+            if pair not in added_pairs:
+                added_pairs.add(pair)
                 flattened.append(((key, comp_str), score, comp_idx))
 
     return flattened
@@ -62,6 +110,7 @@ def get_similarity(
     comparison: SimilarityComparisonMethod = None,
     *,
     distinct: bool = True,
+    methods: list[SimilarityFuncMethod] = ["extract", "ratio", "lcs", "lev"],
     fallback: float = 0.0,
 ) -> float: ...
 
@@ -73,6 +122,7 @@ def get_similarity(
     comparison: SimilarityComparisonMethod = None,
     *,
     distinct: bool = True,
+    methods: list[SimilarityFuncMethod] = ["extract", "ratio", "lcs", "lev"],
     fallback: F,
 ) -> float | F: ...
 
@@ -83,6 +133,7 @@ def get_similarity(
     comparison: SimilarityComparisonMethod = None,
     *,
     distinct: bool = True,
+    methods: list[SimilarityFuncMethod] = ["extract", "ratio", "lcs", "lev"],
     fallback: F | float = 0.0,
 ) -> float | F:
     """Uses the Levenshtein distance to calculate the similarity of a list of strings.
@@ -97,19 +148,11 @@ def get_similarity(
     if not values:
         return fallback
 
-    # if there are no values to compare to, return 1
-    if len(list(values)) < 2:
-        return 1.0
+    def calc_avg(lst: list[float]) -> float:
+        return round((sum(lst) / len(lst)), precision)
 
-    def avg(lst: list[float], div: int = 1) -> float:
-        if distinct:
-            lst = list(set(lst))
-        return round((sum(lst) / len(lst)) / div, precision)
-
-    def med(lst: list[float], div: int = 1) -> float:
-        if distinct:
-            lst = list(set(lst))
-        return round(statistics.median(lst) / div, precision)
+    def calc_med(lst: list[float]) -> float:
+        return round(statistics.median(lst), precision)
 
     # Extract just the base filenames (without extensions) for path or pathlike
     str_vals: list[str] = []
@@ -122,8 +165,17 @@ def get_similarity(
         else:
             str_vals.append(str(v))
 
+    if distinct:
+        str_vals = list(set(str_vals))
+
+    # if there are no values to compare to, return 1
+    if len(str_vals) < 2:
+        return 1.0
+
+    str_vals = isorted(str_vals)
+
     # Compare left and right strings
-    scores = calc_similarity(str_vals, flatten=True)
+    scores = calc_similarity(str_vals, methods=methods)
     flat_scores = [score for _, score, _ in scores]
 
     if not flat_scores:
@@ -131,19 +183,19 @@ def get_similarity(
 
     if lowest:
         # Return the lowest score
-        return round(min(flat_scores) / 100, precision)
+        return round(min(flat_scores), precision)
 
     elif highest:
         # Return the highest score
-        return round(max(flat_scores) / 100, precision)
+        return round(max(flat_scores), precision)
 
     # Find the median score
     elif median:
-        return med(flat_scores, 100)
+        return calc_med(flat_scores)
 
     # Average the scores
     else:
-        return avg(flat_scores, 100)
+        return calc_avg(flat_scores)
 
 
 def get_list_similarity(
@@ -265,6 +317,7 @@ def find_greatest_common_string(
 
 
 def calculate_gcs_percentage(strs: list[str] | list[Path], *, precision: int = 3, min_chars: int = 2) -> float:
+    """Calculate the percentage of the longest filename that is shared by all strings as a percentage between 0-1"""
     if not strs:
         return 0.0
 

@@ -30,7 +30,7 @@ class test_tree_node:
             assert x.unique_disc_nums == None
             assert x.unique_part_nums == None
             assert x.unique_series_nums == None
-            assert x.similarity("id3_disc_nums") == None
+            assert x.similarity("id3_disc_nums", include_curr=True) == None
 
         # Children
         assert i.children.__repr__() == "{d: —, p: —, s: —, ^: 1-38, ~: 0.872}"

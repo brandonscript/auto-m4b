@@ -627,21 +627,15 @@ def try_parse_num(s: str, fallback: Any = None) -> int | float | None:
 
 @cachetools.func.ttl_cache(maxsize=32, ttl=MEMO_TTL)
 def is_maybe_series_parent(s: str | Path) -> bool:
-    from src.lib.misc import is_gt_75mb, percent_truthy_in_list
+    from src.lib.misc import is_gt_75mb, truthiness
 
     if Path(s).is_file():
         return False
 
     series_book_children = 0.0
     if Path(s).is_dir():
-        series_book_children = (
-            percent_truthy_in_list(
-                [
-                    is_maybe_series_book(c.name) and (c.is_dir() or is_gt_75mb(c.stat().st_size))
-                    for c in Path(s).iterdir()
-                ]
-            )
-            / 100
+        series_book_children = truthiness(
+            [is_maybe_series_book(c.name) and (c.is_dir() or is_gt_75mb(c.stat().st_size)) for c in Path(s).iterdir()]
         )
     series_in_name = bool(series_parent_pattern.search(str(s)))
     return not is_maybe_multi_disc(s) and (series_book_children > 0.5 or series_in_name)

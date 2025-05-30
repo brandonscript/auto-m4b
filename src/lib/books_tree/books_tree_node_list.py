@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 
@@ -12,7 +13,7 @@ from lib.compare import (
     list_items_match_value,
     unique_items,
 )
-from lib.misc import percent_truthy_in_list
+from lib.misc import truthiness
 from lib.typing import SimilarityComparable, SimilarityComparisonMethod
 from src.lib.books_tree.books_tree_utils import (
     are_nums_contiguous,
@@ -165,12 +166,8 @@ class TreeNodeList:
         pivoted_apn = [x for x in pivoted_apn if len(set(x)) > 1]
         pivoted_apnr = [x for x in pivoted_apnr if len(set(x)) > 1]
 
-        apn_contiguous = (
-            percent_truthy_in_list([bool(are_nums_contiguous(x, sort=True, skips_ok=True)) for x in pivoted_apn]) / 100
-        )
-        apnr_contiguous = (
-            percent_truthy_in_list([bool(are_nums_contiguous(x, sort=True, skips_ok=True)) for x in pivoted_apnr]) / 100
-        )
+        apn_contiguous = truthiness([bool(are_nums_contiguous(x, sort=True, skips_ok=True)) for x in pivoted_apn])
+        apnr_contiguous = truthiness([bool(are_nums_contiguous(x, sort=True, skips_ok=True)) for x in pivoted_apnr])
 
         return max(apn_contiguous, apnr_contiguous) == 1.0
 
@@ -262,8 +259,8 @@ class TreeNodeList:
             )
             return max(a or fallback or 0.0, aa or fallback or 0.0)
 
-        values = getattr(self, prop)
-        if include_curr and (curr := getattr(self.node, prop, None)) and curr:
+        values = [*getattr(self, prop)]
+        if include_curr and (curr := getattr(self.node, re.sub(r"s?$", "", prop), None)) and curr:
             values.insert(0, curr)
         if len(values) < 2:
             return cast(F, fallback)
@@ -283,7 +280,6 @@ class TreeNodeList:
 
         if not self.have_disc_nums:
             return None
-        # return percent_truthy_in_list([x > -1 for x in self.disc_nums]) / 100
         return len(self.disc_nums) / len(self._trees)
 
     @lazy
@@ -380,7 +376,6 @@ class TreeNodeList:
         """Return the ratio of part numbers / total part numbers, from 0-1"""
         if not self.have_part_nums:
             return None
-        # return percent_truthy_in_list([x > -1 for x in self.part_nums]) / 100
         return len(self.part_nums) / len(self._trees)
 
     @lazy
@@ -409,7 +404,6 @@ class TreeNodeList:
         """Return the ratio of series numbers / total series numbers, from 0-1"""
         if not self.have_series_nums:
             return None
-        # return percent_truthy_in_list([x > -1 for x in self.series_nums]) / 100
         return len(self.series_nums) / len(self._trees)
 
     @lazy
@@ -441,7 +435,6 @@ class TreeNodeList:
         """Return the ratio of start numbers / total start numbers, from 0-1"""
         if not self.have_start_nums:
             return None
-        # return percent_truthy_in_list([x > -1 for x in self.start_nums]) / 100
         return len(self.start_nums) / len(self._trees)
 
     @lazy
@@ -479,7 +472,6 @@ class TreeNodeList:
         """Return the ratio of track numbers / total track numbers, from 0-1"""
         if not self.have_track_nums:
             return None
-        # return percent_truthy_in_list([x > -1 for x in self.id3_track_nums]) / 100
         return len(self.id3_track_nums) / len(self._trees)
 
     @lazy

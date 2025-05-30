@@ -141,6 +141,7 @@ OnComplete = Literal["archive", "delete", "test_do_nothing"]
 
 NumericIterable = TypeVar("NumericIterable", bound=Iterable[int | float] | list[int | float])
 SimilarityComparisonMethod = Literal["median", "avg", "min", "max"] | None
+SimilarityFuncMethod = Literal["ratio", "token_set_ratio", "token_sort_ratio", "extract", "lcs", "lev"]
 SimilarityComparable = Literal[
     "id3_albums",
     "id3_albumartists",
