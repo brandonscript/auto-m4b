@@ -103,7 +103,7 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
         err_str = str(cast(ffmpeg.Error, e).stderr) if isinstance(e, ffmpeg.Error) else str(e)
 
         # Some mock files are not readable by ffprobe, so we return None
-        if "pytest" in sys.modules and "mock_" in err_str and "Invalid data" in err_str:
+        if "pytest" in sys.modules and any([s in err_str for s in ["mock_", "fails_"]]) and "Invalid data" in err_str:
             return None
 
         if "No such file or directory: 'ffprobe'" in err_str and FFPROBE_REPAIRS <= 3:

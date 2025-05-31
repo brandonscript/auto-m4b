@@ -203,9 +203,10 @@ def get_size_similarity(
     sizes: list[int | float],
     *,
     precision: int = 3,
-    zero_point: float = 6.05,
-    curve_strength: float = 4,
-    byte_multiplier: int = 1,
+    zero_point: float = 7.7,
+    curve_strength: float = 8,
+    byte_multiplier: float = 1,
+    ignore_smaller_than: int | float = 0,
 ) -> float:
     """
     Computes a similarity score from 0 to 1 based on a logarithmic scale.
@@ -240,14 +241,14 @@ def get_size_similarity(
 
     curve_strength = max(3, curve_strength)
 
-    sizes = [size * byte_multiplier for size in sizes]
+    sizes = [size * byte_multiplier for size in sizes if size >= ignore_smaller_than]
 
     # Calculate the maximum absolute difference between any two sizes, ensuring it's at least 1
     max_diff = max(1, max(abs(a - b) for a, b in combinations(sizes, 2)))
 
     log_diff = log10(max_diff)
 
-    # / 6 then ** 5, then cap to 0.999 (1 is identical)
+    # Clamp to 0.999 (1 is identical)
     score = min(0.999, max(0.0, 1.0 - (log_diff / zero_point) ** curve_strength))
 
     return round(score, precision)

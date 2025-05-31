@@ -44,6 +44,14 @@ class xt:
         def structure_is_not(t: BooksTree, expected: BookStructureTuple):
             return f"Expected '{rel_to_inbox(t.path)}' to not be {xt.msg._s(expected)}, got {t.structure}"
 
+        @staticmethod
+        def structure_like(t: BooksTree, expected: BookStructureTuple):
+            return f"Expected '{rel_to_inbox(t.path)}' to have structure like {xt.msg._s(expected)}, got {t.structure}"
+
+        @staticmethod
+        def structure_some_of(t: BooksTree, expected: BookStructureTuple):
+            return f"Expected '{rel_to_inbox(t.path)}' to have some of structure(s) {xt.msg._s(expected)}, got {t.structure}"
+
     @staticmethod
     def is_root(t: BooksTree):
         assert t.is_root and t.has_only_structure(
@@ -409,8 +417,6 @@ class test_tree_structures:
         basic_no_cover__standalone_mp3: Audiobook,
         basic_no_cover__standalone_m4b: Audiobook,
     ):
-        # tree = inbox_books_tree(match_filter=".*")
-        # tree = inbox_books_tree(match_filter="^(basic_no_cover__standalone|mock_book_container.*(?<!0[12]\\.mp3)$)")
         tree = inbox_books_tree(match_filter="^(basic_no_cover__standalone|mock_book_container)")
         standalones = [f for f in tree.files_recursive_f if not re.search(r"0[12]\.mp3$", f.path.name)]
         assert len(standalones) == 5
@@ -455,7 +461,7 @@ class test_tree_structures:
         first_file = book.files_recursive_f[0]
         first_dir = book.dirs_recursive_f[0]
         for f in book.files_recursive_f:
-            assert f.has_structure_like("flat"), xt.msg.structure_is(f, ("flat"))
+            assert f.has_structure_like("flat"), xt.msg.structure_some_of(f, ("flat", "flatish"))
             xt.is_not_book_root(f)
         assert first_file.has_structure("flatish"), xt.msg.structure_is(first_file, ("flatish"))
         assert first_dir.has_structure("flatish"), xt.msg.structure_is(first_dir, ("flatish"))
@@ -464,15 +470,15 @@ class test_tree_structures:
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder", scan_id3=False)
         book = tree.get(cast(str, authors_guide_to_murder__flat_mp3.key))
         assert book
-        assert book.has_only_structure("container"), xt.msg.structure_is(book, ("container"))
-        xt.is_not_book_root(book)
+        assert book.has_only_structure("flat"), xt.msg.structure_is(book, ("flat"))
+        xt.is_book_root(book)
 
         assert len(book.children_recursive_f) == 39, f"Expected 39 children, got {len(book.children_recursive_f)}"
         assert len(book.files_recursive_f) == 38, f"Expected 38 files, got {len(book.files_recursive_f)}"
         assert len(book.dirs_recursive_f) == 1, f"Expected 1 dir, got {len(book.dirs_recursive_f)}"
 
         for c in book.children_recursive_f:
-            assert c.has_structure_like("unknown"), xt.msg.structure_is(c, ("unknown"))
+            assert c.has_structure_like("flat"), xt.msg.structure_is(c, ("flat"))
             xt.is_not_book_root(c)
 
     def test_container_dir(self):
@@ -521,38 +527,38 @@ class test_tree_structures:
             assert c.has_only_structures("flat", "nested"), xt.msg.structure_is(c, ("flat", "nested"))
             xt.is_not_book_root(c)
 
-    def test_mixed(self):
+    def test_mixed_unknown(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.mixed_dir])
         multi_book_mixed = tree.dirs[MOCKED.mixed_dir.name]
-        assert multi_book_mixed.has_only_structure("mixed"), xt.msg.structure_is(multi_book_mixed, "mixed")
+        assert multi_book_mixed.has_only_structure("unknown"), xt.msg.structure_is(multi_book_mixed, "unknown")
         xt.is_book_root(multi_book_mixed)
 
         for sb in multi_book_mixed.children[:5]:
-            assert sb.has_only_structures("mixed"), xt.msg.structure_is(sb, ("mixed"))
+            assert sb.has_only_structures("unknown"), xt.msg.structure_is(sb, "unknown")
             xt.is_not_book_root(sb)
 
-        assert (nb := multi_book_mixed.children[5]) and nb.has_only_structures("mixed"), xt.msg.structure_is(
-            nb, ("mixed")
+        assert (nb := multi_book_mixed.children[5]) and nb.has_only_structures("unknown"), xt.msg.structure_is(
+            nb, "unknown"
         )
 
-    def test_mixed_chums(self, missing_chums__mixed_mp3: Audiobook):
+    def test_flatish_chums(self, missing_chums__mixed_mp3: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[missing_chums__mixed_mp3.path])
-        mixed_chums = tree.dirs[missing_chums__mixed_mp3.path.name]
-        assert mixed_chums.has_only_structure("mixed"), xt.msg.structure_is(mixed_chums, "mixed")
-        xt.is_book_root(mixed_chums)
+        flatish_chums = tree.dirs[missing_chums__mixed_mp3.path.name]
+        assert flatish_chums.has_only_structure("flat"), xt.msg.structure_is(flatish_chums, "flat")
+        xt.is_book_root(flatish_chums)
 
-        for c in mixed_chums.children_recursive_f[:1]:
-            assert c.has_only_structure("mixed"), xt.msg.structure_is(c, "mixed")
+        for c in flatish_chums.children_recursive_f[:1]:
+            assert c.has_structure_like("flat"), xt.msg.structure_some_of(c, ("flat", "flatish"))
             xt.is_not_book_root(c)
 
-    def test_mixed_fails(self, fails__mixed_mp3: Audiobook):
+    def test_mixed_unknown_fails(self, fails__mixed_mp3: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[fails__mixed_mp3.path])
         mixed_fails = tree.dirs[fails__mixed_mp3.path.name]
-        assert mixed_fails.has_only_structure("mixed"), xt.msg.structure_is(mixed_fails, "mixed")
+        assert mixed_fails.has_only_structure("unknown"), xt.msg.structure_is(mixed_fails, "unknown")
         xt.is_book_root(mixed_fails)
 
         for c in mixed_fails.children_recursive_f[:1]:
-            assert c.has_only_structure("mixed"), xt.msg.structure_is(c, "mixed")
+            assert c.has_only_structure("unknown"), xt.msg.structure_is(c, "unknown")
             xt.is_not_book_root(c)
 
     def test_multi_disc(self):
@@ -674,16 +680,16 @@ class test_tree_structures:
             (c.is_book_root for c in flatlist([d.children_recursive_f for d in series_parent.dirs.values()]))
         ), f"Expected no children to be book roots"
 
-    def test_multi_nested(self):
+    def test_multi_nested_unknown(self):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=[MOCKED.multi_nested_dir])
         multi_nested = tree.dirs[MOCKED.multi_nested_dir.name]
         xt.is_book_root(multi_nested)
-        assert multi_nested.has_only_structure("mixed"), xt.msg.structure_is(multi_nested, "mixed")
+        assert multi_nested.has_only_structure("unknown"), xt.msg.structure_is(multi_nested, "unknown")
         for d in multi_nested.children_recursive_f:
-            assert d.has_only_structures("mixed"), xt.msg.structure_is(d, ("mixed"))
+            assert d.has_only_structures("unknown"), xt.msg.structure_is(d, ("unknown"))
             xt.is_not_book_root(d)
 
-    def test_multi_nested_series(self, secret_project_series__nested_flat_mixed: Audiobook):
+    def test_series_with_singles(self, secret_project_series__nested_flat_mixed: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox)
         container = tree.dirs[secret_project_series__nested_flat_mixed.basename]
         xt.is_not_book_root(container)

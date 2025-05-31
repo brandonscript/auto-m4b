@@ -9,7 +9,7 @@ from src.lib.books_tree.books_tree_utils import (
 )
 from src.lib.id3_tags import Id3Tags
 from src.lib.parsers import get_disc_num, get_series_num
-from src.lib.term import print_warning
+from src.lib.term import print_debug
 
 if TYPE_CHECKING:
     from src.lib.books_tree.books_tree import BooksTree
@@ -37,13 +37,13 @@ class TreeNode:
         from src.lib.config import cfg
         from src.lib.parsers import get_start_num
 
-        # Check if it matches INBOX_DIR and if so, abort
-        if tree.path == cfg.inbox_dir:
-            print_warning(f"TreeNode: {tree} is the INBOX_DIR, this should not happen")
-            return
-
         self._tree = tree
         self._curr = curr
+        # Check if it matches INBOX_DIR and if so, abort
+        if tree.path == cfg.inbox_dir:
+            print_debug(f"[TreeNode]: {tree} is the inbox dir")
+            return
+
         self.id3_tags = tree.id3_tags
         if self.id3_tags:
             self.id3_album = self.id3_tags.album

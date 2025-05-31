@@ -67,6 +67,50 @@ class romans:
         to_path = lambda x: Path(x) if isinstance(l[0], Path) else x
         return cast(list[S], [to_path(cls.strip(str(s))) for s in l])
 
+    @classmethod
+    def to_int(cls, s: str | int) -> int:
+        """Converts a roman numeral string to an integer. If s is an integer, returns it as-is.
+        If no roman numeral is found, returns -1."""
+        if isinstance(s, int):
+            return s
+        s = str(s).strip()
+        if _is_numeric := re.match(r"^\d+$", s):
+            return int(s)
+        codex = {
+            "I": 1,
+            "V": 5,
+            "X": 10,
+            "L": 50,
+            "C": 100,
+            "D": 500,
+            "M": 1000,
+            "IV": 4,
+            "IX": 9,
+            "XL": 40,
+            "XC": 90,
+            "CD": 400,
+            "CM": 900,
+        }
+        roman = m[0] if (m := romans.find_all(s)) else None
+
+        if not roman:
+            return -1
+
+        if len(m) > 1:
+            print_debug(f"[romans.to_int]: found multiple roman numerals in {s}: {m}")
+
+        roman = roman.upper()
+        i = 0
+        num = 0
+        while i < len(roman):
+            if i + 1 < len(roman) and roman[i : i + 2] in codex:
+                num += codex[roman[i : i + 2]]
+                i += 2
+            else:
+                num += codex[roman[i]]
+                i += 1
+        return num
+
 
 def to_words(s: str, *, sep=r"[\s_.]") -> list[str]:
     return [w.strip() for w in re.split(sep, s) if w.strip()]

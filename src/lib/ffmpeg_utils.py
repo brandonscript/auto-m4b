@@ -9,7 +9,7 @@ from src.lib.books_tree import BooksTree
 from src.lib.config import AUDIO_EXTS
 from src.lib.formatters import format_duration, get_nearest_standard_bitrate
 from src.lib.fs_utils import only_audio_files
-from src.lib.term import print_error
+from src.lib.term import print_error, print_warning
 from src.lib.typing import DurationFmt, MEMO_TTL
 
 
@@ -169,3 +169,145 @@ def build_id3_tags_args(
     id3tags.update({"encoded-by": "PHNTM", "genre": "Audiobook"})
 
     return [(f"--{k}", v) for k, v in id3tags.items()]
+
+
+def shrink_mp3_to_size(file: Path, target_size: int) -> Path:
+    """Shrink an MP3 file to a target size via ffmpeg using whatever means necessary, including trimming and/or reducing bitrate.
+
+    Args:
+        file (Path): Path to the MP3 file
+        target_size (int): Target size in bytes
+
+    Returns:
+        Path: Path to the shrunk file (original file if already small enough)
+    """
+    if not file.exists():
+        raise ValueError(f"[shrink_mp3_to_size]: file {file} does not exist")
+
+    if file.suffix not in AUDIO_EXTS:
+        return file
+
+    current_size = file.stat().st_size
+
+    # if the file is already smaller than the target size, do nothing
+    if current_size < target_size:
+        return file
+
+    # get the duration of the file
+    duration = max(1, get_duration(file, fmt="seconds"))
+
+    # get the bitrate of the file, in bps
+    bitrate, _ = get_bitrate_py(file)
+    _stream_size = bitrate * duration / 8
+
+    # get the samplerate of the file, in Hz
+    samplerate = get_samplerate_py(file)
+
+    # Create a temporary file for processing
+    tmp_file = file.with_suffix(".tmp.mp3")
+
+    try:
+
+        in_stream = ffmpeg.input(str(file))
+
+        # Check if there's a cover art stream and get its dimensions
+        probe = ffprobe(str(file))
+        cover_stream = next((s for s in probe["streams"] if s.get("codec_type") == "video"), None)
+
+        cover_adj = {
+            "vcodec": "copy",
+        }
+        if (_has_cover_stream := bool(cover_stream)) and cover_stream.get("width", 0) > 100:
+            # If cover art is larger than 100px, resize it
+            cover_adj = {
+                "vcodec": "mjpeg",
+                "vf": "scale=100:100:force_original_aspect_ratio=decrease",
+                "qscale": 2,
+            }
+
+        # First attempt: Try reducing bitrate
+        # Convert target size to bits and divide by duration
+        target_bitrate = int((target_size * 8) / duration)
+        # Keep bitrate between 24kbps and original bitrate
+        target_bitrate = min(bitrate, max(target_bitrate, 24 * 1000))
+
+        # Predict new file size in bytes with new bitrate
+        predicted_size = int((target_bitrate / 8) * duration)
+
+        # if the new size is still too large, we need to trim the file
+        trim_seconds = 0
+        while predicted_size > target_size:
+            trim_seconds += 1
+            predicted_size = int((target_bitrate / 8) * (duration - trim_seconds))
+
+        check_size = current_size
+        i = 0
+        params = [
+            {
+                "t": max(1, duration - trim_seconds),
+                "audio_bitrate": f"{target_bitrate/1000}k",
+                "ar": samplerate,
+                "compression_level": 7,
+            },
+            {
+                "t": max(1, duration - trim_seconds),
+                "audio_bitrate": f"{target_bitrate/1000}k",
+                "ar": 22050,
+                "compression_level": 8,
+            },
+            {
+                "t": max(1, duration - trim_seconds),
+                "audio_bitrate": "16k",
+                "ar": 22050,
+                "compression_level": 9,
+            },
+            {
+                "t": max(1, duration - trim_seconds),
+                "audio_bitrate": "16k",
+                "ar": 22050,
+                "compression_level": 9,
+            },
+        ]
+        base_offset = len(params) - 2
+
+        while check_size > target_size and i < len(params):
+
+            out_stream = ffmpeg.output(
+                in_stream,
+                str(tmp_file),
+                acodec="libmp3lame",
+                map_metadata="0",  # Copy all metadata including cover art
+                map_chapters="0",  # Copy chapters
+                **params[i],
+                **cover_adj,
+            )
+
+            ffmpeg.run(out_stream, overwrite_output=True, capture_stdout=True, capture_stderr=True)
+            check_size = tmp_file.stat().st_size
+
+            if i == len(params) - 1:
+                offset = i - base_offset
+                params.append({**params[i], "t": max(1, duration - trim_seconds - offset)})
+
+            if i > 2:
+                print_warning(f"Shrinking {file}: on third attempt, consider using a more aggressive approach")
+
+            i += 1
+
+        # Final size check
+        if (size := tmp_file.stat().st_size) > target_size:
+            print_warning(f"Shrinking {file}: could not achieve target size of {target_size} b, got {size} b")
+
+        tmp_file.replace(file)
+        return file
+
+    except ffmpeg.Error as e:
+        from src.lib.logger import write_err_file
+
+        write_err_file(file, e, "ffmpeg", e.stderr.decode())
+        print_error(f"Error shrinking {file}")
+        return file
+    finally:
+        # Clean up temporary file if it exists
+        if tmp_file.exists():
+            tmp_file.unlink()

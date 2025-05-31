@@ -23,7 +23,7 @@ from src.lib.parsers import (
     parse_year,
     to_words,
 )
-from src.lib.patterns import common_str_pattern, startswith_num_pattern
+from src.lib.patterns import basic_part_or_ch_pattern, common_str_pattern, startswith_num_pattern
 from src.lib.term import print_debug
 
 if TYPE_CHECKING:
@@ -1020,6 +1020,10 @@ def score_flat(tree: "BooksTree") -> float:
         if not tree.parent or tree.is_root:
             return 0.0
 
+        if not tree.files:
+            # Can't be flat if it has no files
+            return 0.0
+
         _is_multi, multi_disc_score, multi_part_score = score_multi_part_or_disc(tree)
         files_have_tags = bool(tree.i.files_recursive.id3_tags)
 
@@ -1045,7 +1049,7 @@ def score_flat(tree: "BooksTree") -> float:
         if tree.dirs and (multi_disc_score > 0.5 or multi_part_score > 0.5):
             return 0.0
 
-        path_sim = tree.i.children_recursive.similarity("pathnames", fallback=0.0)
+        path_sim = tree.i.children_recursive.similarity("pathnames", include_curr=False, fallback=0.0)
         album_sim = tree.i.children_recursive.similarity("id3_albums", fallback=path_sim)
         author_sim = tree.i.children_recursive.similarity("id3_artists", fallback=path_sim)
 
@@ -1132,14 +1136,14 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         t = t if (t := tree.id3_tags) and not t.BAD else None
         # album_to_p_siblings_sim = 0.0
         # author_to_p_siblings_sim = 0.0
-        if tree.depth > 1 and (p_files_have_tags := bool(p.i.files_recursive.id3_tags)):
+        if tree.depth > 1 and (p_files_have_tags := bool(tree.i.siblings_recursive.id3_tags)):
             t: Id3Tags | None = tree.id3_tags
             # pp_album_sim = pp.i.files_recursive.similarity("id3_albums", fallback=0.0)
             # pp_author_sim = pp.i.files_recursive.similarity("id3_authors", fallback=0.0)
-            p_album_sim = 0.0 if not t else get_similarity([t.album, *p.i.files_recursive.id3_albums]) or 0.0
-            p_artist_sim = 0.0 if not t else get_similarity([t.artist, *p.i.files_recursive.id3_artists]) or 0.0
+            p_album_sim = 0.0 if not t else get_similarity([t.album, *tree.i.siblings_recursive.id3_albums]) or 0.0
+            p_artist_sim = 0.0 if not t else get_similarity([t.artist, *tree.i.siblings_recursive.id3_artists]) or 0.0
             p_albumartist_sim = (
-                0.0 if not t else get_similarity([t.albumartist, *p.i.files_recursive.id3_albumartists]) or 0.0
+                0.0 if not t else get_similarity([t.albumartist, *tree.i.siblings_recursive.id3_albumartists]) or 0.0
             )
             p_author_sim = round(max(p_artist_sim, p_albumartist_sim), 3)
 
@@ -1202,6 +1206,7 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
 
         siblings_sim = sum(siblings_rels) / len(siblings_rels) if siblings_rels else 0.0
         sibling_files_sim = p.i.files.similarity("pathnames", fallback=0.0) if p else 0.0
+        siblings_with_part_or_chapter = truthiness([bool(basic_part_or_ch_pattern.search(t.name)) for t in p.files])
 
         if tree.is_match:
             ...
@@ -1214,7 +1219,11 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         has_mixed_file_types = len(suffixes) > 1 if p else False
         sizes_gt_75mb = truthiness([is_gt_75mb(f.size) for f in p.files]) if p else False
         sizes_sim = (
-            get_size_similarity([f.size for f in p.files], byte_multiplier=100 if "pytest" in sys.modules else 1)
+            get_size_similarity(
+                [f.size for f in p.files],
+                byte_multiplier=100 if "pytest" in sys.modules else 1,
+                ignore_smaller_than=10 * 1000 if "pytest" in sys.modules else 10 * 1000 * 1000,
+            )
             if p and not only_file_in_parent
             else 0.0
         )
@@ -1230,6 +1239,7 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
             + ((1 - sizes_sim) * 0.75)  # Boost if sizes are dissimilar
             + (0.5 - parent_name_sim)  # Penalize if too similar to parent
             + (0.75 - sibling_files_sim)  # Boost for dissimilar sibling files
+            - (0.75 * siblings_with_part_or_chapter)  # Penalize if siblings have part or chapter in the name
             + (only_file_in_parent / 2)  # 1/2 weight for only file in parent, if it's not a single
         )
 
@@ -1354,14 +1364,14 @@ def score_series_parent(tree: "BooksTree") -> float:
             return 0.5 - score_flat(tree)
 
         files_have_tags = bool(tree.i.files_recursive.id3_tags)
-        author_sim = tree.i.files_recursive.similarity("id3_authors", fallback=0.0)
-        album_sim = tree.i.files_recursive.similarity("id3_albums", fallback=0.0)
-        author_sim_distinct = tree.i.files_recursive.similarity("id3_authors", distinct=True, fallback=0.0)
-        album_sim_distinct = tree.i.files_recursive.similarity("id3_albums", distinct=True, fallback=0.0)
 
         base_score = 0.0
 
         if files_have_tags:
+            author_sim = tree.i.files_recursive.similarity("id3_authors", fallback=0.0)
+            album_sim = tree.i.files_recursive.similarity("id3_albums", fallback=0.0)
+            author_sim_distinct = tree.i.files_recursive.similarity("id3_authors", distinct=True, fallback=0.0)
+            album_sim_distinct = tree.i.files_recursive.similarity("id3_albums", distinct=True, fallback=0.0)
 
             # If the author is dissimilar, it's probably not related at all (not a series parent)
             author_sim_diff = abs(author_sim - author_sim_distinct)
@@ -1451,6 +1461,9 @@ def score_series_parent(tree: "BooksTree") -> float:
         if tree.i.this.has_series_num or tree.i.this.has_start_num or tree.i.this.has_disc_num:
             # Penalize if the parent candidate has numbers, not very likely to be a series parent
             series_parent_score -= 0.4
+
+        if series_parent_score > 1:
+            ...
 
         return round(series_parent_score, 3)
     except Exception as e:
@@ -1561,7 +1574,9 @@ def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "
         part_nums_cmpl = p.i.children.part_nums_completion
         part_nums_cntg = p.i.children.part_nums_are_contiguous
         part_nums_uniq = p.i.children.part_nums_uniqueness
-        part_nums_score = 1.0 if has_part_nums and not disc_nums_score else -1.0
+        part_nums_score = 1.0 if has_part_nums else -1.0
+        if disc_nums_score > 0:
+            part_nums_score -= disc_nums_score
         part_nums_penalty = 0.0
         if has_part_nums:
             part_nums_penalty += -1.0 + (part_nums_cmpl or 0.0)
@@ -1588,6 +1603,9 @@ def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "
 
         disc_nums_score += tags_offset
         part_nums_score += tags_offset
+
+        disc_nums_score = round(disc_nums_score, 3)
+        part_nums_score = round(part_nums_score, 3)
 
         if disc_nums_score > 0 and disc_nums_score > part_nums_score:
             return ("multi_disc", disc_nums_score, part_nums_score)

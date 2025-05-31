@@ -11,6 +11,7 @@ import ffmpeg
 from mutagen.mp3 import HeaderNotFoundError
 from tinta import Tinta
 
+from lib.ffprobe_utils import ffprobe_file
 from src.lib.books_tree import BooksTree
 from src.lib.cleaners import strip_leading_articles
 from src.lib.fs_utils import find_first_audio_file

@@ -13,6 +13,7 @@ def _name_substr(ignore_if_trailing: str = '', max_l_of_comma: int = 4, max_r_of
     # (?:[Ww]ritten.?[Bb]y|[Pp]erformed.?[Bb]y|[Rr]ead.?[Bb]y)\W+(?P<name>(?:(?:(?<= )(?: ?[A-Z][a-z\.-]*){1,4})),? ?(?:(?: ?[A-Z][a-z\.-]*){1,4}(?!Performed by)))
     return rf"(?:(?:(?:^|(?<= ))(?: ?{_titlecase_word}){{1,{max_l_of_comma}}})),? ?(?:(?: ?{_titlecase_word}){{1,{max_r_of_comma}}}{ignore_if_trailing})"
 _div = r"[-_–—.\s]*?"
+_roman_numeral = r"(?:^|(?<=[\W_]))[IVXLCDM]+(?:$|(?=[\W_]))"
 wordsplit_pat = re.compile(r"[\s_.]")
 
 author_fs_pattern = re.compile(r"^(?P<author>.*?)[\W\s]*[-_–—\(]", re.I)
@@ -28,12 +29,13 @@ firstname_lastname_pattern = re.compile(r"^(?P<firstname>.*?).*\s(?P<lastname>\S
 
 book_title_pattern = re.compile(r"(?<=[-_–—])[\W\s]*(?P<book_title>[\w\s]+?)\s*(?=\d{4}|\(|\[|$)", re.I)
 # partno_or_ch_match_pattern = re.compile(rf",?{_div}(?:part|ch(?:\.|apter))?{_div}\W*(?P<num1>\d+)(?:$|{_div}(?:of|-){_div}(?P<num2>\d+)\W*$)", re.I)
-partno_or_ch_match_pattern2 = re.compile(rf"(?:(?:(?:(?<=\W)|^)p|P)[Aa]?[Rr]?[Tt]|C[Hh]?(?:[\. ]|[Aa][Pp][Tt][Ee][Rr])|[^A-Za-z0-9\n]+?)\W*(?P<num1>\d+)(?:.?(?:of|-|to).?(?P<num2>\d+))?[^\n]*$")
-part_or_ch_match_words = re.compile(rf"(?:(?<=\W)|^){_div}(?:pa?r?t|ch(?:\.|apter)){_div}\d+.*$", re.I)
+roman_numeral_pattern = re.compile(rf"({_roman_numeral})", re.I)
+basic_part_or_ch_pattern = re.compile(r"(?:(?<=\W)|^)part|chapter|ch\.|pt\.", re.I)
+partno_or_ch_match_pattern2 = re.compile(rf"(?:(?:(?:(?<=\W)|^)p|P)[Aa]?[Rr]?[Tt]|C[Hh]?(?:[\. ]|[Aa][Pp][Tt][Ee][Rr])|[^A-Za-z0-9\n]+?)\W*(?P<num1>(?:\d|{_roman_numeral})+)(?:.?(?:of|-|to).?(?P<num2>(?:\d|{_roman_numeral})+))?[^\n]*$")
+part_or_ch_match_words = re.compile(rf"(?:(?<=\W)|^){_div}(?:pa?r?t|ch(?:\.|apter)){_div}(\d|{_roman_numeral})+.*$", re.I)
 path_junk_pattern = re.compile(r"^[ \,.\)\}\]_-]*|[ \,.\)\}\]_-]*$", re.I)
 path_garbage_pattern = re.compile(r"^[ \,.\)\}\]]*", re.I)
 path_strip_l_t_alphanum_pattern = re.compile(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$", re.I)
-roman_numeral_pattern = re.compile(r"((?:^|(?<=[\W_]))[IVXLCDM]+(?:$|(?=[\W_])))", re.I)
 roman_strip_pattern = re.compile(r"(?<=\w)(?=[\W_.-])|(?<=[\W_.-])(?=\w)|(?<=[a-z])(?=[A-Z])")
 
 year_pattern = re.compile(r"(?P<year>\d{4})", re.I)

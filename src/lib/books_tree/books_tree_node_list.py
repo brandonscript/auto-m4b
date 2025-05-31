@@ -36,7 +36,7 @@ F = TypeVar("F", bound=Any)
 
 class TreeNodeList:
 
-    def __init__(self, trees: list["BooksTree"], curr: "TreeNode | None" = None):
+    def __init__(self, trees: list["BooksTree"], curr: "TreeNode | None" = None, *, default_include_curr: bool = True):
 
         if not curr:
             ...
@@ -53,6 +53,7 @@ class TreeNodeList:
         self._disc_nums_similarity_cache = {}
         self._track_nums_similarity_cache = {}
         self._title_similarity_cache = {}
+        self._default_include_curr = default_include_curr
 
     def __repr__(self):
         di = self.disc_nums
@@ -232,13 +233,15 @@ class TreeNodeList:
         comparison: SimilarityComparisonMethod | None = None,
         *,
         distinct: bool = True,
-        include_curr: bool = True,
+        include_curr: bool | None = None,
         fallback: F | None = None,
     ) -> float | F:
         """Base method for calculating similarity between values of a property"""
 
         if prop is None:
             raise ValueError("TreeNodeList.similarity: prop cannot be None")
+
+        include_curr = include_curr if include_curr is not None else self._default_include_curr
 
         if prop == "id3_authors":
             a = self.similarity(

@@ -76,4 +76,48 @@ gb = 1000 * mb
     ],
 )
 def test_get_size_similarity(name, b, m, expected):
-    assert get_size_similarity(b, byte_multiplier=m) == expected
+    assert get_size_similarity(b, byte_multiplier=m, zero_point=6.05, curve_strength=4) == expected
+
+
+def test_get_size_similarity_real_world():
+    files = [
+        ("01 - Opening credits.mp3", 568918),
+        ("02 - Dedication.mp3", 156067),
+        ("03 - Prologue.mp3", 5277215),
+        ("04 - Part I.mp3", 103397),
+        ("05 - Chapter One - Cassie.mp3", 19411574),
+        ("06 - Chapter Two - Emma.mp3", 18417873),
+        ("07 - Chapter Three - Kat.mp3", 18387155),
+        ("08 - Chapter Four - Cassie.mp3", 17435779),
+        ("09 - Chapter Five - Emma.mp3", 20147912),
+        ("10 - Chapter Six - Kat.mp3", 20742873),
+        ("11 - Chapter Seven - Cassie.mp3", 22744072),
+        ("12 - Chapter Eight - Emma.mp3", 34265948),
+        ("13 - Chapter Nine - Kat.mp3", 17353017),
+        ("14 - Chapter Ten - Cassie.mp3", 24684443),
+        ("15 - Part II.mp3", 103399),
+        ("16 - Chapter Eleven - Emma.mp3", 12708034),
+        ("17 - Chapter Twelve - Kat.mp3", 19854193),
+        ("18 - Chapter Thirteen - Cassie.mp3", 18779944),
+        ("19 - Chapter Fourteen - Emma.mp3", 17559917),
+        ("20 - Chapter Fifteen - Kat.mp3", 16231743),
+        ("21 - Chapter Sixteen - Cassie.mp3", 11566697),
+        ("22 - Chapter Seventeen - Emma.mp3", 16893483),
+        ("23 - Chapter Eighteen - Kat.mp3", 11516537),
+        ("24 - Chapter Nineteen - Cassie.mp3", 13785436),
+        ("25 - Chapter Twenty - Emma.mp3", 13558790),
+        ("26 - Chapter Twenty-One - Kat.mp3", 13412405),
+        ("27 - Chapter Twenty-Two - Cassie.mp3", 12046938),
+        ("28 - Chapter Twenty-Three - Emma.mp3", 12357273),
+        ("29 - Chapter Twenty-Four - Kat.mp3", 19589635),
+        ("30 - Chapter Twenty-Five - Cassie.mp3", 8070580),
+        ("31 - Chapter Twenty-Six - Emma.mp3", 7547394),
+        ("32 - Chapter Twenty-Seven - Kat.mp3", 12150695),
+        ("33 - Chapter Twenty-Eight - Cassie.mp3", 11634416),
+        ("34 - Chapter Twenty-Nine - Emma.mp3", 12238466),
+        ("35 - Chapter Thirty - Kat.mp3", 17007891),
+        ("36 - Epilogue.mp3", 8828509),
+        ("38 - Credits.mp3", 882998),
+        ("37 - Authors' Note.mp3", 2012128),
+    ]
+    assert get_size_similarity([f[1] for f in files], ignore_smaller_than=10 * mb) == 0.306

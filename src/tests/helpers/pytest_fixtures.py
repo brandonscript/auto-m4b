@@ -1,3 +1,4 @@
+import multiprocessing as mp
 import os
 import random
 import shutil
@@ -8,7 +9,8 @@ from pathlib import Path
 import dotenv
 import pytest
 
-from src.lib.fs_utils import clean_dirs, find_adjacent_files_with_same_basename
+from lib.ffmpeg_utils import shrink_mp3_to_size
+from src.lib.fs_utils import clean_dirs, find_adjacent_files_with_same_basename, is_audio_file
 from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState
 from src.tests.helpers.pytest_dumps import FIXTURES_ROOT, GIT_ROOT, MOCKED, TEST_DIRS
@@ -102,6 +104,7 @@ def load_test_fixture(
     override_name: str | None = None,
     match_filter: str | None = None,
     cleanup_inbox: bool = False,
+    max_file_size: int = 100 * 1024 * 1024,  # 100MB
 ):
     src_dir = FIXTURES_ROOT / name
     src_mp3 = src_dir.with_suffix(".mp3")
@@ -110,15 +113,26 @@ def load_test_fixture(
     src = next((f for f in [src_mp3, src_m4b, src_dir] if f.exists()), None)
     if not src or not src.exists():
         raise FileNotFoundError(f"Fixture {name} not found. Does it exist in {FIXTURES_ROOT}?")
+
+    # List to track files that need shrinking
+    files_to_shrink = []
+
     if src.is_dir():
         dst = TEST_DIRS.inbox / (override_name or name)
         dst.mkdir(parents=True, exist_ok=True)
 
         for f in src.glob("**/*"):
+            if not f.is_file():
+                continue
             dst_f = dst / f.relative_to(src)
-            if f.is_file() and not dst_f.exists():
-                dst_f.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(f, dst_f)
+            src_size = f.stat().st_size
+            dst_size = dst_f.stat().st_size if (dst_exists := dst_f.is_file()) else src_size
+            if dst_exists and src_size == min(dst_size, max_file_size):
+                continue
+            dst_f.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(f, dst_f)
+            if max_file_size and is_audio_file(dst_f) and dst_size > max_file_size:
+                files_to_shrink.append((dst_f, max_file_size))
 
         # if any files in dst are not in src, delete them
         for f in dst.glob("**/*"):
@@ -128,16 +142,29 @@ def load_test_fixture(
     else:
         dst = TEST_DIRS.inbox / Path(override_name or name).with_suffix(src.suffix)
         shutil.rmtree(dst.with_suffix(""), ignore_errors=True)
-        if not dst.exists() or (src.stat().st_size != dst.stat().st_size):
+        src_size = src.stat().st_size
+        dst_size = dst.stat().st_size if (dst_exists := dst.is_file()) else src_size
+        if not dst_exists or src_size != min(dst_size, max_file_size):
             shutil.copy(src, dst)
+            if max_file_size and is_audio_file(dst) and dst_size > max_file_size:
+                files_to_shrink.append((dst, max_file_size))
 
         for f in find_adjacent_files_with_same_basename(src):
             dst_f = dst.with_suffix(f.suffix)
-            if not dst_f.exists() or (f.stat().st_size != dst_f.stat().st_size):
+            f_size = f.stat().st_size
+            dst_size = dst_f.stat().st_size if (dst_exists := dst_f.is_file()) else f_size
+            if not dst_exists or f_size != min(dst_size, max_file_size):
                 shutil.copy(f, dst_f)
+            if max_file_size and is_audio_file(dst_f) and dst_size > max_file_size:
+                files_to_shrink.append((dst_f, max_file_size))
 
     if exclusive or match_filter is not None:
         testutils.set_match_filter(match_filter or name)
+
+    # Shrink files in parallel using multiprocessing
+    if files_to_shrink:
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            pool.starmap(shrink_mp3_to_size, files_to_shrink)
 
     converted = TEST_DIRS.converted / (override_name or name)
     converted_dir = converted.with_suffix("")
@@ -351,6 +378,7 @@ def authors_guide_to_murder__flat_mp3():
         exclusive=True,
         match_filter="^authors_guide_to_murder",
         cleanup_inbox=True,
+        max_file_size=20 * 1000,  # 20kb
     )
 
 

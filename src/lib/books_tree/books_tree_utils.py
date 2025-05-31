@@ -10,7 +10,7 @@ import regex as rex
 
 from lib.term import print_debug
 from src.lib.misc import re_group
-from src.lib.parsers import try_parse_num
+from src.lib.parsers import romans, try_parse_num
 from src.lib.patterns import (
     part_or_ch_match_words,
     partno_or_ch_match_pattern2,
@@ -53,7 +53,7 @@ def get_part_num(s: str | Path) -> int:
     s = str(s)
     if not (substr := re_group(part_or_ch_match_words.search(s), 0)):
         return -1
-    return int(re_group(partno_or_ch_match_pattern2.search(substr), "num1", default=-1))
+    return romans.to_int(re_group(partno_or_ch_match_pattern2.search(substr), "num1", default=-1))
 
 
 def get_track_num_from_id3(id3: Id3TagDict) -> tuple[int, int]:

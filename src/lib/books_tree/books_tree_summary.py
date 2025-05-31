@@ -19,6 +19,7 @@ class TreeNodeSummary:
     dirs: "TreeNodeList"
     this_and_siblings: "TreeNodeList"
     this_and_siblings_recursive: "TreeNodeList"
+    siblings_recursive: "TreeNodeList"  # Excludes 'self'
 
     def __init__(self, tree: "BooksTree"):
         from src.lib.books_tree.books_tree_node import TreeNode
@@ -37,18 +38,30 @@ class TreeNodeSummary:
             self.dirs = TreeNodeList([], self.this)
             self.this_and_siblings = TreeNodeList([], self.this)
             self.this_and_siblings_recursive = TreeNodeList([], self.this)
+            self.siblings_recursive = TreeNodeList([], self.this)
 
         self.this = TreeNode(tree)
         self.parent = TreeNode(tree.parent) if tree.parent and not tree.parent.is_root else None
-        self.children = TreeNodeList(tree.children, self.this)
-        self.children_recursive = TreeNodeList(tree.children_recursive, self.this)
-        self.files = TreeNodeList(tree.files, self.this)
-        self.files_recursive = TreeNodeList(tree.files_recursive, self.this)
-        self.dirs = TreeNodeList(list(tree.dirs.values()), self.this)
-        self.this_and_siblings = TreeNodeList([tree, *(tree.siblings or [])], self.this)
-        self.this_and_siblings_recursive = TreeNodeList(
-            [tree, *(tree.siblings or [])] + [c for c in tree.children_recursive if c != tree], self.this
-        )
+        self.children = TreeNodeList(tree.children, self.this, default_include_curr=False)
+        self.children_recursive = TreeNodeList(tree.children_recursive, self.this, default_include_curr=False)
+        self.files = TreeNodeList(tree.files, self.this, default_include_curr=False)
+        self.files_recursive = TreeNodeList(tree.files_recursive, self.this, default_include_curr=False)
+        self.dirs = TreeNodeList(list(tree.dirs.values()), self.this, default_include_curr=False)
+        self.this_and_siblings = TreeNodeList([tree, *(tree.siblings or [])], self.this, default_include_curr=True)
+        self.this_and_siblings_recursive = TreeNodeList([tree], self.this, default_include_curr=True)
+        self.siblings_recursive = TreeNodeList([], self.this, default_include_curr=False)
+        if p := tree.parent:
+            children_r = [c for c in p.children_recursive if c != tree]
+            self.this_and_siblings_recursive = TreeNodeList(
+                [tree, *children_r],
+                self.this,
+                default_include_curr=True,
+            )
+            self.siblings_recursive = TreeNodeList(
+                children_r,
+                self.this,
+                default_include_curr=False,
+            )
 
     def __repr__(self):
         return f"{self.this._tree.rel_path}"
