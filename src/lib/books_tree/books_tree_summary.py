@@ -50,7 +50,11 @@ class TreeNodeSummary:
         self.this_and_siblings = TreeNodeList([tree, *(tree.siblings or [])], self.this, default_include_curr=True)
         self.this_and_siblings_recursive = TreeNodeList([tree], self.this, default_include_curr=True)
         self.siblings_recursive = TreeNodeList([], self.this, default_include_curr=False)
-        if p := tree.parent:
+        if (p := tree.parent) and not p.is_root:
+            # If this is a file, and it's a depth of at least 3, we want to look at parent's siblings
+            # otherwise, look at parent's children
+            if tree.is_file() and p.parent and tree.depth >= 3:
+                p = p.parent
             children_r = [c for c in p.children_recursive if c != tree]
             self.this_and_siblings_recursive = TreeNodeList(
                 [tree, *children_r],

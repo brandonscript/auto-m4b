@@ -222,6 +222,16 @@ class test_tree_scanning:
         for c in test_book.children:
             assert c.parent == test_book
 
+    def test_complex_parents(self, nathan_lowell__nested_series_m4a: list[Audiobook]):
+        tree = BooksTree(TEST_DIRS.inbox, match_filter="^(Nathan Lowell)")
+        container = next(iter(tree.dirs.values()))
+        assert container.has_structure("container")
+        assert container.parent == tree
+        assert container.parent.is_root  # type: ignore
+        for c in container.children_recursive:
+            assert c.parent
+            assert c.container_root == container
+
     def test_keys(self, mock_inbox, setup_teardown):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=MOCKED.all_book_dirs)
         test_book = tree.dirs[MOCKED.flat_dirs[0].name]

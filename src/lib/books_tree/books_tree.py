@@ -113,6 +113,9 @@ class BooksTree(BaseModel):
             else:
                 self.parent = r
 
+        if self.depth > 0:
+            assert self.parent, f"[BooksTree] {self.path} has no parent"
+
         self._match_filter = match_filter or cfg.MATCH_FILTER
         if scan or (scan is None and not root):
             self.scan(
@@ -310,6 +313,8 @@ class BooksTree(BaseModel):
 
         if isinstance(q, Path):
             q = str(q)
+        # Escape special regex characters
+        q = re.escape(q)
         exp = re.compile(q, re.I) if not case_sensitive else re.compile(q)
 
         return next(
