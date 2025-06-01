@@ -875,8 +875,8 @@ class test_tree_finding:
             ("series_parent", MOCKED.series_parent_dir),
             (("multi_parent", "multi_disc"), MOCKED.multi_disc_dir),
             (("multi_parent", "multi_part"), MOCKED.multi_part_dir),
-            ("container", MOCKED.multi_nested_dir),
-            ("mixed", MOCKED.mixed_dir),
+            ("unknown", MOCKED.multi_nested_dir),
+            ("unknown", MOCKED.mixed_dir),
             ("standalone_file", MOCKED.standalone_mp3_1),
             ("standalone_file", MOCKED.standalone_m4b),
             ("single", MOCKED.single_dir_mp3),
@@ -887,7 +887,7 @@ class test_tree_finding:
         expected_structure: BookStructure2 | BookStructureTuple,
         path: Path,
         mock_inbox,
-        setup_teardown,
+        # setup_teardown,
     ):
         root = inbox_books_tree()
         assert (branch := root.get(path)), f"Expected {path} to be found in TreePath({root.path})"

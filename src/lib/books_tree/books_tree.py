@@ -903,15 +903,14 @@ class BooksTree(BaseModel):
             if not s or (st < 0.5 and si < 0.5):
                 return None
             f.add_structures(s)
+            if f.is_file() and s == "single" and (p := f.parent) and p.is_dir():
+                # Bubble up single structure to parent dir
+                p.add_structures("single")
             return s
 
         # File pass #1: standalone, single
         for f in this_file + self.files_recursive:
-
-            if not (std_or_single := check_single_standalone_file(f)):
-                continue
-
-            f.add_structures(std_or_single)
+            check_single_standalone_file(f)
 
         # Dir pass #1: single, multi-disc, multi-part, flat
         for d in this_dir + self.dirs_recursive:
@@ -958,15 +957,20 @@ class BooksTree(BaseModel):
             if c.structure:
                 continue
 
-            has_standalone_siblings = any(f.has_structure("standalone_file") for f in c.siblings or [])
-            if has_standalone_siblings:
-                c.set_structures("standalone_file")
+            # sibs = c.siblings or []
+            # _standalone_siblings_boost = len([s for s in sibs if s.has_structure("standalone_file")]) / len(sibs)
+            # _single_siblings_boost = len([s for s in sibs if s.has_structure("single")]) / len(sibs)
+            if c.children and (_all_children_are_singles := all(c.has_structure("single") for c in c.children)):
+                c.set_structures("single")
                 continue
 
-            container_or_mixed, _, _ = self.score_container_mixed
-            if container_or_mixed == "container":
+            if (container_or_mixed := self.score_container_mixed[0]) == "container":
                 c.set_structures(container_or_mixed)
             # TODO: Don't apply mixed anywhere, only use unknown
+            # elif c.is_file() and standalone_siblings_boost > 0.5:
+            #     c.set_structures("standalone_file")
+            # elif c.is_file() and single_siblings_boost > 0.5:
+            #     c.set_structures("single")
             else:
                 c.set_structures("unknown", recursive=True)
 
