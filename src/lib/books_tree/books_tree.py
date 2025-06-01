@@ -952,6 +952,8 @@ class BooksTree(BaseModel):
                     if (l := check_dir(dd)[0]) and l and l != "series_parent"
                 ]
                 [f.add_structures(s) for f in d.files_recursive if (s := check_single_standalone_file(f))]
+            else:
+                ...
 
         # Child pass #2, for anything that doesn't yet have a structure
         for c in this_file + this_dir + self.children_without_structure_r:

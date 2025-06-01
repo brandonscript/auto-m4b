@@ -1403,40 +1403,52 @@ def score_series_parent(tree: "BooksTree") -> float:
         # if tree.i.children.have_authors:
         #     id3_checks += int((tree.i.children.similarity("id3_authors", fallback=0.0)) > 0.9) / 3
 
-        if not files_have_tags and (tree.i.children.have_series_nums or tree.i.children.have_start_nums):
-            path_sim = tree.i.children.similarity("pathnames", distinct=True, include_curr=True, fallback=0.0)
-            standalones_score = (
-                0.0
-                if not tree.files
-                else sum([score_single_standalone_file(c)[1] for c in tree.files]) / len(tree.files)
-            )
+        if (
+            str(tree)
+            == "/Users/brandon/Dev/auto-m4b/src/tests/tmp/inbox/Nathan Lowell/Shaman's Tales from the Golden Age of the Solar Clipper"
+        ):
+            ...
+
+        def get_nums_score(nums: Literal["series_nums", "start_nums", "part_nums"], score: Literal["+", "-"]):
+
             nums_cmpl = []
             nums_uniq = []
-            if len(tree.i.children.series_nums) > 1:
-                # Series numbers are good, and we want them to be complete + unique
-                nums_cmpl.append(tree.i.children.series_nums_completion)
-                nums_uniq.append(tree.i.children.series_nums_uniqueness)
-            if len(tree.i.children.start_nums) > 1:
+
+            if len(getattr(tree.i.children, nums)) > 1:
                 # Low completion is more likely to be a series parent, high we can't be sure
                 # Low uniqueness is more likely to be a series parent, high we can't be sure
-                nums_cmpl.append(0.5 - cast(float, tree.i.children.start_nums_completion))
-                nums_uniq.append(0.5 - cast(float, tree.i.children.start_nums_uniqueness))
-            if len(tree.i.children.part_nums) > 1:
-                # Same as start numbers, part nums may indicate multi_disc or flat
-                nums_cmpl.append(0.5 - cast(float, tree.i.children.part_nums_completion))
-                nums_uniq.append(0.5 - cast(float, tree.i.children.part_nums_uniqueness))
-
-            nums_cmpl = [max(0.0, x) for x in nums_cmpl if x is not None]
-            nums_uniq = [max(0.0, x) for x in nums_uniq if x is not None]
-
-            if tree.is_match:
-                ...
+                nums_cmpl.append(0.5 - cast(float, getattr(tree.i.children, f"{nums}_completion")))
+                nums_uniq.append(0.5 - cast(float, getattr(tree.i.children, f"{nums}_uniqueness")))
 
             num_score = 0.0
             if nums_cmpl:
                 num_score += sum(nums_cmpl) / len(nums_cmpl)
             if nums_uniq:
                 num_score += sum(nums_uniq) / len(nums_uniq)
+
+            return -num_score if num_score and score == "+" else num_score
+
+        num_score = 0.0
+
+        if tree.i.children.have_series_nums:
+            # Series numbers are good, and we want them to be complete + unique
+            num_score += get_nums_score("series_nums", "+") * 0.75
+
+        if not files_have_tags and tree.i.children.have_start_nums:
+            path_sim = tree.i.children.similarity("pathnames", distinct=True, include_curr=True, fallback=0.0)
+            standalones_score = (
+                0.0
+                if not tree.files
+                else sum([score_single_standalone_file(c)[1] for c in tree.files]) / len(tree.files)
+            )
+
+            if len(tree.i.children.start_nums) > 1:
+                # Low completion is more likely to be a series parent, high we can't be sure
+                # Low uniqueness is more likely to be a series parent, high we can't be sure
+                num_score += get_nums_score("start_nums", "-") / 4
+            if len(tree.i.children.part_nums) > 1:
+                # Same as start numbers, part nums may indicate multi_disc or flat
+                num_score += get_nums_score("part_nums", "-") / 4
 
             flat_penalty = -1 * score_flat(tree)
             # The more similar the pathnames are, the less likely this is a series parent
@@ -1448,14 +1460,20 @@ def score_series_parent(tree: "BooksTree") -> float:
                         series_book_children_score,
                         path_sim_penalty,
                         standalones_score,
-                        num_score,
                         flat_penalty,
                     )
                 )
                 / 5
             )
 
-        series_parent_score = base_score + child_series_books_ratio
+        if (
+            str(tree)
+            == "/Users/brandon/Dev/auto-m4b/src/tests/tmp/inbox/Nathan Lowell/Shaman's Tales from the Golden Age of the Solar Clipper"
+        ):
+            ...
+            tree.i.children.series_nums
+
+        series_parent_score = base_score + num_score + child_series_books_ratio
         if bool(re.search(r"(?:\b|_)series(?:\b|_)", tree.name.lower(), re.I)):
             series_parent_score = max(series_parent_score + 0.75, 0.95)
         if tree.i.this.has_series_num or tree.i.this.has_start_num or tree.i.this.has_disc_num:
