@@ -802,12 +802,6 @@ class BooksTree(BaseModel):
         return score_multi_parent(self)
 
     @property
-    def score_multi_part(self):
-        from src.lib.scorers import score_multi_part_or_disc
-
-        return score_multi_part_or_disc(self)
-
-    @property
     def score_series_book(self):
         from src.lib.scorers import score_series_book
 
@@ -882,23 +876,23 @@ class BooksTree(BaseModel):
         this_dir = [self] if self.is_dir() else []
 
         def check_dir(d: BooksTree):
-            is_single = bool(d.files) and all(f.has_structure("single") for f in d.files)
-            is_multi, multi_disc_score, multi_part_score = d.score_multi_part_or_disc
-            is_flat = d.score_flat > 0.6 and all(
+            single = bool(d.files) and all(f.has_structure("single") for f in d.files)
+            multi, multi_disc_score, multi_part_score = d.score_multi_part_or_disc
+            flat = d.score_flat > 0.6 and all(
                 d.score_flat > x for x in (multi_disc_score, multi_part_score, d.score_series_parent)
             )
-            is_series_parent = d.score_series_parent > 0.75 and d.score_series_parent > d.score_series_book
+            series_parent = d.score_series_parent > 0.75 and d.score_series_parent > d.score_series_book
             likely = None
             match True:
-                case _ if is_flat:
+                case _ if flat:
                     likely = "flat"
-                case _ if is_multi:
-                    likely = is_multi
-                case _ if is_single:
+                case _ if multi:
+                    likely = multi
+                case _ if single:
                     likely = "single"
-                case _ if is_series_parent:
+                case _ if series_parent:
                     likely = "series_parent"
-            return likely, is_single, is_multi, is_flat, is_series_parent
+            return likely, single, multi, flat, series_parent
 
         def check_nested(d: BooksTree):
             if (p := d.parent) and not p.is_root and (_is_only_dir_in_p := (len(p.dirs) < 2 and not p.files)):
@@ -928,32 +922,36 @@ class BooksTree(BaseModel):
                 d.set_structures("empty")
                 continue
 
-            _likely, is_single, is_multi, is_flat, is_series_parent = check_dir(d)
+            likely, _single, multi, _flat, _series_parent = check_dir(d)
 
-            # if all files in dir are 'single', set dir to 'single' too
-            if is_single:
-                d.add_structures("single")
-                check_nested(d)
-            elif is_multi:
-                if not self.structure:
-                    self.set_structures(is_multi, "multi_parent")
-                d.add_structures(is_multi, recursive=True)
-                check_nested(d)
-            elif is_flat:
-                d.add_structures("flat", recursive=True)
-                [cc.add_structures("flatish", recursive=True) for cc in d.children_recursive if cc.is_dir() and d.files]
-                check_nested(d)
-            elif is_series_parent:
-                d.set_structures("series_parent")
-                [cc.add_structures("series_book", recursive=True) for cc in d.children_recursive]
-                [
-                    dd.add_structures(l, recursive=True)
-                    for dd in d.dirs.values()
-                    if (l := check_dir(dd)[0]) and l and l != "series_parent"
-                ]
-                [f.add_structures(s) for f in d.files_recursive if (s := check_single_standalone_file(f))]
-            else:
-                ...
+            match likely:
+                case ("single", _):
+                    d.add_structures("single")
+                    check_nested(d)
+                case "multi_disc" | "multi_part":
+                    if not multi:
+                        continue
+                    if not d.structure:
+                        d.set_structures(multi, "multi_parent")
+                    d.add_structures(multi, recursive=True)
+                    check_nested(d)
+                case "flat":
+                    d.add_structures("flat", recursive=True)
+                    [
+                        cc.add_structures("flatish", recursive=True)
+                        for cc in d.children_recursive
+                        if cc.is_dir() and d.files
+                    ]
+                    check_nested(d)
+                case "series_parent":
+                    d.set_structures("series_parent")
+                    [cc.add_structures("series_book", recursive=True) for cc in d.children_recursive]
+                    [
+                        dd.add_structures(l, recursive=True)
+                        for dd in d.dirs.values()
+                        if (l := check_dir(dd)[0]) and l and l != "series_parent"
+                    ]
+                    [f.add_structures(s) for f in d.files_recursive if (s := check_single_standalone_file(f))]
 
         # Child pass #2, for anything that doesn't yet have a structure
         for c in this_file + this_dir + self.children_without_structure_r:
@@ -1014,6 +1012,9 @@ class BooksTree(BaseModel):
 
     def has_only_structures(self, *structure: BookStructure2):
         return len(self.structure) == len(structure) and all([s in self.structure for s in structure])
+
+    def has_only_structures_like(self, *structure: str):
+        return all(re.search(s, str(self.structure), re.I) for s in structure)
 
     def add_structures(
         self,

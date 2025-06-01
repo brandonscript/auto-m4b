@@ -1029,8 +1029,15 @@ def score_flat(tree: "BooksTree") -> float:
 
         if tree.is_file():
 
-            if tree.parent.is_root or (tree.parent and tree.parent.dirs) or multi_disc_score > 0.5:
+            if tree.parent.is_root:
                 return 0.0
+
+            if multi_disc_score > 0.5 or multi_part_score > 0.5:
+                return 1 - (max(multi_disc_score, multi_part_score))
+
+            if tree.parent and tree.parent.dirs:
+                files_to_dirs_ratio = len(tree.parent.files) / len(tree.parent.children)
+                return 1 - (files_to_dirs_ratio / 2)
 
             completion = float(
                 tree.i.this_and_siblings.track_nums_completion
@@ -1051,12 +1058,18 @@ def score_flat(tree: "BooksTree") -> float:
 
         path_sim = tree.i.children_recursive.similarity("pathnames", include_curr=False, fallback=0.0)
         album_sim = tree.i.children_recursive.similarity("id3_albums", fallback=path_sim)
+        album_p_sim = tree.i.this_and_siblings_recursive.similarity("id3_albums", fallback=path_sim)
         author_sim = tree.i.children_recursive.similarity("id3_artists", fallback=path_sim)
 
         if files_have_tags:
+
+            if album_p_sim == 1.0:
+                # If identical to parent's album, this could be flatish (or multi-disc/part).
+                return round(1.0 - max(multi_disc_score, multi_part_score), 3)
+
             if author_sim < 0.65 or album_sim < 0.95:
                 # If very dissimilar authors, or not identical albums, it's not a flat.
-                return min(album_sim, author_sim)
+                return round(min(album_sim, author_sim), 3)
             else:
                 # Take the average of the album and author similarity
                 return round((album_sim + author_sim) / 2, 3)
@@ -1614,10 +1627,10 @@ def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "
                 # If very dissimilar authors, or not closely related albums, it's probably not a multi-part or multi-disc.
                 avg_album_sim = (album_sim + album_sim_distinct) / 2
                 avg_author_sim = (author_sim + author_sim_distinct) / 2
-                tags_offset = 1 - round(min(avg_album_sim, avg_author_sim), 3)
+                tags_offset = -1 * (1 - round(min(avg_album_sim, avg_author_sim), 3))
             else:
-                # Take the average of the album and author similarity
-                tags_offset = round((album_sim + author_sim) / 2, 3)
+                # Slight boost from the average of the album and author similarity
+                tags_offset = round((album_sim + author_sim) / 2, 3) / 4
 
         disc_nums_score += tags_offset
         part_nums_score += tags_offset

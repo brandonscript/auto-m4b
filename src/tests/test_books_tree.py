@@ -302,29 +302,27 @@ class test_tree_scanning:
 
             expected = expecteds[0]
             expected_children = expecteds[1:]
-            assert len(t.books_f) == expected[0], f"Expected '{t.key}' to have {expected[0]} books, got {len(t.books)}"
+            assert len(t.books) == expected[0], f"Expected '{t.key}' to have {expected[0]} books, got {len(t.books)}"
             assert (
-                len(t.books_and_series_f) == expected[1]
-            ), f"Expected '{t.key}' to have {expected[1]} books_and_series, got {len(t.books_and_series_f)}"
-            assert len(t.dirs_f) == expected[2], f"Expected '{t.key}' to have {expected[2]} dirs, got {len(t.dirs_f)}"
+                len(t.books_and_series) == expected[1]
+            ), f"Expected '{t.key}' to have {expected[1]} books_and_series, got {len(t.books_and_series)}"
+            assert len(t.dirs) == expected[2], f"Expected '{t.key}' to have {expected[2]} dirs, got {len(t.dirs)}"
             assert (
-                len(t.dirs_recursive_f) == expected[3]
-            ), f"Expected '{t.key}' to have {expected[3]} dirs_recursive, got {len(t.dirs_recursive_f)}"
+                len(t.dirs_recursive) == expected[3]
+            ), f"Expected '{t.key}' to have {expected[3]} dirs_recursive, got {len(t.dirs_recursive)}"
+            assert len(t.files) == expected[4], f"Expected '{t.key}' to have {expected[4]} files, got {len(t.files)}"
             assert (
-                len(t.files_f) == expected[4]
-            ), f"Expected '{t.key}' to have {expected[4]} files, got {len(t.files_f)}"
+                len(t.files_recursive) == expected[5]
+            ), f"Expected '{t.key}' to have {expected[5]} files_recursive, got {len(t.files_recursive)}"
             assert (
-                len(t.files_recursive_f) == expected[5]
-            ), f"Expected '{t.key}' to have {expected[5]} files_recursive, got {len(t.files_recursive_f)}"
+                len(t.children) == expected[6]
+            ), f"Expected '{t.key}' to have {expected[6]} children, got {len(t.children)}"
             assert (
-                len(t.children_f) == expected[6]
-            ), f"Expected '{t.key}' to have {expected[6]} children, got {len(t.children_f)}"
-            assert (
-                len(t.children_recursive_f) == expected[7]
-            ), f"Expected '{t.key}' to have {expected[7]} children_recursive, got {len(t.children_recursive_f)}"
+                len(t.children_recursive) == expected[7]
+            ), f"Expected '{t.key}' to have {expected[7]} children_recursive, got {len(t.children_recursive)}"
 
             if t.is_root:
-                for i, c in enumerate(t.dirs_recursive_f):
+                for i, c in enumerate(t.dirs_recursive):
                     if len(expected_children) <= i:
                         break
 
@@ -454,7 +452,7 @@ class test_tree_structures:
         flat_all = [*flat_dirs, *flat_files]
         for d in flat_all:
             assert d.has_only_structure("flat"), xt.msg.structure_is(d, "flat")
-        for c in tree.children_f:
+        for c in tree.children:
             xt.is_book_root(c)
 
     def test_flatish_with_tags(self, authors_guide_to_murder__flat_mp3: Audiobook):
@@ -471,10 +469,10 @@ class test_tree_structures:
         first_file = book.files_recursive_f[0]
         first_dir = book.dirs_recursive_f[0]
         for f in book.files_recursive_f:
-            assert f.has_structure_like("flat"), xt.msg.structure_some_of(f, ("flat", "flatish"))
+            assert f.has_only_structures_like("flat"), xt.msg.structure_some_of(f, ("flat", "flatish"))
             xt.is_not_book_root(f)
-        assert first_file.has_structure("flatish"), xt.msg.structure_is(first_file, ("flatish"))
-        assert first_dir.has_structure("flatish"), xt.msg.structure_is(first_dir, ("flatish"))
+        assert first_file.has_only_structures("flat", "flatish"), xt.msg.structure_is(first_file, ("flat", "flatish"))
+        assert first_dir.has_only_structures("flat", "flatish"), xt.msg.structure_is(first_dir, ("flat", "flatish"))
 
     def test_flatish_without_tags(self, authors_guide_to_murder__flat_mp3: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder", scan_id3=False)
