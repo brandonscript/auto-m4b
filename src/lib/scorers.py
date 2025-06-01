@@ -1115,6 +1115,17 @@ def score_flat(tree: "BooksTree") -> float:
             or tree.i.children.all_path_nums_are_contiguous
             or 0
         )
+
+        # Adjust the score depending on whether child structures have already been determined
+        child_adj = 0.0
+        for s in tree.list_structures_r:
+            adj = 1 / len(tree.list_structures_r)
+            match s:
+                case "multi_disc" | "multi_part" | "series_parent" | "multi_parent" | "standalone_file":
+                    child_adj -= 0.5 * adj
+                case "flatish" | "flat":
+                    child_adj += 0.5 * adj
+
         return round((completion + contiguous + path_sim) / 3, 3)
     except Exception as e:
         print_debug(f"Error scoring flat: {e}")
