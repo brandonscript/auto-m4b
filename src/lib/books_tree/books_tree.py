@@ -877,11 +877,14 @@ class BooksTree(BaseModel):
 
         def check_dir(d: BooksTree):
             single = bool(d.files) and all(f.has_structure("single") for f in d.files)
-            multi, multi_disc_score, multi_part_score = d.score_multi_part_or_disc
-            flat = d.score_flat > 0.6 and all(
-                d.score_flat > x for x in (multi_disc_score, multi_part_score, d.score_series_parent)
-            )
-            series_parent = d.score_series_parent > 0.75 and d.score_series_parent > d.score_series_book
+            s_f = d.score_flat
+            s_sb = d.score_series_book
+            s_sp = d.score_series_parent
+            s_mp = d.score_multi_parent
+            multi, s_m_di, s_m_pt = d.score_multi_part_or_disc
+            flat = s_f > 0.6 and all(s_f > x for x in (s_m_di, s_m_pt, s_sp))
+            series_parent = s_sp > 0.75 and s_sp > s_sb
+            multi_parent = s_mp > 0.75 and s_mp > s_sp
             likely = None
             match True:
                 case _ if flat:
@@ -890,9 +893,13 @@ class BooksTree(BaseModel):
                     likely = multi
                 case _ if single:
                     likely = "single"
+                case _ if multi_parent:
+                    likely = "multi_parent"
                 case _ if series_parent:
                     likely = "series_parent"
-            return likely, single, multi, flat, series_parent
+                case _ if multi:
+                    likely = multi
+            return likely, single, multi, flat, multi_parent, series_parent
 
         def check_nested(d: BooksTree):
             if (p := d.parent) and not p.is_root and (_is_only_dir_in_p := (len(p.dirs) < 2 and not p.files)):
@@ -921,15 +928,14 @@ class BooksTree(BaseModel):
                 d.set_structures("empty")
                 continue
 
-            likely, _single, multi, _flat, _series_parent = check_dir(d)
+            likely, _single, multi, _flat, _multi_parent, _series_parent = check_dir(d)
 
             match likely:
                 case ("single", _):
                     d.add_structures("single")
                     check_nested(d)
                 case "multi_disc" | "multi_part":
-                    if not multi:
-                        continue
+                    assert multi, f"Expected multi_disc or multi_part, got {multi}"
                     if not d.structure:
                         d.set_structures(multi, "multi_parent")
                     d.add_structures(multi, recursive=True)
@@ -942,6 +948,17 @@ class BooksTree(BaseModel):
                         if cc.is_dir() and d.files
                     ]
                     check_nested(d)
+                case "multi_parent":
+                    d.set_structures("multi_parent")
+                    [
+                        dd.add_structures(l, recursive=True)
+                        for dd in d.dirs.values()
+                        if (l := check_dir(dd)[0]) and l and l != "multi_parent"
+                    ]
+                    if "multi_disc" in d.list_structures_r:
+                        d.add_structures("multi_disc")
+                    elif "multi_part" in d.list_structures_r:
+                        d.add_structures("multi_part")
                 case "series_parent":
                     d.set_structures("series_parent")
                     [cc.add_structures("series_book", recursive=True) for cc in d.children_recursive]
