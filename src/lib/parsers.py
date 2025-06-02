@@ -12,6 +12,7 @@ import cachetools.func
 from nltk import pos_tag, word_tokenize
 from spacy.ml import Doc
 
+from lib.ol_lookup import open_library_lookup_author
 from src.lib.misc import (
     any_in,
     get_numbers_in_string,
@@ -200,26 +201,93 @@ def startswith_partno(s: str, s2: str | None = None) -> bool:
     return bool(get_start_num(s) >= 0)
 
 
-# def nlp_get_names(s: str) -> list[str]:
-#     s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
-#     doc: Doc = nlp(s)
-#     return [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
-
-
-def nlp_get_titles(s: str) -> list[str]:
+def nlp_extract(s: str) -> tuple[list[str], list[str]]:
+    """Extracts objects and people from a string using spaCy's named entity recognition.
+    Returns a tuple of lists: (people, objects)
+    """
     s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
     doc: Doc = nlp(s)
-    objects = [ent.text for ent in doc.ents if ent.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG"]]
-    people = [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
-    # Remove people from the string
-    no_people = re.sub(r"\b" + "|".join(people) + r"\b", "", s)
-    # Clean up the string by:
-    # 1. Replace multiple spaces with a single space
-    # 2. Strip leading/trailing non-alphanumeric characters (preserving diacritics)
-    no_people = re.sub(r"\s+", " ", no_people)  # Normalize spaces
-    # Strip leading/trailing non-alphanumeric chars while preserving diacritics
-    no_people = leading_trailing_non_alphanum_pattern.sub("", no_people)
-    return [no_people, *objects]
+    objects = [tk for tk in doc.ents if tk.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG", "GPE", "LAW"]]
+    people = [tk for tk in doc.ents if tk.label_ in ["PERSON", "GPE"]]
+    junk = [tk for tk in doc if not tk.is_alpha]
+
+    # Remove junk from people
+    people = [p for p in people if not any(j.text in p.text for j in junk)]
+
+    # Remove junk from objects
+    objects = [o for o in objects if not any(j.text in o.text for j in junk)]
+
+    # If the same token is in both people and objects, keep the one that is nearest other
+    # found strings. E.g. For "Trenton Lee Stewart – The Mysterious Benedict Society", if the tokens are:
+    # people: ["Trenton", "Lee Stewart"]
+    # objects: ["Trenton", "The Mysterious Benedict Society"]
+    # We want to keep "Trenton Lee Stewart" and "The Mysterious Benedict Society"
+    # because "Trenton" is closer to "Lee Stewart" than it is to "The Mysterious Benedict Society"
+    duplicates = [o for o in objects if o in people]
+    o_ranges = [(s.find(o.text), len(o.text)) for o in objects if not o in duplicates]
+    p_ranges = [(s.find(p.text), len(p.text)) for p in people if not p in duplicates]
+
+    # Find the range that is closest to the other range
+    for d in duplicates:
+        # Get the position (range) where the duplicate is in the original string
+        d_i = s.find(d.text)
+        # Find the distance from the duplicate to all the other ranges
+        o_dist = [abs(d_i - r[0]) for r in o_ranges]
+        p_dist = [abs(d_i - r[0]) for r in p_ranges]
+        if o_dist and p_dist:
+            # if closer to object, remove person
+            if min(o_dist) < min(p_dist):
+                people.remove(d)
+            # if closer to person, remove object
+            else:
+                objects.remove(d)
+
+    clean_people = [p.text for p in people]
+    clean_objects = [o.text for o in objects]
+
+    # If any of the people are a substring of any object, strip the person from the object
+    # and vice-versa
+    for i, o in enumerate(objects):
+        for j, p in enumerate(people):
+            if p.text in o.text:
+                clean_objects[i] = leading_trailing_non_alphanum_pattern.sub("", o.text.replace(p.text, "")).strip()
+            if o.text in p.text:
+                clean_people[j] = leading_trailing_non_alphanum_pattern.sub("", p.text.replace(o.text, "")).strip()
+
+    # If any of the strings are contiguous in the original string, combine them.
+    # e.g., if people is ["Trenton", "Lee Stewart"] and objects is ["The", "Mysterious", "Benedict", "Society"],
+    # we want to combine "Trenton Lee Stewart" and "The Mysterious Benedict Society"
+
+    # Helper function to combine contiguous strings
+    def combine_contiguous(strings: list[str], original: str) -> list[str]:
+        if not strings:
+            return []
+
+        # Sort strings by their position in the original string
+        sorted_strings = sorted(strings, key=lambda x: original.find(x))
+        result = []
+        current = sorted_strings[0]
+
+        for next_str in sorted_strings[1:]:
+            # Check if strings are contiguous in the original string
+            current_end = original.find(current) + len(current)
+            next_start = original.find(next_str)
+
+            # If they are contiguous (allowing for whitespace/punctuation)
+            if next_start <= current_end + 1:  # +1 to allow for a single space/punctuation
+                current = f"{current} {next_str}".strip()
+            else:
+                result.append(current)
+                current = next_str
+
+        result.append(current)
+        return result
+
+    # Combine contiguous strings for both people and objects
+    clean_people = combine_contiguous(clean_people, s)
+    clean_objects = combine_contiguous(clean_objects, s)
+
+    return clean_people, clean_objects
 
 
 def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
@@ -227,8 +295,7 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
 
     dir_title = re_group(book_title_pattern.search(book.basename), "book_title")
     dir_author = parse_author(book.basename, "fs", fallback="")
-    # dir_nlp_names = nlp_get_names(book.basename)
-    dir_nlp_titles = nlp_get_titles(book.basename)
+    dir_nlp_people, dir_nlp_titles = nlp_extract(book.basename)
     dir_year = re_group(year_pattern.search(book.basename), "year")
     dir_narrator = parse_narrator(book.basename, "fs", fallback="")
 
@@ -248,11 +315,10 @@ def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
 
     file_title = re_group(book_title_pattern.search(orig_file_name), "book_title")
     file_author = parse_author(orig_file_name, "fs", fallback="")
-    file_nlp_titles = nlp_get_titles(orig_file_name)
-    # file_nlp_names = nlp_get_names(orig_file_name)
+    file_nlp_people, file_nlp_titles = nlp_extract(orig_file_name)
     file_year = parse_year(orig_file_name)
 
-    author_candidates: list[tuple[str, float]] = []
+    author_candidates: list[tuple[str, float]] = [(p, 1.0) for p in [*dir_nlp_people, *file_nlp_people]]
     if dir_author and (n := get_nltk_names(dir_author)):
         author_candidates.extend(n)
     if file_author and (n := get_nltk_names(file_author)):
@@ -448,20 +514,44 @@ def heuristic_score(name: str) -> float:
 
 def score_name_candidates(candidates: list[tuple[str, str]]) -> dict[str, float]:
     scores = {}
-    for _label, name in candidates:
-        doc = nlp(name)
+    for nltk_label, name in candidates:
+        entity_score = 0.0
+
+        if nltk_label.endswith("NLP"):
+            continue
+
+        # Count the number of times the name appears in candidates
+        name_count = sum(1 for _, n in candidates if n == name)
 
         # Check if spaCy detects it as a PERSON entity
-        entity_score = 0
+        doc = nlp(name)
         for ent in doc.ents:
             if ent.label_ == "PERSON" and ent.text == name:
-                entity_score = 1.0  # High confidence if spaCy recognizes it
+                entity_score = 1.0  # High confidence if spaCy recognizes it too
 
         # Fall back on heuristics if no entity detected
-        if entity_score == 0:
-            entity_score = heuristic_score(name)
+        if h_score := heuristic_score(name):
+            entity_score += h_score * max(0.2, entity_score)
 
-        scores[name] = entity_score
+        if nltk_label == "PERSON":
+            entity_score += 0.25
+
+        # If score is < 1.0, check open library and average the result
+        if entity_score < 1.0:
+            if (ol_score := open_library_lookup_author(name)) is not None:
+                if ol_score == 1.0:
+                    entity_score = 1.0
+                else:
+                    entity_score = (entity_score + ol_score) / 2
+
+        entity_score *= name_count
+        entity_score = min(1.0, entity_score)
+
+        if not name in scores:
+            scores[name] = round(entity_score, 3)
+        else:
+            scores[name] = round(max(scores[name], entity_score), 3)
+
     return dict(sorted(scores.items(), key=lambda item: item[1], reverse=True))
 
 
@@ -475,67 +565,105 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
     names = [("PERSON", x[0]) for x in get_nltk_names(swap_firstname_lastname(s).replace(",", " "))] if "," in s else []
     current_name = []
     num_person_chunks = len([r for r in nltk_results if isinstance(r, Tree) and r.label() == "PERSON"])
-    last_was_person = False
 
     def _end_name():
-        nonlocal current_name, names, last_was_person
+        nonlocal current_name, names
         if current_name:
             names.append(("PERSON", " ".join(current_name)))
             current_name = []
-        last_was_person = False
 
-    skip = False
-    for i, nltk_result in enumerate(nltk_results):
-        if skip:
-            skip = False
-            continue
-        label = nltk_result.label() if isinstance(nltk_result, Tree) else None
-        has_prev = i > 0
-        has_next = has_prev and i < len(nltk_results) - 1
-        prev_tree = p if has_prev and (p := nltk_results[i - 1]) and isinstance(p, Tree) else None
-        nltk_tree = cast(Tree, nltk_result) if isinstance(nltk_result, Tree) else None
-        next_tree = n if has_next and (n := nltk_results[i + 1]) and isinstance(n, Tree) else None
-        (match, catg) = cast(tuple[str, str], nltk_result) if isinstance(nltk_result, tuple) else (None, None)
-        (next_match, _) = (
-            cast(tuple[str, str], n)
-            if has_next and (n := nltk_results[i + 1]) and isinstance(n, tuple)
-            else (None, None)
-        )
-        catg = (
-            catg
-            if catg
-            else ("NNP" if nltk_tree and any_in([leaf[1] for leaf in nltk_tree.leaves()], ["NNP", "NN"]) else None)  # type: ignore
-        )
-        last_was_person_tree = bool(prev_tree and prev_tree.label() == "PERSON")
-        next_is_person_tree = bool(next_tree and next_tree.label() == "PERSON")
-        curr_label_is_maybe_person = bool(
-            label and label in ["PERSON", "ORGANIZATION", "NOUN"] or (label != "PERSON" and last_was_person_tree)
-        )
-        curr_is_abbr_letters = bool(match and abbreviated_names_pattern.match(match))
-        if _match_is_only_nonalpha := bool(match and only_non_alphanum_pattern.match(match)):
-            _end_name()
-            continue
-
-        curr_is_noun = bool(catg and catg in ["NNP", "NN"] and match)
-        if nltk_tree and curr_label_is_maybe_person:
-            # Collect tokens that are part of a PERSON entity
-            if label == "PERSON" or (label != "PERSON" and last_was_person):
-                current_name.append(" ".join(leaf[0] for leaf in nltk_tree.leaves()))  # type: ignore
-            last_was_person: bool = label == "PERSON"
-        elif (
-            (last_was_person_tree and next_is_person_tree) or (last_was_person and curr_is_noun) or curr_is_abbr_letters
+    def _is_noun(tk: Any) -> bool:
+        if (
+            (isinstance(tk, tuple) and tk[1] in ["NNP", "NN"])
+            or _is_tree(tk)
+            and any_in([leaf[1] for leaf in cast(Tree, tk).leaves()], ["NNP", "NN"])
         ):
-            # Abbreviations are part of the current name, or
-            # if prev and next are both PERSON, or
-            # if the current token is a noun and the last token was a PERSON
-            if curr_is_abbr_letters and next_match == ".":
-                match = f"{match}."
-                skip = True
-            current_name.append(match)
-            last_was_person: bool = True
+            return True
+        return False
+
+    def _is_non_name_char(c: str | None) -> bool:
+        if not c:
+            return False
+        return c in [
+            "(",
+            ")",
+            "[",
+            "]",
+            "{",
+            "}",
+            "|",
+            "~",
+            "@",
+            "#",
+            "$",
+            "%",
+            "^",
+            "*",
+            "=",
+            "+",
+            "_",
+            "?",
+        ]
+
+    def _is_period(tk: Any) -> bool:
+        return isinstance(tk, tuple) and tk[0].strip() == "."
+
+    def _is_tuple(tk: Any) -> bool:
+        return isinstance(tk, tuple) and len(tk) == 2
+
+    def _is_tree(tk: Any) -> bool:
+        return isinstance(tk, Tree)
+
+    def _is_person(tk: Any) -> bool:
+        return isinstance(tk, Tree) and tk.label() == "PERSON"
+
+    def _is_abbreviated_name(tk: Any) -> bool:
+        return isinstance(tk, tuple) and (
+            bool(abbreviated_names_pattern.match(tk[0])) or bool(uppercase_1_3_letters_pattern.match(tk[0]))
+        )
+
+    def _is_part_of_name(prev: Any, curr: Any, nxt: Any) -> bool:
+        if _is_person(curr):
+            return True
+        if _is_non_name_char(curr[0]):
+            return False
+        if _is_noun(curr) and _is_person(prev):
+            return True
+        if _is_noun(nxt) and _is_person(curr):
+            return True
+        if _is_noun(prev) and (_is_person(curr) or _is_period(curr)):
+            return True
+        if (_is_noun(curr) or _is_period(curr)) and _is_person(nxt):
+            return True
+        if _is_abbreviated_name(curr):
+            return True
+        if _is_abbreviated_name(prev) and _is_noun(curr):
+            return True
+        return False
+
+    prev = None
+    nxt = None
+    for i, tk in enumerate(nltk_results):
+        curr_tuple = cast(tuple[str, str], tk) if _is_tuple(tk) else (None, None)
+        curr_tree = cast(Tree, tk) if _is_tree(tk) else None
+        has_next = i < len(nltk_results) - 1
+        nxt = nltk_results[i + 1] if has_next else None
+
+        if _is_part_of_name(prev, tk, nxt) and not _is_non_name_char(curr_tuple[0]):
+            # Collect tokens that are part of a PERSON entity
+            if curr_tree:
+                current_name.append(" ".join(leaf[0] for leaf in curr_tree.leaves()))  # type: ignore
+            elif curr_tuple:
+                # append to newest part in current_name if len(current_name) > 0
+                if current_name and _is_period(tk):
+                    current_name[-1] += f"{curr_tuple[0]}"
+                else:
+                    current_name.append(curr_tuple[0])
         else:
             # Append completed name if we hit a non-PERSON chunk
             _end_name()
+
+        prev = tk
 
     # Append the last collected name (if any)
     if num_person_chunks > 0 and current_name:
@@ -544,6 +672,10 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
     # Handle short string edge case
     if len(tokens) <= 3 and not names:  # Assume short strings might be a name
         names = [("PERSON", " ".join(tokens))]
+
+    # Use nlp to double check
+    nlp_people, _ = nlp_extract(s)
+    names.extend([("PERSON_NLP", p) for p in nlp_people])
 
     # If we have multiple PERSON entities, score them and return the highest-scoring one
     results = [(k, v) for k, v in score_name_candidates(names).items()]

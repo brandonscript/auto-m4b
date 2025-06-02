@@ -364,11 +364,21 @@ class Config:
         otherwise, show as a float rounded to 1 decimal place, e.g. 0.1s"""
         return f"{int(self.SLEEP_TIME)}s" if self.SLEEP_TIME.is_integer() else f"{self.SLEEP_TIME:.1f}s"
 
-    # @cached_property
-    # def MAX_CHAPTER_LENGTH(self):
+    @env_property(typ=str, default="")
+    def _OPEN_LIBRARY_USER_AGENT(self):
+        """The user agent to use when querying the Open Library API.
+        Make sure you follow their rules for identifying your application:
+        https://openlibrary.org/developers/api
 
-    #     max_chapter_length = self.get_env_var("MAX_CHAPTER_LENGTH", "15,30")
-    #     return ",".join(str(int(x) * 60) for x in max_chapter_length.split(","))
+        Make sure you use your own email address, and a unique
+        name other than `auto-m4b`.
+
+        This env var should be in the following format:
+
+        OPEN_LIBRARY_USER_AGENT=MyAppName/1.0 (myemail@example.com)
+        """
+
+    OPEN_LIBRARY_USER_AGENT = _OPEN_LIBRARY_USER_AGENT
 
     @env_property(
         typ=str,
@@ -471,6 +481,13 @@ class Config:
     def USE_DOCKER(self):
         self.check_m4b_tool()
         return self._USE_DOCKER
+
+    @cached_property
+    def META_DIR(self):
+        meta_dir = Path.home() / ".auto-m4b"
+        if not meta_dir.exists():
+            meta_dir.mkdir(parents=True, exist_ok=True)
+        return meta_dir
 
     @cached_property
     def docker_path(self):

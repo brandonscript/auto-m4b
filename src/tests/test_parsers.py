@@ -405,7 +405,6 @@ series_true_tests = [
     "#1",
     "#1",
     "# 1",
-    "01 - Pride Of Chanur",
     "Old Man's War Series/Old Man's War - John Scalzi",
     "Aleron Kong - The Land Alliances (Chaos Seeds #3)",
     "# 3 (Chaos Seeds) - Aleron Kong - The Land Alliances",
@@ -418,6 +417,7 @@ series_true_tests = [
     [
         *[(test_case, True) for test_case in series_true_tests],
         *[
+            ("01 - Pride Of Chanur", False),
             ("Book", False),
             ("The Fellowship of the Ring", False),
             ("The Fellowship of the Ring - Bk", False),
@@ -475,11 +475,11 @@ def test_contains_partno_or_ch(s1, s2, expected):
         ("Franklin W Dixon", [("Franklin W Dixon", 1.0)]),
         ("Franklin W. Dixon", [("Franklin W. Dixon", 1.0)]),
         ("Colette Cœtre-Conté", [("Colette Cœtre-Conté", 1.0)]),
-        ("Alexandre Dumas The Count of Monte Cristo", [("Alexandre Dumas", 1.0), ("Monte Cristo", 0.5)]),
-        ("0100 _ Books on Tape _ The Count of Monte Cristo _ Alexandre Dumas", [("Alexandre Dumas", 1.0), ("Monte Cristo", 0.5)]),
+        ("Alexandre Dumas The Count of Monte Cristo", [("Alexandre Dumas", 1.0), ("Monte Cristo", -0.125)]),
+        ("0100 _ Books on Tape _ The Count of Monte Cristo _ Alexandre Dumas", [("Alexandre Dumas", 1.0), ("Monte Cristo", -0.125)]),
         ("The Lord of the Rings - J.R.R. Tolkien", [("J.R.R. Tolkien", 1.0)]),
-        ("Old Man's War Series/Old Man's War - John Scalzi", [("John Scalzi", 1.0), ("Old Man", 0.0)]),
-        ("Aleron Kong - The Land Alliances (Chaos Seeds #3)", [("Aleron Kong", 1.0), ("Chaos Seeds", 0.0)]),
+        ("Old Man's War Series/Old Man's War - John Scalzi", [("John Scalzi", 1.0), ("Old Man", 0.751)]),
+        ("Aleron Kong - The Land Alliances (Chaos Seeds #3)", [("Aleron Kong", 1.0), ("Chaos Seeds", -0.175)]),
         # fmt: on
     ],
 )

@@ -131,7 +131,7 @@ class BooksTree(BaseModel):
 
     def __repr__(self):
         if self.is_root or not self.root:
-            return f"🌳 (root)"
+            return f"🌳 (root) {self.name or ''}"
         return f"🌳 {self.path.relative_to(self.root.path)} – {self.structure}"
 
     def __str__(self):

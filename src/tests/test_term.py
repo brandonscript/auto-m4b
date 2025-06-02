@@ -13,6 +13,7 @@ from src.lib.term import (
 @pytest.mark.parametrize(
     "path, limit, indent, expected",
     [
+        # fmt: off
         (Path("/"), None, None, "/"),
         (Path("/home"), None, None, "/home"),
         (Path("home"), None, None, "home"),
@@ -21,22 +22,15 @@ from src.lib.term import (
         (Path("/home/user/Downloads"), 10, 0, "/home/user/\nDownloads"),
         (Path("/home/user/Downloads"), 10, 1, "/home/user/\n Downloads"),
         (Path("/home/user/Downloads"), 10, 5, "/home/user/\n     Downloads"),
-        (
-            Path(
-                "/home/user/Downloads/this_is_a_really_long_filename_that_should_be_broken_up"
-            ),
-            20,
-            1,
-            "/home/user/Downloads/\n this_is_a_really_long_filename_that_should_be_broken_up",
-        ),
-        (
-            Path(
-                "/private/var/folders/18/vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/auto-m4b/merge/tower_treasure__flat_mp3"
-            ),
-            40,
-            1,
-            "/private/var/folders/18/\n vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/\n auto-m4b/merge/tower_treasure__flat_mp3",
-        ),
+        (Path(
+            "/home/user/Downloads/this_is_a_really_long_filename_that_should_be_broken_up"), 
+            20, 1,  
+            "/home/user/Downloads/\n this_is_a_really_long_fil..._that_should_be_broken_up"),
+        (Path(
+            "/private/var/folders/18/vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/auto-m4b/merge/tower_treasure__flat_mp3"),
+            40, 1,  
+            "/private/var/folders/18/\n vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/\n auto-m4b/merge/tower_treasure__flat_mp3",),
+        # fmt: on
     ],
 )
 def test_linebreak_path(path: Path, limit: int, indent: int, expected: str):

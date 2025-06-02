@@ -3,23 +3,20 @@ import json
 import os
 import subprocess
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import cast
 
 import nltk
 import spacy
-from nltk.corpus import words
+from nltk.corpus import webtext, words
 from spacy.language import Language
 from spacy.matcher import Matcher
 
+from src.lib.config import cfg
 from src.lib.term import print_debug
-
-META_DIR = Path.home() / ".auto-m4b"
-META_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def should_update_nltk() -> bool:
-    nltk_file = META_DIR / ".nltk"
+    nltk_file = cfg.META_DIR / ".nltk"
     if not nltk_file.exists():
         return True
 
@@ -33,10 +30,11 @@ def should_update_nltk() -> bool:
 
 
 english_words = set()
+webtext_words = set()
 
 
 def update_nltk_timestamp():
-    nltk_file = META_DIR / ".nltk"
+    nltk_file = cfg.META_DIR / ".nltk"
     with open(nltk_file, "w") as f:
         json.dump({"last_update": datetime.now().isoformat()}, f)
 
@@ -44,10 +42,13 @@ def update_nltk_timestamp():
 if should_update_nltk():
     with contextlib.redirect_stdout(open(os.devnull, "w")):
         nltk.download("words")
+        nltk.download("webtext")
         english_words = set(words.words())
+        webtext_words = set(webtext.words())
     update_nltk_timestamp()
 else:
     english_words = set(words.words())
+    webtext_words = set(webtext.words())
 
 nlp = None  # type: ignore
 

@@ -138,21 +138,21 @@ class MOCKED:
     all_books_and_series = isorted(
         list(
             set(
-                flat_dirs
-                + _container_dir_others
-                + _container_dir_series_books
-                + series_books
-                + single_dirs
-                + standalone_files
-                + multi_nested_dirs
+                flat_dirs  # 0-4 (5)
+                + _container_dir_others  # 5-7 (3)
+                + _container_dir_series_books  # 8-11 (4)
+                + series_books  # 12-14 (3)
+                + single_dirs  # 15-17 (3)
+                + standalone_files  # 18-21 (4)
+                + [multi_nested_dir]  # 22 (1)
                 + [
-                    _container_dir_series_parent,
-                    nested_dir,
-                    mixed_dir,
-                    multi_disc_dir,
-                    multi_disc_dir_with_extras,
-                    multi_part_dir,
-                    series_parent_dir,
+                    _container_dir_series_parent,  # 23
+                    nested_dir,  # 24
+                    mixed_dir,  # 25
+                    multi_disc_dir,  # 26
+                    multi_disc_dir_with_extras,  # 27
+                    multi_part_dir,  # 28
+                    series_parent_dir,  # 29
                 ]
             )
         )

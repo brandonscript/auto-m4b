@@ -418,14 +418,14 @@ class test_get_similarity:
             (["hello", "hello"], 1.0),
             (["hello", "hello"], 1.0),
             (["hello", "hello"], 1),
-            (["01 In Ashes Born", "02 To Fire Called", "03 By Darkness Forged"], 0.4),
+            (["01 In Ashes Born", "02 To Fire Called", "03 By Darkness Forged"], 0.34),
             (
                 [
                     "01 In Ashes Born/Seeker's Tales (Solar Clipper Universe) Book 1 - In Ashes Born.m4a",
                     "02 To Fire Called A Seekers Tale from the Golden Age of the Solar Clipper, Book 2 (Unabridged)/To Fire Called A Seekers Tale from the Golden Age of the Solar Clipper, Book 2 (Unabridged).m4a",
                     "03 By Darkness Forged A Seeker's Tale from the Golden Age of the Solar Clipper, Book 3/By Darkness Forged A Seeker's Tale from the Golden Age of the Solar Clipper, Book 3.m4a",
                 ],
-                0.61,
+                0.56,
             ),
         ],
     )

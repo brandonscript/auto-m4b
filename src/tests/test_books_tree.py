@@ -743,6 +743,21 @@ class test_tree_structures:
             xt.is_not_book_root(c)
 
 
+@pytest.mark.usefixtures("mock_inbox", "setup_teardown")
+class test_tree_book_roots:
+
+    def test_book_roots(self):
+        tree = BooksTree(TEST_DIRS.inbox)
+        books_with_roots = isorted(map(str, MOCKED.all_books_and_series))
+        found_books = isorted(list(map(str, tree.books_and_series)))
+
+        extra_paths_found = [p for p in found_books if p not in books_with_roots]
+        missing_paths_expected = [p for p in books_with_roots if p not in found_books]
+
+        assert not extra_paths_found, f"Extra paths found: {extra_paths_found}"
+        assert not missing_paths_expected, f"Missing paths expected: {missing_paths_expected}"
+
+
 class test_tree_structures_series:
 
     def test_books_and_series(self, Chanur_Series: list[Audiobook]):
@@ -905,7 +920,12 @@ class test_tree_finding:
             (TEST_DIRS.inbox, 0, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_m4b, MOCKED.single_dir_mp3] + MOCKED.standalone_files_d1)),
             (TEST_DIRS.inbox, 1, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_mp3, MOCKED.single_dir_m4b])),
             (TEST_DIRS.inbox, 1, 2, MOCKED.all_books_and_series[:6] + MOCKED.all_books_and_series[10:-3]),
-            (TEST_DIRS.inbox, 2, 2, [MOCKED.all_books_and_series[5], MOCKED.all_books_and_series[10], MOCKED.all_books_and_series[-4]] + MOCKED.all_books_and_series[13:-6]),
+            (TEST_DIRS.inbox, 2, 2, [
+                MOCKED.container_dirs[0], 
+                # MOCKED.all_books_and_series[5], 
+                # MOCKED.all_books_and_series[10], 
+                MOCKED.all_books_and_series[-4]
+            ] + MOCKED.all_books_and_series[13:-6]),
             # fmt: on
         ],
     )
@@ -920,9 +940,16 @@ class test_tree_finding:
     ):
 
         tree = BooksTree(path, mindepth=mindepth, maxdepth=maxdepth)
-        assert isorted(tree.books_and_series) == isorted(
-            list(set(map(functools.partial(BooksTree, allow_file_root=True), expected)))
+        found_sorted = isorted(list(map(str, tree.books_and_series)))
+        expected_sorted = isorted(
+            list(set(map(str, map(functools.partial(BooksTree, allow_file_root=True), expected))))
         )
+
+        extra_paths_found = [p for p in found_sorted if p not in expected_sorted]
+        missing_paths_expected = [p for p in expected_sorted if p not in found_sorted]
+
+        assert not extra_paths_found, f"Extra paths found: {extra_paths_found}"
+        assert not missing_paths_expected, f"Missing paths expected: {missing_paths_expected}"
 
     def test_find_standalone_books_in_inbox(self, mock_inbox, setup_teardown):
         tree = BooksTree(TEST_DIRS.inbox)

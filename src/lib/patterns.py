@@ -50,5 +50,7 @@ multi_part_pattern = re.compile(r"(?:^|(?<=[\W_-]))(pa?r?t|ch(?:\.|apter))(?:\b|
 
 only_non_alphanum_pattern = rex.compile(r"^[^\p{L}]+$")
 abbreviated_names_pattern = re.compile(r"^(?:[A-Z]\.?){1,3}$")
+uppercase_1_3_letters_pattern = re.compile(r"^(?:[A-Z]){1,3}$")
 leading_trailing_non_alphanum_pattern = rex.compile(r"^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$", flags=rex.UNICODE)
+open_library_user_agent_pattern = re.compile(r"^(?P<app>[^/]+)/(?P<version>[0-9.]+)? \((?P<email>[^\)]+)\)$") # matches: MyAppName/1.0 (myemail@example.com)
 # fmt: on
