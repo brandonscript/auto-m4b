@@ -881,8 +881,8 @@ def process_book(b: int, item: InboxItem):
 
     copy_to_working_dir(book)
 
-    book.extract_path_info()
-    book.extract_metadata()
+    book.extract_path_info(console=True)
+    book.extract_metadata(console=True)
 
     clean_dirs([book.build_dir, book.build_tmp_dir])
     rm_all_empty_dirs(cfg.merge_dir)

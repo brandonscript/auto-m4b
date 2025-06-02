@@ -236,7 +236,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
     smart_print("\nVerifying id3 tags...", end="")
 
-    book_to_check = Audiobook(m4b_to_check).extract_metadata(quiet=True)
+    book_to_check = Audiobook(m4b_to_check).extract_metadata(console=True)
 
     title_needs_updating = False
     author_needs_updating = False
@@ -487,18 +487,18 @@ def custom_sort(key: str, next_key: str) -> int:
     return -1 if key < next_key else int(key > next_key)
 
 
-def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
+def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     from src.lib.id3_tags import Id3Tags
 
-    if not quiet:
+    if console:
         smart_print(
             f"Sampling [[{book.sample_audio1.name}]] for book metadata and quality info:",
             highlight_color=PATH_COLOR,
         )
 
     t1 = time.time()
-    li = print_list_item if not quiet else lambda *_: None
+    li = print_list_item if console else lambda *_: None
 
     # read id3 tags of audio file
     sample_audio1_tags = Id3Tags.from_file(book.sample_audio1)

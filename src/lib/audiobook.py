@@ -102,13 +102,13 @@ class Audiobook(BaseModel):
     def __repr__(self):
         return f"{self.key}"
 
-    def extract_path_info(self, quiet: bool = False):
-        return extract_path_info(self, quiet)
+    def extract_path_info(self, console: bool = False):
+        return extract_path_info(self, console)
 
-    def extract_metadata(self, quiet: bool = False):
+    def extract_metadata(self, console: bool = False):
         from src.lib.id3_utils import extract_metadata
 
-        return extract_metadata(self, quiet)
+        return extract_metadata(self, console)
 
     def extract_cover_art(self):
         from src.lib.id3_utils import extract_cover_art
@@ -184,15 +184,29 @@ class Audiobook(BaseModel):
 
     @property
     def converted_file(self) -> Path:
+        from src.lib.config import cfg
         from src.lib.fs_utils import find_first_audio_file
 
-        # if self.converted_dir.suffix == ".m4b":
-        #     return self.converted_dir
-        try:
-            return find_first_audio_file(self.converted_dir, ext="m4b")
-        except FileNotFoundError:
+        def _build_filename():
             filename = b.with_suffix("") if (b := Path(self.basename)) and b.suffix == ".m4b" else b.with_suffix(".m4b")
             return self.converted_dir / filename
+
+        def _find_m4b_matching_basename():
+            for f in self.converted_dir.rglob("*.m4b"):
+                if self.basename in f.stem or f.stem in self.basename:
+                    return f
+            return _build_filename()
+
+        if self.converted_dir == cfg.converted_dir:
+            if found := _find_m4b_matching_basename():
+                return found
+            return _build_filename()
+        try:
+            if found := _find_m4b_matching_basename():
+                return found
+            return find_first_audio_file(self.converted_dir, ext="m4b")
+        except FileNotFoundError:
+            return _build_filename()
 
     @property
     def sample_audio1(self):

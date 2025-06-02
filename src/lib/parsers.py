@@ -292,7 +292,7 @@ def nlp_extract(s: str) -> tuple[list[str], list[str]]:
     return clean_people, clean_objects
 
 
-def extract_path_info(book: "Audiobook", quiet: bool = False) -> "Audiobook":
+def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
     from src.lib.cleaners import strip_part_number
 
     dir_title = re_group(book_title_pattern.search(book.basename), "book_title")
