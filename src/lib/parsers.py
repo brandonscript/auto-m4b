@@ -175,6 +175,8 @@ def find_greatest_common_string(s: list[str]) -> str:
 
 
 def contains_partno_or_ch(s: str, s2: str | None = None) -> bool:
+    if not s:
+        return False
     s_matches_part_number = partno_or_ch_match_pattern2.search(s)
     s_start_num = get_start_num(s)
 

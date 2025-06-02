@@ -221,7 +221,9 @@ class Id3Tags(BaseModel):
         return total if total != -1 else None
 
     @classmethod
-    def from_file(cls, file: Path, *tags: TagSource | AdditionalTags, throw: bool = False) -> "Id3Tags | None":
+    def from_file(
+        cls, file: Path, *tags: TagSource | AdditionalTags, throw: bool = False, no_cache: bool = False
+    ) -> "Id3Tags | None":
         """Extract ID3 tags from a file, using cache if available and not expired."""
 
         if not file.is_file():
@@ -230,14 +232,15 @@ class Id3Tags(BaseModel):
         current_time = datetime.now().timestamp()
         cache_key = str(file)
 
-        # Check global cache first
-        cached_result = id3Cache.get(cache_key)
-        if cached_result is not None:
-            if cached_result == "__BAD__":
-                if throw:
-                    raise HeaderNotFoundError(f"Error: Previously failed to extract id3 tags from {file}")
-                return cls(updated=current_time, BAD=True)
-            return cls(**cached_result, updated=current_time)  # type: ignore
+        if not no_cache:
+            # Check global cache first
+            cached_result = id3Cache.get(cache_key)
+            if cached_result is not None:
+                if cached_result == "__BAD__":
+                    if throw:
+                        raise HeaderNotFoundError(f"Error: Previously failed to extract id3 tags from {file}")
+                    return cls(updated=current_time, BAD=True)
+                return cls(**cached_result, updated=current_time)  # type: ignore
 
         # Try to extract tags
         try:
@@ -267,13 +270,10 @@ class Id3Tags(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the Id3Tags instance to a dictionary."""
-        # Get the raw model dump
-        data = self.model_dump(
+        return self.model_dump(
             exclude_none=True,
             exclude={"disc_num", "disc_total", "track_num", "track_total", "updated", "BAD"},
         )
-        # Filter to only include valid tag names
-        return {k: v for k, v in data.items() if k in TagSource.__args__ or k in AdditionalTags.__args__}
 
     def __getitem__(self, key: TagSource | AdditionalTags) -> str | float | None:
         """Allow dictionary-style access to tags."""

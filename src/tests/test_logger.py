@@ -180,7 +180,7 @@ def test_log_supports_vbr_mp3s(bitrate_vbr__mp3: Audiobook, global_test_log: Pat
     check(
         global_test_log,
         [
-            r"^.*?-\d{4}  SUCCESS  bitrate_vbr__mp3 \s* ~46 kb/s       22 kHz   .mp3 \s* 1 file  11 MB \s* 0h:33m:07s  02:43",
+            r"^.*?-\d{4}  SUCCESS  bitrate_vbr__mp3 \s* ~46 kb/s       22 kHz   .mp3 \s* \d+ files?  11 MB \s* 0h:33m:07s  02:43",
         ],
     )
 

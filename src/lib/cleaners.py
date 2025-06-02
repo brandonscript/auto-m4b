@@ -1,11 +1,7 @@
 import re
 
-disc_no_strip_pattern = re.compile(
-    r"\W*?-?\W*?[\(\[]*(disc|cd)\W*\d+[\)\]]*", flags=re.I
-)
-part_no_strip_pattern = re.compile(
-    r"(\W*?-?\W*?[\(\[]*[Pp]([Aa][Rr])?[Tt]\W*\d+[\)\]]*|P[Aa][Rr][Tt]$)"
-)
+disc_no_strip_pattern = re.compile(r"\W*?-?\W*?[\(\[]*(disc|cd)\W*\d+[\)\]]*", flags=re.I)
+part_no_strip_pattern = re.compile(r"(\W*?-?\W*?[\(\[]*[Pp]([Aa][Rr])?[Tt]\W*\d+[\)\]]*|P[Aa][Rr][Tt]$)")
 non_alpha_strip_pattern = re.compile(r"^\W+|\W+$")
 
 html_tag_pattern = re.compile(r"</?\w+\s*/?>", flags=re.DOTALL)
@@ -25,19 +21,24 @@ def strip_non_alphanumeric(s: str) -> str:
 
 def strip_disc_number(s: str) -> str:
     """Takes a string and removes any disc/CD number found in the string"""
+    if not s:
+        return s
     return disc_no_strip_pattern.sub("", s).strip()
 
 
 def strip_part_number(s: str) -> str:
-
     # if it matches both the part number and ignore, return original string
+    if not s:
+        return s
+    if part_no_strip_pattern.match(s) and not s.startswith("Part "):
+        return s
     return part_no_strip_pattern.sub("", s).strip()
 
 
-def strip_author_narrator(
-    s: str, author: str | None = None, narrator: str | None = None
-) -> str:
+def strip_author_narrator(s: str, author: str | None = None, narrator: str | None = None) -> str:
     """Takes a string and removes any author or narrator names found in the string"""
+    if not s:
+        return s
     if author:
         s = re.sub(re.escape(author), "", s, flags=re.I).strip()
     if narrator:
@@ -47,8 +48,10 @@ def strip_author_narrator(
 
 def fix_smart_quotes(s: str) -> str:
     """Takes a string and replaces smart quotes with regular quotes"""
-    trans = str.maketrans("‘’‚‛′′“”„‟″″", "''''''\"\"\"\"\"\"")
-    return s.translate(trans)
+    if not s:
+        return s
+    trnsl = str.maketrans("‘’‚‛′′“”„‟″″", "''''''\"\"\"\"\"\"")
+    return s.translate(trnsl)
 
 
 urlencode_map = {

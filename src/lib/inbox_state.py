@@ -145,10 +145,11 @@ class InboxState(Hasher):
         set_ready: bool = False,
         *,
         scan_id3: bool = True,
+        force: bool = False,
     ):
         from src.lib.config import cfg
 
-        if time.time() - self._last_scan < cfg.WAIT_TIME:
+        if not force and time.time() - self._last_scan < cfg.WAIT_TIME:
             return
 
         if self.stale:
@@ -202,18 +203,14 @@ class InboxState(Hasher):
 
     @property
     def match_filter(self):
-        # from src.lib.config import cfg
-        # from src.lib.misc import parse_none
-
-        # if not cfg.MATCH_FILTER:
-        #     if env := parse_none(os.getenv("MATCH_FILTER")):
-        #         print_debug(f"Setting match filter from env: {cfg.MATCH_FILTER} (was not previoulsy set in state)")
-        #         self.set_match_filter(env)
-        #     elif (mf := self.tree.match_filter) and isinstance(mf, str):
-        #         print_debug(f"Setting match filter from tree: {cfg.MATCH_FILTER} (was not previoulsy set in state)")
-        #         self.set_match_filter(mf)
-        # return cfg.MATCH_FILTER
         return self.tree.match_filter
+
+    @property
+    def unescaped_match_filter(self):
+        unescaped = str(self.match_filter)
+        while unescaped != (unescaped := re.sub(r"\\(.)", r"\1", unescaped)):
+            ...
+        return unescaped
 
     def set_match_filter(self, match_filter: str | None):
         from src.lib.config import cfg

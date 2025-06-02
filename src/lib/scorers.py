@@ -129,7 +129,7 @@ class MetadataScore:
 
         return clean_string(val if val else fallback)
 
-    def determine_title(self, fallback: str = "Unknown", *, force: bool = False):
+    def determine_title(self, *, fallback: str = "Unknown", force: bool = False):
 
         if not force and self._title:
             return self._title
@@ -255,7 +255,7 @@ class MetadataScore:
         self._title = self.title._value or fallback
         return self._title
 
-    def determine_author(self, fallback: str = "Unknown", *, force: bool = False):
+    def determine_author(self, *, fallback: str = "Unknown", force: bool = False):
 
         if not force and self._author:
             return self._author
@@ -452,7 +452,7 @@ class MetadataScore:
         self._narrator = parse_narrator(self.narrator._value or fallback, "generic")
         return self._narrator
 
-    def determine_albumartist(self, *, force: bool = False):
+    def determine_albumartist(self, *, fallback: str = "Unknown", force: bool = False):
         # If artist and albumartist are different, or if albumartist contains a / we want to process.
 
         if not force and self._albumartist:

@@ -107,10 +107,13 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
         # Some mock files are not readable by ffprobe, so we return None
         # if "pytest" in sys.modules and any([s in err_str for s in ignore_paths]) and "Invalid data" in err_str:
         if "Invalid data" in err_str:
-            if "pytest" in sys.modules:
+            if "pytest" in sys.modules and not throw:
                 return None
             split_err_str = [s for s in err_str.split("\\n") if len(s) > 3]
-            return f"ffprobe failed for {split_err_str[-1]}" if split_err_str else f"ffprobe failed for {file}"
+            err = f"ffprobe failed for {split_err_str[-1]}" if split_err_str else f"ffprobe failed for {file}"
+            if throw:
+                raise BadFileError(err) from e
+            return err
 
         if "No such file or directory: 'ffprobe'" in err_str and FFPROBE_REPAIRS <= 3:
             fix_ffprobe()

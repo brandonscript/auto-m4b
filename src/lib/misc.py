@@ -66,6 +66,8 @@ def escape_special_chars(string: str) -> str:
 
 def get_numbers_in_string(s: str) -> str:
     """Returns a only the numbers found in a string, in order they are found."""
+    if not s:
+        return ""
     return "".join(re.findall(r"\d", s))
 
 

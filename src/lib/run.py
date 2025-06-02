@@ -419,16 +419,15 @@ def books_to_process() -> tuple[int, Callable[[], None]]:
         s = f"all {pluralize_with_count(inbox.num_matched, 'book')}" if inbox.num_matched > 1 else "1 book"
         note = wrap_brackets(f"ignoring {inbox.num_ignored_books}" if inbox.num_ignored_books else "")
         return 0, lambda: smart_print(
-            f"Failed to convert {s} in the inbox matching [[{inbox.match_filter}]]{note}",
+            f"Failed to convert {s} in the inbox matching [[{inbox.unescaped_match_filter}]]{note}",
             highlight_color=AMBER_COLOR,
         )
 
     if inbox.match_filter and inbox.matched_ok_books:
         ignoring = f"ignoring {inbox.num_ignored_books}" if inbox.num_ignored_books else ""
         note = wrap_brackets(ignoring, skipping, sep=", ")
-        unescaped_match_filter = re.sub(r"\\ ", " ", str(inbox.match_filter))
         return inbox.num_matched_ok, lambda: smart_print(
-            f"Found {pluralize_with_count(inbox.num_matched, 'book')} in the inbox matching [[{unescaped_match_filter}]]{note}\n",
+            f"Found {pluralize_with_count(inbox.num_matched, 'book')} in the inbox matching [[{inbox.unescaped_match_filter}]]{note}\n",
             highlight_color=AMBER_COLOR,
         )
     elif inbox.failed_books:
@@ -927,7 +926,7 @@ def process_inbox():
     if inbox.loop_counter == 1:
         print_debug("First run, scanning inbox...")
         print_banner()
-        inbox.scan(set_ready=True)
+        inbox.scan(set_ready=True, force=True)
 
     if not audio_files_found():
         print_banner()

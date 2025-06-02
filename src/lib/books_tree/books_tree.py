@@ -52,9 +52,6 @@ class BooksTree(BaseModel):
     _is_book_root: bool | None = None
     path: Path = Field(default_factory=Path)
     parent: "BooksTree | None" = None
-    # size: int = 0
-    # mindepth: int | None = None
-    # maxdepth: int | None = None
     structure: tuple[BookStructure2, ...] = Field(default_factory=tuple)
     root: "BooksTree | None" = None
     _match_filter: list[Path] | str | None = None
@@ -70,14 +67,10 @@ class BooksTree(BaseModel):
         path: "Path | Audiobook | BooksTree | str" = ".",
         *,
         root: "Path | Audiobook | BooksTree | None" = None,
-        # files: Sequence["str | Path | BooksTree"] = [],
-        # dirs: Mapping[str, "str | Path | BooksTree"] = {},
         mindepth: int | None = None,
         maxdepth: int | None = None,
         allow_file_root: bool = False,
         match_filter: list[Path] | str | None = None,
-        # structure: tuple[BookStructure2, ...] = (),
-        # size: int = 0,
         scan: bool | None = None,
         determine_structure: bool = True,
         scan_id3: bool = True,
@@ -125,9 +118,6 @@ class BooksTree(BaseModel):
                 determine_structure=determine_structure,
                 scan_id3=scan_id3,
             )
-        # self.size = size
-        # if structure:
-        #     self.structure = structure
 
     def __repr__(self):
         if self.is_root or not self.root:
@@ -371,8 +361,9 @@ class BooksTree(BaseModel):
         Returns:
         int: The number of audio files found.
         """
+        from src.lib.fs_utils import filter_paths_by_depth
 
-        return len(self.__class__(self.path, root=self.root, mindepth=mindepth, maxdepth=maxdepth).files_recursive)
+        return len(filter_paths_by_depth((f.path for f in self.files_recursive), self.path, mindepth, maxdepth))
 
     @property
     def name(self):

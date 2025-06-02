@@ -542,7 +542,7 @@ def mock_id3_tags():
         for f, tags in files_and_tags:
             write_id3_tags_mutagen(f, tags)
 
-        return [(t := Id3Tags.from_file(f)) and t.to_dict() for f, _ in files_and_tags]
+        return [(t := Id3Tags.from_file(f, no_cache=True)) and t.to_dict() for f, _ in files_and_tags]
 
     return write_tags
 

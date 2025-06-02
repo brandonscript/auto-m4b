@@ -152,11 +152,15 @@ def write_m4b_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path |
 def write_id3_tags_mutagen(
     file: "Path | BooksTree", book: "Audiobook | dict[str, Any]", cover: Path | None = None
 ) -> None:
+    from src.lib.id3_tags import Id3Tags
+
     path = file.path if isinstance(file, BooksTree) else file
     if path.suffix in [".m4b", ".m4a"]:
         write_m4b_tags(path, book, cover)
     else:
         write_mp3_tags(path, book, cover)
+    # Delete from tags cache
+    Id3Tags.rm_from_cache(path)
 
 
 def write_mp3_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None) -> None:
@@ -515,13 +519,13 @@ def extract_metadata(book: "Audiobook", quiet: bool = False) -> "Audiobook":
     id3_score = MetadataScore(book, sample_audio2_tags)  # type: ignore
 
     t3 = time.time()
-    book.title = id3_score.determine_title(book.fs_title)
+    book.title = id3_score.determine_title(fallback=book.fs_title)
     book.album = book.title
     book.sortalbum = strip_leading_articles(book.title)
 
-    book.artist = id3_score.determine_author(book.fs_author)
-    book.narrator = id3_score.determine_narrator(book.fs_narrator)
-    book.albumartist = id3_score.determine_albumartist()
+    book.artist = id3_score.determine_author(fallback=book.fs_author)
+    book.narrator = id3_score.determine_narrator(fallback=book.fs_narrator)
+    book.albumartist = id3_score.determine_albumartist(fallback=book.fs_author)
 
     t4 = time.time()
 

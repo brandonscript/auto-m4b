@@ -14,6 +14,7 @@ from src.lib.ffmpeg_utils import (
 )
 from src.lib.formatters import human_bitrate, to_audiobook_fmt
 from src.lib.fs_utils import (
+    count_audio_files_in_dir,
     cp_file_into_dir,
     find_cover_art_file,
     get_size,
@@ -264,7 +265,11 @@ class Audiobook(BaseModel):
         return self._inbox_item.num_books_in_series if self._inbox_item else -1
 
     def num_files(self, for_dir: DirName):
-        return BooksTree(getattr(self, for_dir + "_dir")).count_files()
+        d = for_dir + "_dir"
+        this_dir = getattr(self, d)
+        if for_dir == "inbox" and self.active_dir_name == "inbox" and self.tree:
+            return self.tree.count_files()
+        return count_audio_files_in_dir(this_dir, only_file_exts=cfg.AUDIO_EXTS)
 
     @property
     def num_roman_numerals(self):
@@ -328,6 +333,10 @@ class Audiobook(BaseModel):
     @property
     def active_dir(self) -> Path:
         return getattr(self, f"{self._active_dir or 'inbox'}_dir")
+
+    @property
+    def active_dir_name(self) -> DirName:
+        return self._active_dir or "inbox"
 
     @property
     def author(self):
