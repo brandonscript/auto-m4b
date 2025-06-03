@@ -112,6 +112,8 @@ mutagen = "^1.47.0"
 spacy = { version = "<4", extras = ["apple"], platform = "darwin" }
 nltk = "^3.9.1"
 lazy = "^1.6"
+requests = "^2.32.3"
+requests-cache = "^1.2.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"

@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -218,3 +219,7 @@ def truncate_middle(s: str, max_len: int) -> str:
         return s
     half_len = max_len // 2
     return f"{s[:half_len]}...{s[-half_len:]}"
+
+
+def strip_leading_the(s: str) -> str:
+    return re.sub(r"^the\s+", "", s, flags=re.I)

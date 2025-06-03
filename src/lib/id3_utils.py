@@ -12,6 +12,8 @@ from mutagen.mp3 import HeaderNotFoundError
 from tinta import Tinta
 
 from lib.ffprobe_utils import ffprobe_file
+from lib.formatters import strip_leading_the
+from lib.ol_lookup import open_library_lookup_author, open_library_lookup_title
 from src.lib.books_tree import BooksTree
 from src.lib.cleaners import strip_leading_articles
 from src.lib.fs_utils import find_first_audio_file
@@ -31,7 +33,7 @@ from src.lib.term import (
     print_list_item,
     smart_print,
 )
-from src.lib.typing import AdditionalTags, BadFileError, Id3TagDict, TagSource
+from src.lib.typing import AdditionalTags, BadFileError, Id3TagDict, Id3TagDictWithDnumTnum, NotNone, TagSource
 
 MissingApplicationError = ValueError
 
@@ -68,6 +70,7 @@ TagSet = NamedTuple(
         ("title", str),
         ("artist", str),
         ("album", str),
+        ("sortalbum", str),
         ("albumartist", str),
         ("composer", str),
         ("date", str),
@@ -77,25 +80,18 @@ TagSet = NamedTuple(
 )
 
 
-def _tags_from_book_or_dict(book_or_dict: "Audiobook | dict[str, Any]") -> TagSet:
-    if isinstance(book_or_dict, dict):
-        title = str(book_or_dict.get("title", ""))
-        artist = str(book_or_dict.get("artist", ""))
-        album = str(book_or_dict.get("album", ""))
-        albumartist = str(book_or_dict.get("albumartist", ""))
-        composer = str(book_or_dict.get("composer", ""))
-        date = str(book_or_dict.get("date", ""))
-        track_num = book_or_dict.get("track_num", (1, 1))
-        comment = str(book_or_dict.get("comment", ""))
-    else:
-        title = book_or_dict.title
-        artist = book_or_dict.artist
-        album = book_or_dict.album
-        albumartist = book_or_dict.albumartist
-        composer = book_or_dict.composer
-        date = book_or_dict.date
-        track_num = book_or_dict.track_num
-        comment = book_or_dict.comment
+def _tags_from_dict(tags: Id3TagDictWithDnumTnum) -> TagSet:
+    title = str(tags.get("title", ""))
+    artist = str(tags.get("artist", ""))  # type: ignore
+    album = str(tags.get("album", ""))
+    sortalbum = str(tags.get("sortalbum", album))
+    albumartist = str(tags.get("albumartist", ""))
+    composer = str(tags.get("composer", ""))
+    date = str(tags.get("date", ""))
+    track_num = cast(tuple[int, int], tags.get("track_num", tags.get("track", (1, 1))))
+    if not track_num:
+        track_num = cast(tuple[int, int], tags.get("track", (1, 1)))
+    comment = str(tags.get("comment", ""))
 
     try:
         d = datetime.datetime.strptime(date, "%Y-%m-%d")
@@ -105,10 +101,15 @@ def _tags_from_book_or_dict(book_or_dict: "Audiobook | dict[str, Any]") -> TagSe
     if year or d:
         date = d.strftime("%Y-%m-%d") if d else f"{year}-01-01"
 
-    return TagSet(title, artist, album, albumartist, composer, date, track_num, comment)
+    return TagSet(title, artist, album, sortalbum, albumartist, composer, date, track_num, comment)
 
 
-def write_m4b_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None):
+def write_m4b_tags(
+    file: Path,
+    tags: Id3TagDictWithDnumTnum,
+    *,
+    cover: Path | None = None,
+):
     """Uses mutagen to write id3 tags to an m4b file"""
     try:
         from mutagen.mp4 import MP4, MP4Cover
@@ -120,16 +121,18 @@ def write_m4b_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path |
     if not file.exists():
         raise FileNotFoundError(f"Error: Cannot write id3 tags, '{file}' does not exist")
 
-    title, artist, album, albumartist, composer, date, track_num, comment = _tags_from_book_or_dict(book)
+    title, artist, album, sortalbum, albumartist, composer, date, _tn, comment = _tags_from_dict(tags)
 
     if f := MP4(file):
         f["\xa9nam"] = title
         f["\xa9ART"] = artist
         f["\xa9alb"] = album
+        f["\xa9soa"] = sortalbum
         f["aART"] = albumartist
         f["\xa9wrt"] = composer
         f["\xa9day"] = date
-        f["trkn"] = [(track_num[0], track_num[1])]
+        f["trkn"] = [(1, 1)]
+        f["disk"] = ""
         f["\xa9cmt"] = comment
 
         # if cover exists, determine if it is jpg or png and set it
@@ -150,20 +153,31 @@ def write_m4b_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path |
 
 
 def write_id3_tags_mutagen(
-    file: "Path | BooksTree", book: "Audiobook | dict[str, Any]", cover: Path | None = None
+    file: "Path | BooksTree",
+    tags: Id3TagDictWithDnumTnum,
+    *,
+    cover: Path | None = None,
 ) -> None:
     from src.lib.id3_tags import Id3Tags
 
     path = file.path if isinstance(file, BooksTree) else file
     if path.suffix in [".m4b", ".m4a"]:
-        write_m4b_tags(path, book, cover)
+        write_m4b_tags(path, tags, cover=cover)
     else:
-        write_mp3_tags(path, book, cover)
+        write_mp3_tags(path, tags, cover=cover)
     # Delete from tags cache
     Id3Tags.rm_from_cache(path)
+    ...
+    ...
 
 
-def write_mp3_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path | None = None) -> None:
+def write_mp3_tags(
+    file: Path,
+    tags: Id3TagDictWithDnumTnum,
+    *,
+    cover: Path | None = None,
+    exclude: list[Literal["track_num", "disc_num"]] = [],
+) -> None:
     try:
         from mutagen.easyid3 import EasyID3
         from mutagen.id3 import APIC, ID3
@@ -178,17 +192,18 @@ def write_mp3_tags(file: Path, book: "Audiobook | dict[str, Any]", cover: Path |
     if not file.exists():
         raise FileNotFoundError(f"Error: Cannot write id3 tags, '{file}' does not exist")
 
-    title, artist, album, albumartist, composer, date, track_num, comment = _tags_from_book_or_dict(book)
+    title, artist, album, sortalbum, albumartist, composer, date, _tn, comment = _tags_from_dict(tags)
 
     if f := EasyID3(file):
         f["title"] = title
         f["artist"] = artist
         f["album"] = album
+        f["sortalbum"] = sortalbum
         f["albumartist"] = albumartist
         f["author"] = artist
         f["composer"] = composer
         f["comment"] = comment
-        f["tracknumber"] = f"{track_num[0]}/{track_num[1]}"
+        f["tracknumber"] = "1/1"
         f["discnumber"] = ""
         f["date"] = date
         f["originaldate"] = date
@@ -236,7 +251,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
     smart_print("\nVerifying id3 tags...", end="")
 
-    book_to_check = Audiobook(m4b_to_check).extract_metadata(console=True)
+    book_to_check = Audiobook(m4b_to_check).extract_metadata()
 
     title_needs_updating = False
     author_needs_updating = False
@@ -247,48 +262,192 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
     updates = []
 
+    new_tags = book.to_id3_tags()
+    # We don't want to write track/disc tags to the m4b
+    new_tags.pop("track_num", None)
+    new_tags.pop("disc_num", None)
+
+    ol_author_candidates = [
+        (open_library_lookup_author(book.author, method="score"), "author"),
+        (open_library_lookup_author(book.author, method="similarity"), "author"),
+        (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
+    ]
+    ol_title = open_library_lookup_title(book.title, author=book.author, narrator=book.narrator, method="similarity")
+    ol_author, author_prop = next(
+        (
+            c
+            for c in sorted(ol_author_candidates, key=lambda x: x[0].score(fallback=999) if x[0] else 0.0)
+            if c[0] and c[0].has_match
+        ),
+        (None, None),
+    )
+
     def _print_needs_updating(what: str, left_value: str | None, right_value: str) -> None:
-        s = Tinta().dark_grey(f"- ").grey(what).dark_grey("needs updating:")
         if left_value:
+            s = Tinta().dark_grey(f"- ").grey(what).dark_grey("needs updating:")
             s.amber(left_value)
         else:
-            s.light_grey("Missing")
+            s = Tinta().dark_grey(f"- ").grey(what).dark_grey("is missing")
         s.dark_grey("»").mint(right_value)
         smart_print(s.to_str())
 
-    if book.title and book_to_check.id3_title != book.title:
-        title_needs_updating = True
-        updates.append(lambda: _print_needs_updating("Title", book_to_check.id3_title, book.title))
+    def _check_title(orop: str, id3_tag: TagSource):
+        nonlocal title_needs_updating, new_tags
+        tag_value = getattr(book_to_check, f"id3_{id3_tag}")
+        if bool(ol_title):
+            if ol_title.has_match and ol_title.score(fallback=999) < 0.9:
+                title_needs_updating = True
+                new_title = NotNone(ol_title).title
+                updates.append(lambda: _print_needs_updating(orop, tag_value, new_title))
+                new_tags[id3_tag] = new_title
+                new_tags["sortalbum"] = strip_leading_the(new_title)
+        elif book.title and (tag_value != book.title):
+            title_needs_updating = True
+            updates.append(lambda: _print_needs_updating(orop, tag_value, book.title))
+            new_tags[id3_tag] = book.title
+            new_tags["sortalbum"] = strip_leading_the(book.title)
 
-    if book.author and book_to_check.id3_artist != book.author:
-        author_needs_updating = True
-        updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, book.author))
+    def _check_author(prop: str, id3_tag: TagSource):
+        nonlocal author_needs_updating, narrator_needs_updating, new_tags
+        tag_value = getattr(book_to_check, f"id3_{id3_tag}")
 
-    if book.title and book_to_check.id3_album != book.title:
-        title_needs_updating = True
-        updates.append(lambda: _print_needs_updating("Album (title)", book_to_check.id3_album, book.title))
+        if bool(ol_title):
+            if ol_title.has_match and (
+                ol_title.author_score(fallback=999) < 0.9 or ol_title.author_and_narrator_swapped
+            ):
+                author_needs_updating = True
+                new_author = NotNone(ol_title).author  # will return correct author or narrator if swapped
+                updates.append(lambda: _print_needs_updating(prop, tag_value, new_author))
+                new_tags[id3_tag] = new_author
+                if ol_title.author_and_narrator_swapped:
+                    narrator_needs_updating = True
+                    new_narrator = NotNone(ol_title).narrator
+                    updates.append(lambda: _print_needs_updating(prop, tag_value, new_narrator))
+                    new_tags["composer"] = new_narrator
+        elif bool(ol_author):
+            if ol_author.has_match and (ol_author.score(fallback=999) < 0.9 or author_prop == "narrator"):
+                if author_prop == "author":
+                    author_needs_updating = True
+                    new_author = NotNone(ol_author).name
+                    updates.append(lambda: _print_needs_updating(prop, tag_value, NotNone(ol_author).name))
+                    new_tags[id3_tag] = new_author
+                elif author_prop == "narrator":
+                    narrator_needs_updating = True
+                    new_narrator = NotNone(ol_author).name
+                    updates.append(lambda: _print_needs_updating(prop, tag_value, new_narrator))
+                    new_tags["composer"] = new_narrator
+        elif book.author and (tag_value != book.author):
+            author_needs_updating = True
+            updates.append(lambda: _print_needs_updating(prop, tag_value, book.author))
+            new_tags[id3_tag] = book.author
 
-    if book.title and book_to_check.id3_sortalbum != book.title:
-        title_needs_updating = True
-        updates.append(lambda: _print_needs_updating("Sort album (title)", book_to_check.id3_sortalbum, book.title))
+    def _check_narrator(prop: str, id3_tag: TagSource):
+        nonlocal narrator_needs_updating
+        tag_value = getattr(book_to_check, f"id3_{id3_tag}")
+        if bool(ol_title):
+            if ol_title.has_match and ol_title.author_and_narrator_swapped:
+                narrator_needs_updating = True
+                new_author = NotNone(ol_title).author
+                updates.append(lambda: _print_needs_updating(prop, tag_value, new_author))
+                new_tags["artist"] = new_author
+                new_tags["albumartist"] = new_author
+        elif bool(ol_author):
+            if ol_author.has_match and author_prop == "narrator":
+                narrator_needs_updating = True
+                new_narrator = NotNone(ol_author).name
+                updates.append(lambda: _print_needs_updating(prop, tag_value, new_narrator))
+                new_tags["composer"] = new_narrator
+        elif book.narrator and (tag_value != book.narrator):
+            narrator_needs_updating = True
+            updates.append(lambda: _print_needs_updating(prop, tag_value, book.narrator))
+            new_tags["composer"] = book.narrator
 
-    if book.author and book_to_check.id3_albumartist != book.author:
-        author_needs_updating = True
-        updates.append(
-            lambda: _print_needs_updating("Album artist (author)", book_to_check.id3_albumartist, book.author)
+    def _check_date(prop: str, id3_tag: TagSource):
+        nonlocal date_needs_updating, new_tags
+        tag_value = getattr(book_to_check, f"id3_{id3_tag}")
+        tags_years_match = get_year_from_date(tag_value) == get_year_from_date(book.date)
+        ol_years_match = (
+            bool(ol_title) and ol_title.has_match and get_year_from_date(ol_title.date) == get_year_from_date(book.date)
         )
+        if not ol_years_match and NotNone(ol_title).score(fallback=0) > 0.75:
+            date_needs_updating = True
+            new_date = NotNone(ol_title).date
+            updates.append(lambda: _print_needs_updating(prop, tag_value, new_date))
+            new_tags[id3_tag] = new_date
+        elif book.date and not tags_years_match:
+            date_needs_updating = True
+            updates.append(lambda: _print_needs_updating(prop, tag_value, book.date))
+            new_tags[id3_tag] = book.date
 
-    if book.narrator and book_to_check.id3_composer != book.narrator:
-        narrator_needs_updating = True
-        updates.append(lambda: _print_needs_updating("Composer (narrator)", book_to_check.id3_composer, book.narrator))
+    # Title - because multi-file books usually have unique titles for each track,
+    # but a merged m4b only gets one title (usually the same as the album name)
+    # if bool(ol_title):
+    #     if ol_title.has_match and ol_title.score() < 0.9:
+    #         title_needs_updating = True
+    #         updates.append(lambda: _print_needs_updating("Title", book_to_check.id3_title, ol_title.name))
+    # elif book.title and (book_to_check.id3_title != book.title):
+    #     title_needs_updating = True
+    #     updates.append(lambda: _print_needs_updating("Title", book_to_check.id3_title, book.title))
+    _check_title("Title", "title")
 
-    if book.date and get_year_from_date(book_to_check.id3_date) != get_year_from_date(book.date):
-        date_needs_updating = True
-        updates.append(lambda: _print_needs_updating("Date", book_to_check.id3_date, book.date))
+    # Author
+    # if bool(ol_title):
+    #     if ol_title.has_match and (ol_title.author_score() < 0.9 or ol_title.author_is_narrator):
+    #         author_needs_updating = True
+    #         updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, ol_title.author))
+    # elif bool(ol_author):
+    #     if ol_author.has_match and (ol_author.score() < 0.9 or author_prop == "narrator"):
+    #         author_needs_updating = True
+    #         updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, ol_author.name))
+    # elif book.author and (book_to_check.id3_artist != book.author):
+    #     author_needs_updating = True
+    #     updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, book.author))
+    _check_author("Artist (author)", "artist")
+
+    # Album
+    # if bool(ol_title):
+    #     if ol_title.has_match and ol_title.score() < 0.9:
+    #         title_needs_updating = True
+    #         updates.append(lambda: _print_needs_updating("Album (title)", book_to_check.id3_album, ol_title.name))
+    # elif book.title and book_to_check.id3_album != book.title:
+    #     title_needs_updating = True
+    #     updates.append(lambda: _print_needs_updating("Album (title)", book_to_check.id3_album, book.title))
+    _check_title("Album (title)", "album")
+
+    # Sort album
+    # if bool(ol_title):
+    #     if ol_title.has_match and ol_title.score() < 0.9:
+    #         title_needs_updating = True
+    #         updates.append(
+    #             lambda: _print_needs_updating("Sort album (title)", book_to_check.id3_sortalbum, ol_title.name)
+    #         )
+    # elif book.title and book_to_check.id3_sortalbum != book.title:
+    #     title_needs_updating = True
+    #     updates.append(lambda: _print_needs_updating("Sort album (title)", book_to_check.id3_sortalbum, book.title))
+    _check_title("Sort album (title)", "sortalbum")
+
+    # if book.author and book_to_check.id3_albumartist != book.author:
+    #     author_needs_updating = True
+    #     updates.append(
+    #         lambda: _print_needs_updating("Album artist (author)", book_to_check.id3_albumartist, book.author)
+    #     )
+    _check_author("Album artist (author)", "albumartist")
+
+    # if book.narrator and book_to_check.id3_composer != book.narrator:
+    #     narrator_needs_updating = True
+    #     updates.append(lambda: _print_needs_updating("Composer (narrator)", book_to_check.id3_composer, book.narrator))
+    _check_narrator("Composer (narrator)", "composer")
+
+    # if book.date and get_year_from_date(book_to_check.id3_date) != get_year_from_date(book.date):
+    #     date_needs_updating = True
+    #     updates.append(lambda: _print_needs_updating("Date", book_to_check.id3_date, book.date))
+    #     new_tags["date"] = book.date
+    _check_date("Date", "date")
 
     if book.comment and compare_trim(book_to_check.id3_comment, book.comment):
         comment_needs_updating = True
         updates.append(lambda: _print_needs_updating("Comment", book_to_check.id3_comment, book.comment))
+        new_tags["comment"] = book.comment
 
     if (cover := book.cover_art_file) and cover.exists() and not book_to_check.has_id3_cover:
         cover_needs_updating = True
@@ -306,7 +465,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     )
     if needs_update:
         nl()
-        write_id3_tags_mutagen(m4b_to_check, book, book.cover_art_file)
+        write_id3_tags_mutagen(m4b_to_check, new_tags, cover=book.cover_art_file)
         [update() for update in updates]
         smart_print(Tinta("\nDone").mint("✓").to_str())
 
@@ -358,9 +517,8 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
 
     try:
         if ffresult := ffprobe_file(path):
-            # '-s': '320x240'}):
             # find a stream that is jpg or png and has a disposition of attached_pic
-            for stream in ffresult["streams"]:
+            for stream in ffresult.get("streams", []):
                 if stream.get("codec_name") in ["mjpeg", "png"] and stream.get("disposition", {}).get("attached_pic"):
                     content_type = stream.get("codec_name")
                     common_steps = [

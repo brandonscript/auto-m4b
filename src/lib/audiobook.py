@@ -22,8 +22,8 @@ from src.lib.fs_utils import (
     last_updated_at,
 )
 from src.lib.misc import get_dir_name_from_path
-from src.lib.parsers import count_distinct_romans, extract_path_info
-from src.lib.typing import AudiobookFmt, DirName, SizeFmt
+from src.lib.parsers import count_distinct_romans, extract_path_info, get_year_from_date
+from src.lib.typing import AudiobookFmt, DirName, Id3TagDictWithDnumTnum, SizeFmt
 
 
 class Audiobook(BaseModel):
@@ -38,6 +38,8 @@ class Audiobook(BaseModel):
     id3_year: str = ""
     id3_comment: str = ""
     id3_composer: str = ""
+    id3_track_num: tuple[int, int] = (1, 1)
+    id3_disc_num: tuple[int, int] = (1, 1)
     has_id3_cover: bool = False
     fs_author: str = ""
     fs_title: str = ""
@@ -59,6 +61,7 @@ class Audiobook(BaseModel):
     narrator: str = ""
     title_is_partno: bool = False
     track_num: tuple[int, int] = (1, 1)
+    disc_num: tuple[int, int] = (1, 1)
     m4b_num_parts: int = 1
     _active_dir: DirName | None = None
 
@@ -123,6 +126,47 @@ class Audiobook(BaseModel):
         except Exception:
             # no cover art found, probably
             return None
+
+    def update_from_tags(self):
+        from src.lib.id3_tags import Id3Tags
+
+        new_tags = Id3Tags.from_file(self.sample_audio1, throw=False)
+        if not new_tags:
+            return
+        if new_tags.album:
+            self.album = new_tags.album
+            self.id3_album = new_tags.album
+        if new_tags.title:
+            self.title = new_tags.title
+            self.id3_title = new_tags.title
+        if new_tags.artist:
+            self.artist = new_tags.artist
+            self.id3_artist = new_tags.artist
+        if new_tags.albumartist:
+            self.albumartist = new_tags.albumartist
+            self.id3_albumartist = new_tags.albumartist
+        if new_tags.composer:
+            self.composer = new_tags.composer
+            self.id3_composer = new_tags.composer
+        if new_tags.date:
+            self.date = new_tags.date
+            self.id3_date = new_tags.date
+        if new_tags.track_num:
+            self.track_num = (new_tags.track_num, new_tags.track_total or new_tags.track_num)
+        if new_tags.disc_num:
+            self.disc_num = (new_tags.disc_num, new_tags.disc_total or new_tags.disc_num)
+        if new_tags.comment:
+            self.comment = new_tags.comment
+            self.id3_comment = new_tags.comment
+        if new_tags.sortalbum:
+            self.sortalbum = new_tags.sortalbum
+            self.id3_sortalbum = new_tags.sortalbum
+        if new_tags.year:
+            self.id3_year = new_tags.year
+        elif new_tags.date:
+            self.id3_year = get_year_from_date(new_tags.date)
+
+        return self
 
     @property
     def orig_file_type(self):
@@ -470,3 +514,15 @@ Size: {self.size("inbox", "human")}
             if k.startswith("_") or v is None or v == "":
                 continue
             print(f"- {k}: {v}")
+
+    def to_id3_tags(self) -> Id3TagDictWithDnumTnum:
+        return {
+            "title": self.title,
+            "artist": self.artist,
+            "album": self.album,
+            "albumartist": self.albumartist,
+            "composer": self.composer,
+            "date": self.date,
+            "track_num": self.track_num,
+            "disc_num": self.disc_num,
+        }

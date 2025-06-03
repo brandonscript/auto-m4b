@@ -384,7 +384,7 @@ def test_parse_tags_from_fixtures(
         (
             "house_on_the_cliff__flat_mp3",
             {
-                "title": "The House on the Cliff, Version 3",
+                "title": "The House on the Cliff, Brown Cloth",
                 "author": "Franklin W. Dixon",
                 "narrator": "",
             },
@@ -408,7 +408,7 @@ def test_verify_tags_after_convert(
     book.extract_metadata()
     _tags1 = extract_id3_tags(book.sample_audio1)
     _tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
-    converted = Audiobook(book.converted_file).extract_metadata()
+    converted = Audiobook(book.converted_file).update_from_tags()
     _converted_tags = extract_id3_tags(book.converted_file)
 
     # Ensure converted file has the same tags as the expected

@@ -4,7 +4,7 @@ import regex as rex
 
 # TODO: Add test coverage for narrator with /
 # fmt: off
-_titlecase_word = r"[A-Z][\p{Ll}\.'-]*"
+_titlecase_word = r"[A-Z][\p{Ll}\.'-]*[^_]"
 _author_prefixes = r"[Ww]ritten.?[Bb]y|[Aa]uthor"
 _narrator_prefixes = r"(?:[Rr]ead|[Nn]arrated|[Pp]erformed).?[Bb]y|[Nn]arrator"
 def _name_substr(ignore_if_trailing: str = '', max_l_of_comma: int = 4, max_r_of_comma: int = 4):
@@ -48,9 +48,14 @@ book_series_pattern = re.compile(r"(?:^|(?<=[\W_-]))(bo{0,2}k|vol(?:ume)?|#)(?:\
 series_parent_pattern = re.compile(rf"(?:(?<=\W)|^){_div}series{_div}.*$", re.I)
 multi_part_pattern = re.compile(r"(?:^|(?<=[\W_-]))(pa?r?t|ch(?:\.|apter))(?:\b|[\W_-])*(\d+)", re.I)
 
+underscores_joining_words_pattern = re.compile(r"(?<!\s)_(?!=\s)")
+
+junk_chars_name_pattern = re.compile(r"[\(\)\[\]\{\}\|\~\@\#\$\¢\£\¡\–\—\*\%\^\*\=\+\_\?\/\\\:]")
+junk_chars_title_pattern = re.compile(r"[\(\)\[\]\{\}\|\~\@\^\–\—\*\=\+\_\?\/\\]")
+title_chunk_pattern = re.compile(r"[,-:;–—_]\s*(?P<chunk>(?:vers?\.?|version|v\.|vol\.?|volume|bk\.|book|part|ch\.|pt\.|chapter|ep\.|episode|series)\s*\d+\W*$)", re.I)
 only_non_alphanum_pattern = rex.compile(r"^[^\p{L}]+$")
 abbreviated_names_pattern = re.compile(r"^(?:[A-Z]\.?){1,3}$")
 uppercase_1_3_letters_pattern = re.compile(r"^(?:[A-Z]){1,3}$")
-leading_trailing_non_alphanum_pattern = rex.compile(r"^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$", flags=rex.UNICODE)
+leading_trailing_non_alphanum_pattern = rex.compile(r"^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$", flags=(rex.UNICODE | rex.V1))
 open_library_user_agent_pattern = re.compile(r"^(?P<app>[^/]+)/(?P<version>[0-9.]+)? \((?P<email>[^\)]+)\)$") # matches: MyAppName/1.0 (myemail@example.com)
 # fmt: on

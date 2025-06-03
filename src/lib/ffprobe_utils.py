@@ -82,6 +82,9 @@ def fix_ffprobe(counter: int = 0):
             raise ImportError(f"ffmpeg's ffprobe is not installed, please fix it manually:\n\n $ {fix_cmd}\n\n")
 
 
+FFProbeResult = dict[str, Any]
+
+
 def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, throw: bool = False):
     """Extract metadata from a file using ffprobe."""
 
@@ -96,7 +99,7 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
         raise FileNotFoundError(f"Error: Cannot extract id3 tag, '{file}' does not exist")
     try:
         options = options or {}
-        probe_result = ffmpeg.probe(str(file), cmd="ffprobe", **options)
+        probe_result: dict[str, Any] = ffmpeg.probe(str(file), cmd="ffprobe", **options)
     except Exception as e:
         from src.lib.logger import write_err_file
 
@@ -113,12 +116,12 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
             err = f"ffprobe failed for {split_err_str[-1]}" if split_err_str else f"ffprobe failed for {file}"
             if throw:
                 raise BadFileError(err) from e
-            return err
+            return None
 
         if "No such file or directory: 'ffprobe'" in err_str and FFPROBE_REPAIRS <= 3:
             fix_ffprobe()
             FFPROBE_REPAIRS += 1
-            return ffprobe_file(file, options=options, throw=throw)
+            return cast(FFProbeResult, ffprobe_file(file, options=options, throw=throw))
 
         write_err_file(file, e, "ffprobe")
         base_msg = f"Error: Could run ffprobe on file '{file}' with options {options}."
@@ -132,4 +135,4 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
             print_debug(err_str)
         return None
 
-    return cast(dict, probe_result)
+    return cast(FFProbeResult, probe_result)

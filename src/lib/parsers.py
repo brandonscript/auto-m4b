@@ -17,6 +17,7 @@ from src.lib.misc import (
     any_in,
     get_numbers_in_string,
     isorted,
+    iter_prev_curr_next,
     re_group,
 )
 from src.lib.nlp import english_words, inflect, nlp
@@ -540,7 +541,7 @@ def score_name_candidates(candidates: list[tuple[str, str]]) -> dict[str, float]
 
         # If score is < 1.0, check open library and average the result
         if entity_score < 1.0:
-            if (ol_score := open_library_lookup_author(name)) is not None:
+            if (ol_author := open_library_lookup_author(name)) and (ol_score := ol_author.score()) is not None:
                 if ol_score == 1.0:
                     entity_score = 1.0
                 else:
@@ -574,11 +575,11 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
             names.append(("PERSON", " ".join(current_name)))
             current_name = []
 
-    def _is_noun(tk: Any) -> bool:
+    def _is_proper_noun(tk: Any) -> bool:
         if (
-            (isinstance(tk, tuple) and tk[1] in ["NNP", "NN"])
+            (isinstance(tk, tuple) and tk[1] in ["NNP", "NNPS"])
             or _is_tree(tk)
-            and any_in([leaf[1] for leaf in cast(Tree, tk).leaves()], ["NNP", "NN"])
+            and any_in([leaf[1] for leaf in cast(Tree, tk).leaves()], ["NNP", "NNPS"])
         ):
             return True
         return False
@@ -586,26 +587,7 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
     def _is_non_name_char(c: str | None) -> bool:
         if not c:
             return False
-        return c in [
-            "(",
-            ")",
-            "[",
-            "]",
-            "{",
-            "}",
-            "|",
-            "~",
-            "@",
-            "#",
-            "$",
-            "%",
-            "^",
-            "*",
-            "=",
-            "+",
-            "_",
-            "?",
-        ]
+        return bool(junk_chars_name_pattern.search(c))
 
     def _is_period(tk: Any) -> bool:
         return isinstance(tk, tuple) and tk[0].strip() == "."
@@ -629,17 +611,17 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
             return True
         if _is_non_name_char(curr[0]):
             return False
-        if _is_noun(curr) and _is_person(prev):
+        if _is_proper_noun(curr) and _is_person(prev):
             return True
-        if _is_noun(nxt) and _is_person(curr):
+        if _is_proper_noun(nxt) and _is_person(curr):
             return True
-        if _is_noun(prev) and (_is_person(curr) or _is_period(curr)):
+        if _is_proper_noun(prev) and (_is_person(curr) or _is_period(curr)):
             return True
-        if (_is_noun(curr) or _is_period(curr)) and _is_person(nxt):
+        if (_is_proper_noun(curr) or _is_period(curr)) and _is_person(nxt):
             return True
         if _is_abbreviated_name(curr):
             return True
-        if _is_abbreviated_name(prev) and _is_noun(curr):
+        if _is_abbreviated_name(prev) and _is_proper_noun(curr):
             return True
         return False
 
@@ -673,7 +655,18 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
 
     # Handle short string edge case
     if len(tokens) <= 3 and not names:  # Assume short strings might be a name
-        names = [("PERSON", " ".join(tokens))]
+        names = [
+            (
+                "UNKNOWN",
+                " ".join(
+                    (
+                        t
+                        for p, t, n in iter_prev_curr_next(tokens)
+                        if t and len(t) < 11 and not any(map(_is_non_name_char, [p, t, n]))
+                    )
+                ),
+            )
+        ]
 
     # Use nlp to double check
     nlp_people, _ = nlp_extract(s)
@@ -723,6 +716,9 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
             author_pattern = author_generic_pattern
             narrator_pattern = narrator_generic_pattern
         case "fs":
+            # if we're dealing with a filesystem author name, we need to replace underscores
+            # used to join words with spaces because often these are junk in the filename.
+            author = underscores_joining_words_pattern.sub(" ", author)
             author_pattern = author_fs_pattern
             narrator_pattern = narrator_generic_pattern
         case "comment":
@@ -738,6 +734,14 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
 
     author = re_group(author_pattern.search(author), "author", default=fallback).strip()
     narrator = re_group(narrator_pattern.search(narrator), "narrator", default=fallback).strip()
+
+    # Remove junk chars
+    author = junk_chars_name_pattern.sub("", author)
+    narrator = junk_chars_name_pattern.sub("", narrator)
+
+    if author == narrator:
+        # if the author and narrator are the same, set the narrator to an empty string
+        narrator = ""
 
     # author_ok = percent_human_name_chars_in_str(author) > 0.7
     # narrator_ok = percent_human_name_chars_in_str(narrator) > 0.7
@@ -758,7 +762,7 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
         author = _author
         narrator = _narrator
 
-    nltk_s = next((n for (n, score) in get_nltk_names(s) if score > 0), None)
+    nltk_s = next((n for (n, score) in get_nltk_names(junk_chars_name_pattern.sub("", s)) if score > 0), None)
     nltk_author = None if not author else next((n for (n, score) in get_nltk_names(author) if score > 0.7), None)
     nltk_narrator = None if not narrator else next((n for (n, score) in get_nltk_names(narrator) if score > 0.7), None)
 

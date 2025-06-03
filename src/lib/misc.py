@@ -518,3 +518,27 @@ def ensure_list(v: TEn | list[TEn]) -> list[TEn]:
     ):
         return list(v)
     return [v]
+
+
+Mf = TypeVar("Mf")
+
+
+def max_if(iterable: Iterable[T], fallback: Mf | None = None) -> T | Mf | None:
+    if not (iterable := list(iterable)):
+        return fallback
+    return max(iterable)
+
+
+def min_if(iterable: Iterable[T], fallback: Mf | None = None) -> T | Mf | None:
+    if not (iterable := list(iterable)):
+        return fallback
+    return min(iterable)
+
+
+def iter_prev_curr_next(iterable: Iterable[T]) -> Iterable[tuple[T | None, T, T | None]]:
+    if not (iterable := list(iterable)):
+        return []
+    return cast(
+        Iterable[tuple[T | None, T, T | None]],
+        list(zip([None, None, *iterable], [None, *iterable, None], [*iterable, None, None])),
+    )

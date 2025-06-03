@@ -7,6 +7,7 @@ from typing import (
     Concatenate,
     Literal,
     NamedTuple,
+    Optional,
     ParamSpec,
     TypeVar,
 )
@@ -79,6 +80,9 @@ TagSource = Literal[
 ]
 AdditionalTags = Literal["cover", "track", "discnumber", "encoded by", "date", "genre", "publisher", "_updated"]
 Id3TagDict = dict[TagSource | AdditionalTags, str | float]
+Id3TagDictWithDnumTnum = dict[
+    TagSource | AdditionalTags | Literal["disc_num", "track_num"], str | float | tuple[int, int]
+]
 NameParserTarget = Literal["fs", "generic", "comment"]
 ENV_DIRS = [
     "INBOX_FOLDER",
@@ -152,3 +156,11 @@ SimilarityComparable = Literal[
     "id3_track_nums",
     "pathnames",
 ]
+
+N = TypeVar("N", bound=Any)
+
+
+def NotNone(x: Optional[N] | None) -> N:
+    """Casts the value to the given type, removing the None type from an optional value"""
+    assert x is not None, "Expected value to be not None"
+    return cast(N, x)

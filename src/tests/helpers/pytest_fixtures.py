@@ -10,6 +10,7 @@ import dotenv
 import pytest
 
 from lib.ffmpeg_utils import shrink_mp3_to_size
+from lib.typing import Id3TagDictWithDnumTnum
 from src.lib.fs_utils import clean_dirs, find_adjacent_files_with_same_basename, is_audio_file
 from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState
@@ -536,7 +537,7 @@ def blank_audiobook():
 
 @pytest.fixture(scope="function", autouse=False)
 def mock_id3_tags():
-    def write_tags(*files_and_tags: tuple[Path, dict[str, str]]):
+    def write_tags(*files_and_tags: tuple[Path, Id3TagDictWithDnumTnum]):
         from src.lib.id3_tags import Id3Tags
 
         for f, tags in files_and_tags:
