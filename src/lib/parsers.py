@@ -584,10 +584,11 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
             return True
         return False
 
-    def _is_non_name_char(c: str | None) -> bool:
+    def _is_non_name_char(c: str | tuple[str, str] | None) -> bool:
         if not c:
             return False
-        return bool(junk_chars_name_pattern.search(c))
+        _c = c[0] if isinstance(c, tuple) else c
+        return bool(junk_chars_name_pattern.search(_c))
 
     def _is_period(tk: Any) -> bool:
         return isinstance(tk, tuple) and tk[0].strip() == "."

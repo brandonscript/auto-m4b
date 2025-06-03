@@ -147,6 +147,7 @@ class Audiobook(BaseModel):
             self.id3_albumartist = new_tags.albumartist
         if new_tags.composer:
             self.composer = new_tags.composer
+            self.narrator = new_tags.composer
             self.id3_composer = new_tags.composer
         if new_tags.date:
             self.date = new_tags.date
