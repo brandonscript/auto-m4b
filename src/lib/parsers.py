@@ -699,9 +699,14 @@ def percent_human_name_chars_in_str(s: str) -> float:
 
 
 @cachetools.func.ttl_cache(maxsize=128, ttl=MEMO_TTL)
-def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None) -> AuthorNarrator:
+def parse_names(
+    s: str, target: NameParserTarget, *, fallback: str | None = None, max_chars: int = 40
+) -> AuthorNarrator:
     if fallback is None:
         fallback = s
+
+    if len(s) > max_chars:
+        s = s[:max_chars]
 
     # If 's' is comma-separated, split it into a list of names, call this function recursively
     # for each name, then stitch the results back together with a comma
@@ -808,8 +813,11 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
     return AuthorNarrator(author=author, narrator=narrator)
 
 
-def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = None) -> str:
-    return parse_names(s, target, fallback=fallback).author
+def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = None, max_chars: int = 40) -> str:
+    """Parses an author name from a string, using the given target and fallback.
+    If the author name is longer than max_chars, only from 0-max_chars will be used.
+    """
+    return parse_names(s, target, fallback=fallback).author[:max_chars]
 
 
 def has_graphic_audio(s: str) -> bool:
