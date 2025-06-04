@@ -69,7 +69,7 @@ class BooksTree(BaseModel):
         root: "Path | Audiobook | BooksTree | None" = None,
         mindepth: int | None = None,
         maxdepth: int | None = None,
-        allow_file_root: bool = False,
+        allow_self_root: bool = False,
         match_filter: list[Path] | str | None = None,
         scan: bool | None = None,
         determine_structure: bool = True,
@@ -106,15 +106,12 @@ class BooksTree(BaseModel):
             else:
                 self.parent = r
 
-        if self.depth > 0:
-            assert self.parent, f"[BooksTree] {self.path} has no parent"
-
         self._match_filter = match_filter or cfg.MATCH_FILTER
         if scan or (scan is None and not root):
             self.scan(
                 mindepth=mindepth,
                 maxdepth=maxdepth,
-                allow_file_root=allow_file_root,
+                allow_file_root=allow_self_root,
                 determine_structure=determine_structure,
                 scan_id3=scan_id3,
             )

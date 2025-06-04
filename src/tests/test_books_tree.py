@@ -195,23 +195,6 @@ class xt:
 
 class test_tree_scanning:
 
-    def test_tree_root_is_populated(self, mock_inbox, setup_teardown):
-        tree = BooksTree(TEST_DIRS.inbox, match_filter=MOCKED.all_book_dirs)
-        test_book = tree.dirs[MOCKED.flat_dirs[0].name]
-        assert len(test_book.files) == 3
-        assert tree.is_root
-        assert test_book.root and test_book.root == tree
-        assert test_book.root.dirs
-
-    def test_container_root_is_never_root(self, nathan_lowell__nested_series_m4a: Audiobook):
-        tree = BooksTree(TEST_DIRS.inbox)
-        container = next(iter(tree.dirs.values()))
-        assert not container.is_root
-        assert container.container_root == container
-        for c in container.children_recursive_f:
-            assert not c.is_root
-            assert c.container_root == container
-
     def test_parents(self, mock_inbox, setup_teardown):
         tree = BooksTree(TEST_DIRS.inbox, match_filter=MOCKED.all_book_dirs)
         test_book = tree.dirs[MOCKED.flat_dirs[0].name]
@@ -757,6 +740,23 @@ class test_tree_book_roots:
         assert not extra_paths_found, f"Extra paths found: {extra_paths_found}"
         assert not missing_paths_expected, f"Missing paths expected: {missing_paths_expected}"
 
+    def test_tree_root_is_populated(self, mock_inbox, setup_teardown):
+        tree = BooksTree(TEST_DIRS.inbox, match_filter=MOCKED.all_book_dirs, allow_self_root=True)
+        test_book = tree.dirs[MOCKED.flat_dirs[0].name]
+        assert len(test_book.files) == 3
+        assert tree.is_root
+        assert test_book.root and test_book.root == tree
+        assert test_book.root.dirs
+
+    def test_container_root_is_never_root(self, nathan_lowell__nested_series_m4a: Audiobook):
+        tree = BooksTree(TEST_DIRS.inbox)
+        container = next(iter(tree.dirs.values()))
+        assert not container.is_root
+        assert container.container_root == container
+        for c in container.children_recursive_f:
+            assert not c.is_root
+            assert c.container_root == container
+
 
 class test_tree_structures_series:
 
@@ -954,7 +954,7 @@ class test_tree_finding:
     def test_find_standalone_books_in_inbox(self, mock_inbox, setup_teardown):
         tree = BooksTree(TEST_DIRS.inbox)
 
-        expected_sorted = list(sorted([BooksTree(p, allow_file_root=True) for p in MOCKED.standalone_files_d1]))
+        expected_sorted = list(sorted([BooksTree(p, allow_self_root=True) for p in MOCKED.standalone_files_d1]))
 
         assert list(sorted(tree.files)) == expected_sorted
         assert (

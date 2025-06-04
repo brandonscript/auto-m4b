@@ -146,8 +146,8 @@ class testutils:
 
         if isinstance(match_filter, list):
             match_filter = f"({'|'.join([re.escape(str(m.relative_to(cfg.inbox_dir))) for m in match_filter])})"
-        else:
-            match_filter = re.escape(str(match_filter)) if match_filter else None
+        elif isinstance(match_filter, Path):
+            match_filter = re.escape(str(match_filter.relative_to(cfg.inbox_dir)))
 
         if match_filter is None:
             os.environ.pop("MATCH_FILTER", None)

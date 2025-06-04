@@ -1008,6 +1008,8 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
             return (None, container_score, mixed_score)
 
     except Exception as e:
+        if "pytest" in sys.modules:
+            raise e
         print_debug(f"Error scoring container/mixed: {e}")
         return (None, 0.0, 0.0)
 
@@ -1128,11 +1130,15 @@ def score_flat(tree: "BooksTree") -> float:
 
         return round((completion + contiguous + path_sim) / 3, 3)
     except Exception as e:
+        if "pytest" in sys.modules:
+            raise e
         print_debug(f"Error scoring flat: {e}")
         return 0.0
 
 
-def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone_file", "single"] | None, float, float]:
+def score_single_standalone_file(
+    tree: "BooksTree", *, already_checked: list["BooksTree"] | None = None
+) -> tuple[Literal["standalone_file", "single"] | None, float, float]:
     """
     Only determines score for files, not dirs.
 
@@ -1255,10 +1261,10 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         parent_name_sim = get_similarity([tree.name, p.name], methods=["token_set_ratio", "lcs"]) if p else 0.0
 
         standalone_score = (
-            -siblings_sim
-            + (0.05 * has_m4b_files)
-            + (0.25 * sizes_gt_75mb)
-            + (0.5 * has_mixed_file_types)  # Strong boost for mixed file types
+            +(0.5 - siblings_sim)  # Penalize if siblings are similar
+            + (0.05 * has_m4b_files)  # Tiny boost for m4b files
+            + (0.25 * sizes_gt_75mb)  # Boost for large files
+            + (0.6 * has_mixed_file_types)  # Strong boost for mixed file types
             + (0.05 * parent_has_mixed_content)
             + ((1 - sizes_sim) * 0.75)  # Boost if sizes are dissimilar
             + (0.5 - parent_name_sim)  # Penalize if too similar to parent
@@ -1270,8 +1276,25 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         if tree.is_match:
             ...
 
+        if already_checked is None:
+            already_checked = [tree]
+
+        sibling_files = [f for f in (tree.siblings or []) if f.is_file() and not f == tree]
+
+        for f in sibling_files:
+            if f not in already_checked:
+                already_checked.append(f)
+                (_, s, _) = score_single_standalone_file(f, already_checked=already_checked)
+                bonus = (-0.5 + s) / 10
+                standalone_score += bonus
+            if len(already_checked) >= len(sibling_files):
+                already_checked = None
+                break
+
         return ("standalone_file", round(standalone_score, 3), 0.0)
     except Exception as e:
+        if "pytest" in sys.modules:
+            raise e
         print_debug(f"Error scoring standalone_file: {e}")
         return (None, 0.0, 0.0)
 
@@ -1342,6 +1365,8 @@ def score_series_book(tree: "BooksTree") -> float:
 
         return round(series_book_score, 3)
     except Exception as e:
+        if "pytest" in sys.modules:
+            raise e
         print_debug(f"Error scoring series_book: {e}")
         return 0.0
 
@@ -1509,6 +1534,8 @@ def score_series_parent(tree: "BooksTree") -> float:
 
         return round(series_parent_score, 3)
     except Exception as e:
+        if "pytest" in sys.modules:
+            raise e
         print_debug(f"Error scoring series_parent: {e}")
         return 0.0
 
@@ -1550,6 +1577,8 @@ def score_multi_parent(tree: "BooksTree") -> float:
 
         return round(max(multi_disc_score, multi_part_score), 3)
     except Exception as e:
+        if "pytest" in sys.modules:
+            raise e
         print_debug(f"Error scoring multi_parent: {e}")
         return 0.0
 
@@ -1657,6 +1686,8 @@ def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "
 
         return (None, disc_nums_score, part_nums_score)
     except Exception as e:
+        if "pytest" in sys.modules:
+            raise e
         print_debug(f"Error scoring multi_part: {e}")
         return (None, 0.0, 0.0)
 
