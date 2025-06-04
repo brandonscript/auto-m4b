@@ -366,12 +366,25 @@ class BooksTree(BaseModel):
     def name(self):
         return self.path.name
 
-    @property
+    @cached_property
     def key(self):
+        from src.lib.config import cfg
+
         if not (root := self.root):
-            if self.is_root:
-                return None
-            print_debug(f"No root found for '{self.name}' when accessing `key` prop")
+            if self.path == cfg.inbox_dir:
+                return "__inbox__"
+            elif self.path == cfg.converted_dir:
+                return "__converted__"
+            elif self.path == cfg.archive_dir:
+                return "__archive__"
+            elif self.path == cfg.merge_dir:
+                return "__merge__"
+            elif self.path == cfg.build_dir:
+                return "__build__"
+            elif self.path == cfg.backup_dir:
+                return "__backup__"
+            elif self.path == cfg.tmp_dir:
+                return "__tmp__"
             return self.name
 
         from src.lib.fs_utils import try_relative_to
@@ -381,7 +394,7 @@ class BooksTree(BaseModel):
         )
         name_rel = try_relative_to(self.path.name, root.path)
 
-        return str(path_rel) if path_rel and path_rel != Path(".") else str(name_rel) if name_rel else None
+        return str(path_rel) if path_rel and path_rel != Path(".") else str(name_rel) if name_rel else self.name
 
     @property
     def size(self):

@@ -1,7 +1,9 @@
 import re
 
+from lib.misc import re_group
+
 disc_no_strip_pattern = re.compile(r"\W*?-?\W*?[\(\[]*(disc|cd)\W*\d+[\)\]]*", flags=re.I)
-part_no_strip_pattern = re.compile(r"(\W*?-?\W*?[\(\[]*[Pp]([Aa][Rr])?[Tt]\W*\d+[\)\]]*|P[Aa][Rr][Tt]$)")
+part_no_strip_pattern = re.compile(r"(\W*?-?\W*?[\(\[]*(?P<part>[Pp]([Aa][Rr])?[Tt]\W*\d+[\)\]]*|P[Aa][Rr][Tt]$))")
 non_alpha_strip_pattern = re.compile(r"^\W+|\W+$")
 
 html_tag_pattern = re.compile(r"</?\w+\s*/?>", flags=re.DOTALL)
@@ -30,7 +32,7 @@ def strip_part_number(s: str) -> str:
     # if it matches both the part number and ignore, return original string
     if not s:
         return s
-    if part_no_strip_pattern.match(s) and not s.startswith("Part "):
+    if (part := re_group(re.search(part_no_strip_pattern, s), "part", default="")) and not part:
         return s
     return part_no_strip_pattern.sub("", s).strip()
 

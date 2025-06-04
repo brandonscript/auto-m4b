@@ -198,7 +198,7 @@ def write_mp3_tags(
         f["title"] = title
         f["artist"] = artist
         f["album"] = album
-        f["sortalbum"] = sortalbum
+        f["albumsort"] = sortalbum
         f["albumartist"] = albumartist
         f["author"] = artist
         f["composer"] = composer

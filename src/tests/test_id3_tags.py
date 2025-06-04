@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 
 import pytest
@@ -401,7 +402,7 @@ def test_verify_tags_after_convert(
 
     book = indirect_fixture
     _orig_match_filter = InboxState().match_filter
-    testutils.set_match_filter(book.path.stem)
+    testutils.set_match_filter(re.escape(book.path.stem))
 
     app(max_loops=1)
 

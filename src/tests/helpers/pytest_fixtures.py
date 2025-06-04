@@ -78,7 +78,7 @@ def indirect_fixtures(request: pytest.FixtureRequest):
     fixtures = (
         request.param if any((isinstance(request.param, list), isinstance(request.param, tuple))) else [request.param]
     )
-    return tuple(request.getfixturevalue(f) for f in fixtures)
+    return tuple(request.getfixturevalue(f) for f in fixtures if isinstance(f, str))
 
 
 def rm_from_inbox(*names: str):

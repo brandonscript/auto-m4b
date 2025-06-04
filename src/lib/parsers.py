@@ -3,7 +3,7 @@ import re
 import string
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
-from itertools import combinations
+from itertools import combinations, zip_longest
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TYPE_CHECKING, TypeVar
 
@@ -122,9 +122,8 @@ def strip_leading_nums_and_punct(s: str) -> str:
     return re.sub(r"^\d+[\W_]*", "", s)
 
 
-def strip_symbols_and_nums(s: str) -> str:
+def strip_symbols_and_nums(s: str, *, exceptions: str = r"'.-") -> str:
     """Strips all non-alphanumeric characters from a string except those commonly found in names"""
-    exceptions = r"'.-"
 
     # Strip {space}-{space} instances, since hyphentated names don't have spaces around the hyphen
     s = re.sub(r" - ", "", s)
@@ -567,7 +566,9 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
     nltk_results = ne_chunk(pos_tag(tokens))
     names = [("PERSON", x[0]) for x in get_nltk_names(swap_firstname_lastname(s).replace(",", " "))] if "," in s else []
     current_name = []
-    num_person_chunks = len([r for r in nltk_results if isinstance(r, Tree) and r.label() == "PERSON"])
+    num_person_chunks = 0
+    # person_chunks = [r for r in nltk_results if isinstance(r, Tree) and r.label() == "PERSON"]
+    # num_person_chunks = len(person_chunks)
 
     def _end_name():
         nonlocal current_name, names
@@ -600,7 +601,10 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
         return isinstance(tk, Tree)
 
     def _is_person(tk: Any) -> bool:
-        return isinstance(tk, Tree) and tk.label() == "PERSON"
+        nonlocal num_person_chunks
+        if is_person := (isinstance(tk, Tree) and tk.label() == "PERSON"):
+            num_person_chunks += 1
+        return is_person
 
     def _is_abbreviated_name(tk: Any) -> bool:
         return isinstance(tk, tuple) and (
@@ -698,7 +702,24 @@ def percent_human_name_chars_in_str(s: str) -> float:
 def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None) -> AuthorNarrator:
     if fallback is None:
         fallback = s
-    fallback = strip_symbols_and_nums(fallback)
+
+    # If 's' is comma-separated, split it into a list of names, call this function recursively
+    # for each name, then stitch the results back together with a comma
+    # Since each call returns a tuple (author, narrator), we need to unpack each in the list
+    # and join the authors with a comma, then the narrators with a comma.
+    if "," in s:
+        authors, narrators = zip(
+            *[
+                parse_names((n or "").strip(), target, fallback=(f or "").strip())
+                for n, f in zip_longest(s.split(","), fallback.split(","))
+            ]
+        )
+        return AuthorNarrator(
+            ", ".join(filter(lambda x: x, authors)),
+            ", ".join(filter(lambda x: x, narrators)),
+        )
+
+    fallback = strip_symbols_and_nums(fallback, exceptions=r"'.,-")
     if not s or graphic_audio_pattern.search(s):
         return AuthorNarrator(fallback, fallback)
     # author_ok = percent_human_name_chars_in_str(s) > 0.7
@@ -772,6 +793,11 @@ def parse_names(s: str, target: NameParserTarget, *, fallback: str | None = None
 
     author = nltk_author if nltk_author else (get_name_from_str(author) or fallback)
     narrator = nltk_narrator if nltk_narrator else (get_name_from_str(narrator) or fallback)
+
+    # Remove author name from narrator, then trip leading/trailing junk chars again
+    if author in narrator:
+        narrator = re.sub(author, "", narrator)
+        narrator = strip_symbols_and_nums(narrator).strip()
 
     if all((is_generic_word(a) for a in to_words(author))):
         author = fallback

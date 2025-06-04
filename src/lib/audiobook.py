@@ -456,7 +456,6 @@ class Audiobook(BaseModel):
     @property
     def key(self):
         return self.tree.key
-        # return str(self.path.relative_to(cfg.inbox_dir))
 
     @property
     def _inbox_item(self):

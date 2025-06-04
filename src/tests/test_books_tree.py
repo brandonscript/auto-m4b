@@ -346,7 +346,7 @@ class test_tree_scanning:
                     pytest.fail("Cliff House not found in tree")
 
                 if chums := tree.get_like("missing"):
-                    assert chums.has_only_structure("mixed"), xt.msg.structure_is(chums, "mixed")
+                    assert chums.has_only_structure("flat"), xt.msg.structure_is(chums, "flat")
                     xt.is_book_root(chums)
                 else:
                     pytest.fail("Missing Chums not found in tree")
