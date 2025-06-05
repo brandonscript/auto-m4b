@@ -175,7 +175,7 @@ def swap_firstname_lastname_in_long(s: str) -> str:
     """
     split = re.split(r"(\s+[-–—_]\s+|[:;()\[\]{}<>]|(?<=[a-z]\.))", s)
     if len(split) < 2:
-        return s
+        return swap_firstname_lastname(s)
     for i, w in enumerate(split):
         split[i] = swap_firstname_lastname(w)
     return "".join(split)

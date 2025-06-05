@@ -467,7 +467,7 @@ def test_contains_partno_or_ch(s1, s2, expected):
         ("Alexandre Dumas", [("Alexandre Dumas", 4.6)]),
         ("Matthew Nicol", [("Matthew Nicol", 0.91)]),
         ("Andrea Camilleri", [("Andrea Camilleri", 3.5)]),
-        ("Camilleri, Andrea", [("Andrea Camilleri", 1.0)]),
+        ("Camilleri, Andrea", [("Andrea Camilleri", 3.5)]),
         ("John S. Marr", [("John S. Marr", 2.35)]),
         ("Marr, John S.", [("John S. Marr", 2.35)]),
         ("Read by Leonard Porter", [("Leonard Porter", 1.2)]),
