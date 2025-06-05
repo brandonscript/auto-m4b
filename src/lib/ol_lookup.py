@@ -11,9 +11,10 @@ from rapidfuzz import fuzz
 
 from lib.misc import max_if, re_group
 from lib.term import print_debug
+from src.lib.config import cfg
 
 requests_cache.install_cache(
-    "ol_cache", backend="sqlite", expire_after=timedelta(days=1), ignored_parameters=["User-Agent"]
+    str(cfg.META_DIR / "ol_cache"), backend="sqlite", expire_after=timedelta(days=1), ignored_parameters=["User-Agent"]
 )
 
 OpenLibraryAuthorResult = TypedDict(
@@ -414,6 +415,10 @@ def open_library_lookup_author(
         else:
             best_author, best_score = _find_best_author(author, matches, method="similarity")
             base_score -= 1 - best_score
+
+        # If best_author has a negative score, return an empty author
+        if base_score < 0:
+            return OpenLibraryAuthor(None, None)
 
         return OpenLibraryAuthor(best_author, round(base_score, 3))
     except Exception as e:

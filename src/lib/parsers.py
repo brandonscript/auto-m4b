@@ -1,5 +1,7 @@
 import os
+import pickle
 import re
+import sqlite3
 import string
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
@@ -12,6 +14,8 @@ import cachetools.func
 from nltk import pos_tag, word_tokenize
 from spacy.ml import Doc
 
+from lib import nlp
+from lib.cleaners import clean_name_abbreviations
 from lib.ol_lookup import open_library_lookup_author
 from src.lib.misc import (
     any_in,
@@ -20,7 +24,15 @@ from src.lib.misc import (
     iter_prev_curr_next,
     re_group,
 )
-from src.lib.nlp import english_words, inflect, nlp
+from src.lib.nlp import (
+    english_words,
+    inflect,
+    nlp,
+    nlp_trf,
+    restore_original_name,
+    squash_nlp_results,
+    squash_trf_results,
+)
 from src.lib.patterns import *
 from src.lib.patterns import book_series_pattern, multi_disc_pattern
 from src.lib.term import print_debug
@@ -157,6 +169,18 @@ def swap_firstname_lastname(name: str) -> str:
         return name
 
 
+def swap_firstname_lastname_in_long(s: str) -> str:
+    """Looks for name-like strings and swaps the first and last names as it finds them.
+    Splits on strong word boundaries like <space><dash><space>, <colon>, <semicolon>, <em- and emdash>, and brackets.
+    """
+    split = re.split(r"(\s+[-–—_]\s+|[:;()\[\]{}<>]|(?<=[a-z]\.))", s)
+    if len(split) < 2:
+        return s
+    for i, w in enumerate(split):
+        split[i] = swap_firstname_lastname(w)
+    return "".join(split)
+
+
 def find_greatest_common_string(s: list[str]) -> str:
     if not s:
         return ""
@@ -203,101 +227,12 @@ def startswith_partno(s: str, s2: str | None = None) -> bool:
     return bool(get_start_num(s) >= 0)
 
 
-def nlp_extract(s: str) -> tuple[list[str], list[str]]:
-    """Extracts objects and people from a string using spaCy's named entity recognition.
-    Returns a tuple of lists: (people, objects)
-    """
-    s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
-    doc: Doc = nlp(s)
-    objects = [tk for tk in doc.ents if tk.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG", "GPE", "LAW"]]
-    people = [tk for tk in doc.ents if tk.label_ in ["PERSON", "GPE"]]
-    junk = [tk for tk in doc if not tk.is_alpha]
-
-    # Remove junk from people
-    people = [p for p in people if not any(j.text in p.text for j in junk)]
-
-    # Remove junk from objects
-    objects = [o for o in objects if not any(j.text in o.text for j in junk)]
-
-    # If the same token is in both people and objects, keep the one that is nearest other
-    # found strings. E.g. For "Trenton Lee Stewart – The Mysterious Benedict Society", if the tokens are:
-    # people: ["Trenton", "Lee Stewart"]
-    # objects: ["Trenton", "The Mysterious Benedict Society"]
-    # We want to keep "Trenton Lee Stewart" and "The Mysterious Benedict Society"
-    # because "Trenton" is closer to "Lee Stewart" than it is to "The Mysterious Benedict Society"
-    duplicates = [o for o in objects if o in people]
-    o_ranges = [(s.find(o.text), len(o.text)) for o in objects if not o in duplicates]
-    p_ranges = [(s.find(p.text), len(p.text)) for p in people if not p in duplicates]
-
-    # Find the range that is closest to the other range
-    for d in duplicates:
-        # Get the position (range) where the duplicate is in the original string
-        d_i = s.find(d.text)
-        # Find the distance from the duplicate to all the other ranges
-        o_dist = [abs(d_i - r[0]) for r in o_ranges]
-        p_dist = [abs(d_i - r[0]) for r in p_ranges]
-        if o_dist and p_dist:
-            # if closer to object, remove person
-            if min(o_dist) < min(p_dist):
-                people.remove(d)
-            # if closer to person, remove object
-            else:
-                objects.remove(d)
-
-    clean_people = [p.text for p in people]
-    clean_objects = [o.text for o in objects]
-
-    # If any of the people are a substring of any object, strip the person from the object
-    # and vice-versa
-    for i, o in enumerate(objects):
-        for j, p in enumerate(people):
-            if p.text in o.text:
-                clean_objects[i] = leading_trailing_non_alphanum_pattern.sub("", o.text.replace(p.text, "")).strip()
-            if o.text in p.text:
-                clean_people[j] = leading_trailing_non_alphanum_pattern.sub("", p.text.replace(o.text, "")).strip()
-
-    # If any of the strings are contiguous in the original string, combine them.
-    # e.g., if people is ["Trenton", "Lee Stewart"] and objects is ["The", "Mysterious", "Benedict", "Society"],
-    # we want to combine "Trenton Lee Stewart" and "The Mysterious Benedict Society"
-
-    # Helper function to combine contiguous strings
-    def combine_contiguous(strings: list[str], original: str) -> list[str]:
-        if not strings:
-            return []
-
-        # Sort strings by their position in the original string
-        sorted_strings = sorted(strings, key=lambda x: original.find(x))
-        result = []
-        current = sorted_strings[0]
-
-        for next_str in sorted_strings[1:]:
-            # Check if strings are contiguous in the original string
-            current_end = original.find(current) + len(current)
-            next_start = original.find(next_str)
-
-            # If they are contiguous (allowing for whitespace/punctuation)
-            if next_start <= current_end + 1:  # +1 to allow for a single space/punctuation
-                current = f"{current} {next_str}".strip()
-            else:
-                result.append(current)
-                current = next_str
-
-        result.append(current)
-        return result
-
-    # Combine contiguous strings for both people and objects
-    clean_people = combine_contiguous(clean_people, s)
-    clean_objects = combine_contiguous(clean_objects, s)
-
-    return clean_people, clean_objects
-
-
 def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
     from src.lib.cleaners import strip_part_number
 
     dir_title = re_group(book_title_pattern.search(book.basename), "book_title")
     dir_author = parse_author(book.basename, "fs", fallback="")
-    dir_nlp_people, dir_nlp_titles = nlp_extract(book.basename)
+    dir_nlp_people, dir_nlp_titles = spaCy_extract(book.basename)
     dir_year = re_group(year_pattern.search(book.basename), "year")
     dir_narrator = parse_narrator(book.basename, "fs", fallback="")
 
@@ -317,22 +252,25 @@ def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     file_title = re_group(book_title_pattern.search(orig_file_name), "book_title")
     file_author = parse_author(orig_file_name, "fs", fallback="")
-    file_nlp_people, file_nlp_titles = nlp_extract(orig_file_name)
+    file_nlp_people, file_nlp_titles = spaCy_extract(orig_file_name)
     file_year = parse_year(orig_file_name)
 
-    author_candidates: list[tuple[str, float]] = [(p, 1.0) for p in [*dir_nlp_people, *file_nlp_people]]
-    if dir_author and (n := get_nltk_names(dir_author)):
+    author_candidates: list[tuple[str, str, float]] = [*dir_nlp_people, *file_nlp_people]
+    if dir_author and (n := get_nlp_names(dir_author)):
         author_candidates.extend(n)
-    if file_author and (n := get_nltk_names(file_author)):
+    if file_author and (n := get_nlp_names(file_author)):
         author_candidates.extend(n)
-    author_candidates = sorted(author_candidates, key=lambda x: x[1], reverse=True)
-    best_author = next(iter(author_candidates), ("", 0))[0]
+    author_candidates = sorted(author_candidates, key=lambda x: x[2], reverse=True)
+    best_author = next(iter(author_candidates), ("", "UNKNOWN", 0))[0]
 
-    narrator_candidates: list[tuple[str, float]] = n if dir_narrator and (n := get_nltk_names(dir_narrator)) else []
-    narrator_candidates = sorted(narrator_candidates, key=lambda x: x[1], reverse=True)
-    best_narrator = next(iter(narrator_candidates), ("", 0))[0]
+    narrator_candidates: list[tuple[str, str, float]] = n if dir_narrator and (n := get_nlp_names(dir_narrator)) else []
+    narrator_candidates = sorted(narrator_candidates, key=lambda x: x[2], reverse=True)
+    best_narrator = next(iter(narrator_candidates), ("", "UNKNOWN", 0))[0]
 
-    longest_title = max([dir_title, file_title, *dir_nlp_titles, *file_nlp_titles], key=len)
+    dir_nlp_titles_n = [t for (t, _, _) in dir_nlp_titles]
+    file_nlp_titles_n = [t for (t, _, _) in file_nlp_titles]
+
+    longest_title = max([dir_title, file_title, *dir_nlp_titles_n, *file_nlp_titles_n], key=len)
     longest_year = max([dir_year, file_year], key=len)
 
     meta = {
@@ -514,57 +452,66 @@ def heuristic_score(name: str) -> float:
     return min(9.0, max(0.0, score))  # Ensure score is non-negative, capped at 9.0
 
 
-def score_name_candidates(candidates: list[tuple[str, str]]) -> dict[str, float]:
+def lookup_and_score_names(candidates: list[tuple[str, str, float]]) -> list[tuple[str, str, float]]:
     scores = {}
-    for nltk_label, name in candidates:
-        entity_score = 0.0
-
-        if nltk_label.endswith("NLP"):
-            continue
+    for name, label, existing_score in candidates:
+        entity_score = existing_score if existing_score is not None else 0.0
+        entity_label = label
 
         # Count the number of times the name appears in candidates
-        name_count = sum(1 for _, n in candidates if n == name)
+        name_count = sum(1 for _, _, s in candidates if s == existing_score)
 
         # Check if spaCy detects it as a PERSON entity
-        doc = nlp(name)
-        for ent in doc.ents:
-            if ent.label_ == "PERSON" and ent.text == name:
-                entity_score = 1.0  # High confidence if spaCy recognizes it too
+        if not label.endswith("SPACY"):
+            doc = nlp(name)
+            for ent in doc.ents:
+                if ent.label_.startswith("PER") and ent.text == name:
+                    entity_score = (
+                        existing_score if existing_score is not None else 0.5
+                    )  # High confidence if spaCy recognizes it too
 
         # Fall back on heuristics if no entity detected
         if h_score := heuristic_score(name):
             entity_score += h_score * max(0.2, entity_score)
 
-        if nltk_label == "PERSON":
-            entity_score += 0.25
+        # if label.startswith("PER"):
+        #     entity_score += 0.25
 
-        # If score is < 1.0, check open library and average the result
-        if entity_score < 1.0:
-            if (ol_author := open_library_lookup_author(name)) and (ol_score := ol_author.score()) is not None:
+        lookups = [
+            open_library_lookup_author(name, method="score"),
+            open_library_lookup_author(name, method="similarity"),
+        ]
+        for lookup in lookups:
+            if lookup and (ol_score := lookup.score()) is not None:
                 if ol_score == 1.0:
-                    entity_score = 1.0
-                else:
+                    entity_score = max(entity_score, 1.0)
+                    entity_label = "AUTHOR"
+                elif ol_score > 0:
                     entity_score = (entity_score + ol_score) / 2
 
         entity_score *= name_count
-        entity_score = min(1.0, entity_score)
+        # entity_score = min(1.0, entity_score)
 
         if not name in scores:
-            scores[name] = round(entity_score, 3)
+            scores[name] = (entity_label, round(entity_score, 5))
         else:
-            scores[name] = round(max(scores[name], entity_score), 3)
+            scores[name] = (entity_label, round(max(scores[name][1], entity_score), 5))
 
-    return dict(sorted(scores.items(), key=lambda item: item[1], reverse=True))
+    return [(n, l, sc) for n, (l, sc) in sorted(scores.items(), key=lambda item: item[1][1], reverse=True)]
 
 
-def get_nltk_names(s: str) -> list[tuple[str, float]]:
+def get_nltk_names_smash(s: str) -> list[tuple[str, float]]:
     from nltk import ne_chunk, pos_tag, word_tokenize
     from nltk.tree import Tree
 
     # Tokenize and process with NLTK
     tokens = word_tokenize(s)
     nltk_results = ne_chunk(pos_tag(tokens))
-    names = [("PERSON", x[0]) for x in get_nltk_names(swap_firstname_lastname(s).replace(",", " "))] if "," in s else []
+    names = (
+        [("PERSON", x[0]) for x in get_nltk_names_smash(swap_firstname_lastname(s).replace(",", " "))]
+        if "," in s
+        else []
+    )
     current_name = []
     num_person_chunks = 0
     # person_chunks = [r for r in nltk_results if isinstance(r, Tree) and r.label() == "PERSON"]
@@ -600,6 +547,9 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
     def _is_tree(tk: Any) -> bool:
         return isinstance(tk, Tree)
 
+    def _is_gpe_noun(tk: Any) -> bool:
+        return isinstance(tk, Tree) and tk.label() == "GPE" and tk.leaves()[0][1].startswith("NN")
+
     def _is_person(tk: Any) -> bool:
         nonlocal num_person_chunks
         if is_person := (isinstance(tk, Tree) and tk.label() == "PERSON"):
@@ -613,6 +563,8 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
 
     def _is_part_of_name(prev: Any, curr: Any, nxt: Any) -> bool:
         if _is_person(curr):
+            return True
+        if _is_gpe_noun(curr) and all(any((p is None, _is_abbreviated_name(p), _is_person(p))) for p in [prev, nxt]):
             return True
         if _is_non_name_char(curr[0]):
             return False
@@ -674,11 +626,16 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
         ]
 
     # Use nlp to double check
-    nlp_people, _ = nlp_extract(s)
-    names.extend([("PERSON_NLP", p) for p in nlp_people])
+    spaCy_people, _ = spaCy_extract(s)
+    names.extend([("PERSON_SPACY", p) for p in spaCy_people])
+
+    # Check names, and if all the words in the name are generic, change the type to "GENERIC"
+    for name in names:
+        if all(is_generic_word(w) for w in to_words(name[1])):
+            name = ("GENERIC", name[1])
 
     # If we have multiple PERSON entities, score them and return the highest-scoring one
-    results = [(k, v) for k, v in score_name_candidates(names).items()]
+    results = [(k, v) for k, v in lookup_and_score_names(names).items()]
     if len(names) > 1:
 
         # Remove any results from the names list that are a subset of another result
@@ -686,6 +643,261 @@ def get_nltk_names(s: str) -> list[tuple[str, float]]:
         return list(
             filter(lambda x: not any(x[0] in n[0] for n in results if x != n), results),
         )
+
+    return results
+
+
+def spaCy_extract_sm(s: str) -> tuple[list[str], list[str]]:
+    """Extracts objects and people from a string using spaCy's named entity recognition.
+    Returns a tuple of lists: (people, objects)
+    """
+    s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
+    doc: Doc = nlp(s)
+    objects = [tk for tk in doc.ents if tk.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG", "GPE", "LAW"]]
+    people = [tk for tk in doc.ents if tk.label_ in ["PERSON", "GPE"]]
+    junk = [tk for tk in doc if not tk.is_alpha]
+
+    # Remove junk from people
+    people = [p for p in people if not any(j.text in p.text for j in junk)]
+
+    # Remove junk from objects
+    objects = [o for o in objects if not any(j.text in o.text for j in junk)]
+
+    # If the same token is in both people and objects, keep the one that is nearest other
+    # found strings. E.g. For "Trenton Lee Stewart – The Mysterious Benedict Society", if the tokens are:
+    # people: ["Trenton", "Lee Stewart"]
+    # objects: ["Trenton", "The Mysterious Benedict Society"]
+    # We want to keep "Trenton Lee Stewart" and "The Mysterious Benedict Society"
+    # because "Trenton" is closer to "Lee Stewart" than it is to "The Mysterious Benedict Society"
+    duplicates = [o for o in objects if o in people]
+    o_ranges = [(s.find(o.text), len(o.text)) for o in objects if not o in duplicates]
+    p_ranges = [(s.find(p.text), len(p.text)) for p in people if not p in duplicates]
+
+    # Find the range that is closest to the other range
+    for d in duplicates:
+        # Get the position (range) where the duplicate is in the original string
+        d_i = s.find(d.text)
+        # Find the distance from the duplicate to all the other ranges
+        o_dist = [abs(d_i - r[0]) for r in o_ranges]
+        p_dist = [abs(d_i - r[0]) for r in p_ranges]
+        if o_dist and p_dist:
+            # if closer to object, remove person
+            if min(o_dist) < min(p_dist):
+                people.remove(d)
+            # if closer to person, remove object
+            else:
+                objects.remove(d)
+
+    clean_people = [p.text for p in people]
+    clean_objects = [o.text for o in objects]
+
+    # If any of the people are a substring of any object, strip the person from the object
+    # and vice-versa
+    for i, o in enumerate(objects):
+        for j, p in enumerate(people):
+            if p.text in o.text:
+                clean_objects[i] = leading_trailing_non_alphanum_pattern.sub("", o.text.replace(p.text, "")).strip()
+            if o.text in p.text:
+                clean_people[j] = leading_trailing_non_alphanum_pattern.sub("", p.text.replace(o.text, "")).strip()
+
+    # If any of the strings are contiguous in the original string, combine them.
+    # e.g., if people is ["Trenton", "Lee Stewart"] and objects is ["The", "Mysterious", "Benedict", "Society"],
+    # we want to combine "Trenton Lee Stewart" and "The Mysterious Benedict Society"
+
+    # Helper function to combine contiguous strings
+    def _combine_contiguous(strings: list[str], original: str) -> list[str]:
+        if not strings:
+            return []
+
+        # Sort strings by their position in the original string
+        sorted_strings = sorted(strings, key=lambda x: original.find(x))
+        result = []
+        current = sorted_strings[0]
+
+        for next_str in sorted_strings[1:]:
+            # Check if strings are contiguous in the original string
+            current_end = original.find(current) + len(current)
+            next_start = original.find(next_str)
+
+            # If they are contiguous (allowing for whitespace/punctuation)
+            if next_start <= current_end + 1:  # +1 to allow for a single space/punctuation
+                current = f"{current} {next_str}".strip()
+            else:
+                result.append(current)
+                current = next_str
+
+        result.append(current)
+        return result
+
+    # Combine contiguous strings for both people and objects
+    clean_people = _combine_contiguous(clean_people, s)
+    clean_objects = _combine_contiguous(clean_objects, s)
+
+    return clean_people, clean_objects
+
+
+def spaCy_extract(s: str) -> tuple[list[tuple[str, str, float]], list[tuple[str, str, float]]]:
+    """Extracts people and objects using spaCy's NER with transformer model."""
+    s = strip_leading_nums_and_punct(s)
+
+    doc = nlp(s)
+
+    entities = []
+
+    default_score_map = {
+        "PERSON": 1.0,
+        "ORG": 0.8,
+        "PRODUCT": 0.7,
+        "WORK_OF_ART": 0.6,
+        "EVENT": 0.6,
+        "GPE": 0.5,
+        "LAW": 0.4,
+    }
+
+    for ent in doc.ents:
+        score = None
+        if hasattr(ent._, "confidence"):
+            score = ent._.confidence
+        elif hasattr(ent._, "trf") and isinstance(ent._.trf, dict):
+            score = ent._.trf.get("score", None)
+
+        ent_score = score if score is not None else default_score_map.get(ent.label_, 0.3)
+        entities.append((ent.text.strip(), ent.label_, ent_score))
+
+    # Filter junk
+    junk_tokens = {tok.text for tok in doc if not tok.is_alpha}
+    entities = [(p, l, sc) for p, l, sc in entities if not any(j in p for j in junk_tokens)]
+
+    # Add transformer results if we can derive them
+    trf = squash_trf_results(nlp_trf(s))
+    for ent in trf:
+        # if any(k.startswith(ent["entity_group"]) for k in tuple(default_score_map.keys())):
+        # If the entity as an exact match already exists, average the score and update it instead of adding
+        if (found := next(((i, e) for i, e in enumerate(entities) if e[0] == ent["word"]), None)) is not None:
+            i, (p, _, sc) = found
+            l = ent["entity_group"]
+            sc = min(sc, ent["score"])
+            if not l.startswith("PER"):
+                sc /= 2
+            entities[i] = (p, l, sc)
+        else:
+            entities.append((ent["word"], ent["entity_group"], ent["score"]))
+
+    # De-dupe people by substring
+    entities.sort(key=lambda x: -len(x[0]))
+    deduped_entities: list[tuple[str, str, float]] = []
+    seen = set()
+    for name, label, score in entities:
+        norm = name.lower()
+        if any(norm in other for other in seen):
+            continue
+        seen.add(norm)
+        deduped_entities.append((name, label, score))
+
+    people = [(n, "PERSON_SPACY", sc) for (n, l, sc) in deduped_entities if l.startswith("PER")]
+    objects = [e for e in deduped_entities if e[0] not in [p[0] for p in people]]
+
+    return people, objects
+
+
+def get_nlp_cache_db() -> sqlite3.Connection:
+    from src.lib.config import cfg
+
+    """Get or create the SQLite database connection for NLP caching."""
+    db_path = cfg.META_DIR / "nlp_cache.db"
+    conn = sqlite3.connect(str(db_path))
+
+    # Create table if it doesn't exist
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS nlp_cache (
+            input_text TEXT,
+            results BLOB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (input_text)
+        )
+    """
+    )
+    return conn
+
+
+def get_cached_nlp_results(text: str) -> list[tuple[str, str, float]] | None:
+    """Get cached NLP results for the given text."""
+    conn = get_nlp_cache_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT results FROM nlp_cache WHERE input_text = ?", (text,))
+    result = cursor.fetchone()
+    conn.close()
+
+    if result is not None:
+        try:
+            return pickle.loads(result[0])
+        except (pickle.UnpicklingError, EOFError):
+            return None
+    return None
+
+
+def cache_nlp_results(text: str, results: list[tuple[str, str, float]]) -> None:
+    """Cache NLP results for the given text."""
+    conn = get_nlp_cache_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "INSERT OR REPLACE INTO nlp_cache (input_text, results) VALUES (?, ?)",
+            (text, pickle.dumps(results)),
+        )
+        conn.commit()
+    except Exception as e:
+        print_debug(f"Failed to cache NLP results: {e}")
+    finally:
+        conn.close()
+
+
+def get_nlp_names(s: str, *, no_cache: bool = False) -> list[tuple[str, str, float]]:
+    """Extract name candidates using both NLTK and spaCy, score and rank."""
+    # Try to get from cache first
+    if not no_cache and (cached := get_cached_nlp_results(s)):
+        return cached
+
+    s = swap_firstname_lastname_in_long(s)
+
+    from nltk import ne_chunk, pos_tag, word_tokenize
+    from nltk.tree import Tree
+
+    # --- NLTK ---
+    tokens = word_tokenize(s)
+    pos_tags = pos_tag(tokens)
+    tree = ne_chunk(pos_tags)
+
+    nltk_names: list[tuple[str, str, float] | tuple[str, str, None]] = []
+    for subtree in tree:
+        if isinstance(subtree, Tree) and (nltk_label := subtree.label()) == "PERSON_NLTK":
+            name = " ".join(token for token, _ in subtree.leaves())
+            nltk_names.append((name.strip(), nltk_label, None))
+
+    # --- spaCy ---
+    spacy_people, _ = spaCy_extract(s)
+    spacy_names = [(n.strip(), l, sc) for n, l, sc in spacy_people]
+
+    # --- Merge and dedupe substrings ---
+    combined = squash_nlp_results(nltk_names + spacy_names)
+
+    # --- Restore original name(s) if it's approximate, but has been mangled by nlp
+    restored = restore_original_name(s, combined)
+
+    # --- Score ---
+    scored = lookup_and_score_names(restored)
+
+    # --- Clean up name appreviations ---
+    scored = [(clean_name_abbreviations(n, mode="periods"), l, sc) for n, l, sc in scored]
+
+    results = sorted(scored, key=lambda x: -x[2])
+
+    # --- Cache the results ---
+    cache_nlp_results(s, results)
 
     return results
 
@@ -700,23 +912,51 @@ def percent_human_name_chars_in_str(s: str) -> float:
 
 @cachetools.func.ttl_cache(maxsize=128, ttl=MEMO_TTL)
 def parse_names(
-    s: str, target: NameParserTarget, *, fallback: str | None = None, max_chars: int = 40
+    s: str, target: NameParserTarget, *, fallback: str | None = None, max_chars: int = 500, _long_match: bool = False
 ) -> AuthorNarrator:
     if fallback is None:
         fallback = s
 
+    # Prevent recursion by returning "" for separators
+    if not any(c.isalpha() for c in s) or s in ["and", "or", "by", "," ";"]:
+        return AuthorNarrator("", "")
+
     if len(s) > max_chars:
         s = s[:max_chars]
+
+    if not _long_match:
+        author_long_match = re_group(author_comment_pattern.search(s), 0, default="")
+        narrator_long_match = re_group(narrator_comment_multiple_pattern.search(s), 0, default="")
+        if author_long_match and narrator_long_match:
+            return AuthorNarrator(
+                parse_names(
+                    author_long_match, target, fallback=narrator_long_match, max_chars=max_chars, _long_match=True
+                ).author,
+                parse_names(
+                    narrator_long_match, target, fallback=author_long_match, max_chars=max_chars, _long_match=True
+                ).narrator,
+            )
 
     # If 's' is comma-separated, split it into a list of names, call this function recursively
     # for each name, then stitch the results back together with a comma
     # Since each call returns a tuple (author, narrator), we need to unpack each in the list
     # and join the authors with a comma, then the narrators with a comma.
-    if "," in s:
+    if names_split_pattern.search(s) or names_split_pattern.search(fallback):
+
+        split_names = names_split_pattern.split(s)
+        split_fallback = names_split_pattern.split(fallback)
+
+        # For each name in split_names, remove any junk chars, "and", or all word after and including "as"
+        split_names = [
+            n
+            for n in [names_split_pattern.sub("", n).strip() for n in split_names]
+            if n and not re.match(r"and|as", n, re.I)
+        ]
+
         authors, narrators = zip(
             *[
-                parse_names((n or "").strip(), target, fallback=(f or "").strip())
-                for n, f in zip_longest(s.split(","), fallback.split(","))
+                parse_names((n or "").strip(), target, fallback=(f or "").strip(), _long_match=_long_match)
+                for n, f in zip_longest(names_split_pattern.split(s), names_split_pattern.split(fallback))
             ]
         )
         return AuthorNarrator(
@@ -789,12 +1029,12 @@ def parse_names(
         author = _author
         narrator = _narrator
 
-    nltk_s = next((n for (n, score) in get_nltk_names(junk_chars_name_pattern.sub("", s)) if score > 0), None)
-    nltk_author = None if not author else next((n for (n, score) in get_nltk_names(author) if score > 0.7), None)
-    nltk_narrator = None if not narrator else next((n for (n, score) in get_nltk_names(narrator) if score > 0.7), None)
+    nltk_s = next((n for (n, _, sc) in get_nlp_names(junk_chars_name_pattern.sub("", s)) if sc > 0), None)
+    nltk_author = None if not author else next((n for (n, _, sc) in get_nlp_names(author) if sc > 0.7), None)
+    nltk_narrator = None if not narrator else next((n for (n, _, sc) in get_nlp_names(narrator) if sc > 0.7), None)  # type: ignore
 
-    if nltk_s and (not fallback or len(nltk_s) > len(fallback)):
-        fallback = nltk_s
+    if nltk_s and (not fallback or len(nltk_s[0]) > len(fallback)):
+        fallback = nltk_s[0]
 
     author = nltk_author if nltk_author else (get_name_from_str(author) or fallback)
     narrator = nltk_narrator if nltk_narrator else (get_name_from_str(narrator) or fallback)
@@ -817,15 +1057,16 @@ def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = Non
     """Parses an author name from a string, using the given target and fallback.
     If the author name is longer than max_chars, only from 0-max_chars will be used.
     """
-    return parse_names(s, target, fallback=fallback).author[:max_chars]
+    return parse_names(s, target, fallback=fallback, max_chars=max_chars).author or fallback or ""
 
 
 def has_graphic_audio(s: str) -> bool:
     return bool(graphic_audio_pattern.search(s))
 
 
-def parse_narrator(s: str, target: NameParserTarget, *, fallback: str | None = None) -> str:
-    return parse_names(s, target, fallback=fallback).narrator or fallback or ""
+def parse_narrator(s: str, target: NameParserTarget, *, fallback: str | None = None, max_chars: int = 150) -> str:
+
+    return parse_names(s, target, fallback=fallback, max_chars=max_chars).narrator or fallback or ""
 
 
 def parse_year(s: str) -> str:

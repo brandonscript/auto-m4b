@@ -1,4 +1,5 @@
 import re
+from typing import Literal
 
 from lib.misc import re_group
 
@@ -9,6 +10,12 @@ non_alpha_strip_pattern = re.compile(r"^\W+|\W+$")
 html_tag_pattern = re.compile(r"</?\w+\s*/?>", flags=re.DOTALL)
 
 leading_articles_pattern = re.compile(r"^((?:a|an|the)[\s_.]+\b)", flags=re.I)
+
+# Pattern to match 1-3 capital letters with optional periods and spaces between them
+abbrev_pattern = re.compile(r"^(?:[A-Z](?:\.\s*|\s*\.?|\s*)(?=[A-Z]|\s|$)){1,3}$")
+
+# Pattern to match and capture capital letters with their surrounding punctuation
+letter_cap_pattern = re.compile(r"(?:(?P<cap>[A-Z])(?:\.\s*|\s*\.?|\s*)(?=[A-Z]|\s|$))+")
 
 
 def strip_html_tags(s: str) -> str:
@@ -52,7 +59,7 @@ def fix_smart_quotes(s: str) -> str:
     """Takes a string and replaces smart quotes with regular quotes"""
     if not s:
         return s
-    trnsl = str.maketrans("‘’‚‛′′“”„‟″″", "''''''\"\"\"\"\"\"")
+    trnsl = str.maketrans("'‚‛′′" "", "''''''\"\"\"\"")
     return s.translate(trnsl)
 
 
@@ -106,3 +113,33 @@ def clean_string(s: str, strip_disc_no: bool = True, strip_part_no: bool = True)
 def strip_leading_articles(s: str) -> str:
     """Strips leading articles from a string"""
     return leading_articles_pattern.sub("", s).strip()
+
+
+def clean_name_abbreviations(s: str, mode: Literal["periods", "periods_spaces", "strip"] = "periods") -> str:
+    """Cleans up name abbreviations, e.g. J.R.R. Tolkien -> J. R. R. Tolkien
+    or J. R. R. Tolkien -> J.R.R. Tolkien, and applies periods to standalone capital letters
+    e.g. JRR Tolkien -> J.R.R. Tolkien, and Franklin W Dixon -> Franklin W. Dixon"""
+
+    split_s = s.split(" ")
+    out = ""
+    for w in split_s:
+        if not abbrev_pattern.search(w):
+            out += f" {w} "
+            continue
+
+        match mode:
+            case "strip":
+                # Strip all periods and spaces between capital letters
+                out += letter_cap_pattern.sub(r"\1", w)
+            case "periods":
+                # Apply periods (no spaces) to standalone capital letters
+                out += letter_cap_pattern.sub(r"\1.", w)
+            case "periods_spaces":
+                # Apply periods (with spaces) to standalone capital letters
+                out += letter_cap_pattern.sub(r"\1. ", w)
+            case _:
+                raise ValueError(f"[clean_name_abbreviations]: invalid mode: {mode}")
+
+    # strip 2+ spaces to 1
+    out = re.sub(r"\s{2,}", " ", out)
+    return out.strip()

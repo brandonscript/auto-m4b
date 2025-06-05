@@ -5,21 +5,27 @@ import regex as rex
 # TODO: Add test coverage for narrator with /
 # fmt: off
 _titlecase_word = r"[A-Z][\p{Ll}\.'-]*[^_]"
+_short_any_case_word = r"(?:[A-Za-z][\p{Ll}\.'-]*[^_]){1,3}"
 _author_prefixes = r"[Ww]ritten.?[Bb]y|[Aa]uthor"
 _narrator_prefixes = r"(?:[Rr]ead|[Nn]arrated|[Pp]erformed).?[Bb]y|[Nn]arrator"
 def _name_substr(ignore_if_trailing: str = '', max_l_of_comma: int = 4, max_r_of_comma: int = 4):
+    # max_l_of_comma and max_r_of_comma are the max number of words to the left or right of a comma
+    # to consider. 0 means no limit.
     if ignore_if_trailing:
         ignore_if_trailing = f"(?!{ignore_if_trailing})"
     # (?:[Ww]ritten.?[Bb]y|[Pp]erformed.?[Bb]y|[Rr]ead.?[Bb]y)\W+(?P<name>(?:(?:(?<= )(?: ?[A-Z][a-z\.-]*){1,4})),? ?(?:(?: ?[A-Z][a-z\.-]*){1,4}(?!Performed by)))
-    return rf"(?:(?:(?:^|(?<= ))(?: ?{_titlecase_word}){{1,{max_l_of_comma}}})),? ?(?:(?: ?{_titlecase_word}){{1,{max_r_of_comma}}}{ignore_if_trailing})"
+    return rf"(?:(?:(?:^|(?<= ))(?: ?(?:{_titlecase_word}|{_short_any_case_word}))(?!=\bas\b){{1,{max_l_of_comma or ''}}})),? ?(?:(?: ?(?:{_titlecase_word}|{_short_any_case_word})){{1,{max_r_of_comma or ''}}}{ignore_if_trailing})"
 _div = r"[-_–—.\s]*?"
 _roman_numeral = r"(?:^|(?<=[\W_]))[IVXLCDM]+(?:$|(?=[\W_]))"
 wordsplit_pat = re.compile(r"[\s_.]")
+names_split_pattern = re.compile(r"([,;]\s*|\band\b)", re.I)
+substr_pattern = rex.compile(r"(?<=\W|^)(?P<name>{name})(?=\W|$)", rex.V1)
 
 author_fs_pattern = re.compile(r"^(?P<author>.*?)[\W\s]*[-_–—\(]", re.I)
 author_comment_pattern = rex.compile(rf"(?:{_author_prefixes})\W+(?P<author>{_name_substr(_narrator_prefixes)})", rex.V1)
 author_generic_pattern = rex.compile(rf"(?P<author>{_name_substr()})", rex.V1)
 narrator_comment_pattern = rex.compile(rf"(?:{_narrator_prefixes})\W+(?P<narrator>{_name_substr(_author_prefixes)})", rex.V1)
+narrator_comment_multiple_pattern = rex.compile(rf"(?:{_narrator_prefixes})\W+(?P<narrator>{_name_substr(_author_prefixes, max_l_of_comma=0, max_r_of_comma=0)})", rex.V1)
 narrator_generic_pattern = rex.compile(rf"(?P<narrator>{_name_substr()})", rex.V1)
 narrator_slash_pattern = re.compile(r"(?P<author>.+)\/(?P<narrator>.+)", re.I)
 narrator_in_artist_pattern = re.compile(rf"(?P<author>.*)\W+{narrator_comment_pattern}", re.I)
@@ -54,8 +60,8 @@ junk_chars_name_pattern = re.compile(r"[\(\)\[\]\{\}\|\~\@\#\$\¢\£\¡\–\—\
 junk_chars_title_pattern = re.compile(r"[\(\)\[\]\{\}\|\~\@\^\–\—\*\=\+\_\?\/\\]")
 title_chunk_pattern = re.compile(r"[,-:;–—_]\s*(?P<chunk>(?:vers?\.?|version|v\.|vol\.?|volume|bk\.|book|part|ch\.|pt\.|chapter|ep\.|episode|series)\s*\d+\W*$)", re.I)
 only_non_alphanum_pattern = rex.compile(r"^[^\p{L}]+$")
-abbreviated_names_pattern = re.compile(r"^(?:[A-Z]\.?){1,3}$")
 uppercase_1_3_letters_pattern = re.compile(r"^(?:[A-Z]){1,3}$")
+abbreviated_letter_cap_pattern = re.compile(r"(?:(?P<cap>[A-Z])(?=\s|$)\.?(?:\s*|$))+")
 leading_trailing_non_alphanum_pattern = rex.compile(r"^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$", flags=(rex.UNICODE | rex.V1))
 open_library_user_agent_pattern = re.compile(r"^(?P<app>[^/]+)/(?P<version>[0-9.]+)? \((?P<email>[^\)]+)\)$") # matches: MyAppName/1.0 (myemail@example.com)
 # fmt: on

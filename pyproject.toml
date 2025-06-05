@@ -110,10 +110,14 @@ bidict = "^0.23.1"
 regex = "^2024.11.6"
 mutagen = "^1.47.0"
 spacy = { version = "<4", extras = ["apple"], platform = "darwin" }
+spacy-curated-transformers = "^0.3.0"
 nltk = "^3.9.1"
 lazy = "^1.6"
 requests = "^2.32.3"
 requests-cache = "^1.2.1"
+transformers = "^4.52.4"
+protobuf = "^6.31.1"
+sentencepiece = "^0.2.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"
