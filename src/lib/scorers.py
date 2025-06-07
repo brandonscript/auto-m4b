@@ -1,14 +1,15 @@
 import functools
 import re
 import sys
+from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import cast, Literal, TYPE_CHECKING
+from typing import Any, cast, Literal, TYPE_CHECKING, TypeVar
 
-from columnar import columnar
+import columnar
 from rapidfuzz import fuzz
 from rapidfuzz.distance import LCSseq, Levenshtein
 
-from lib.compare import get_size_similarity
 from lib.id3_tags import Id3Tags
 from src.lib.cleaners import clean_string, strip_author_narrator, strip_part_number
 from src.lib.misc import any_in, get_numbers_in_string
@@ -24,12 +25,116 @@ from src.lib.parsers import (
     to_words,
 )
 from src.lib.patterns import basic_part_or_ch_pattern, common_str_pattern, startswith_num_pattern
+from src.lib.singleton import singleton
 from src.lib.term import print_debug
 
 if TYPE_CHECKING:
     from src.lib.audiobook import Audiobook
     from src.lib.books_tree.books_tree import BooksTree
     from src.lib.typing import AdditionalTags, ScoredProp, TagSource
+
+if TYPE_CHECKING:
+    from src.lib.books_tree.books_tree import BooksTree
+
+
+from src.lib.books_tree.books_tree import BooksTree
+from src.lib.compare import get_size_similarity
+
+T = TypeVar("T")
+
+
+@singleton
+class AlreadyChecked:
+    def __init__(self):
+        self._checked: set[Path] = set()
+        self._start_time: datetime | None = None
+
+    def start(self):
+        self._checked.clear()
+        self._start_time = datetime.now()
+
+    def add(self, path: Path):
+        self._checked.add(path)
+
+    def has(self, path: Path) -> bool:
+        return path in self._checked
+
+    def clear(self):
+        self._checked.clear()
+        self._start_time = None
+
+    @property
+    def is_expired(self) -> bool:
+        if not self._start_time:
+            return True
+        return (datetime.now() - self._start_time) > timedelta(seconds=300)  # 5 minute expiry
+
+
+already_checked = AlreadyChecked()
+
+
+class ScorerCache:
+    """Custom cache implementation for scorers that uses tree.path as key"""
+
+    def __init__(self, ttl_seconds: int = 300):  # 5 minutes TTL
+        self._cache: dict[str, tuple[Any, datetime]] = {}
+        self._ttl = timedelta(seconds=ttl_seconds)
+
+    def get(self, key: Path | None) -> Any | None:
+        if not key:
+            return None
+        str_key = str(key)
+        if str_key not in self._cache:
+            return None
+        value, timestamp = self._cache[str_key]
+        if datetime.now() - timestamp > self._ttl:
+            del self._cache[str_key]
+            return None
+        return value
+
+    def set(self, key: Path | None, value: Any) -> None:
+        if not key:
+            return
+        self._cache[str(key)] = (value, datetime.now())
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
+# Global cache instance
+_scorer_cache = ScorerCache()
+
+
+def cached_scorer(func: Callable[..., T]) -> Callable[..., T]:
+    """Custom decorator that caches scorer results using tree.path as key"""
+
+    @functools.wraps(func)
+    def wrapper(tree: "BooksTree", *args: Any, **kwargs: Any) -> T:
+        # Create a unique cache key that includes the function name and args
+        cache_key = f"{func.__name__}:{tree.path}"
+        if args:
+            cache_key += f":{args}"
+        if kwargs:
+            # Sort kwargs items to ensure consistent cache keys
+            sorted_kwargs = sorted(kwargs.items())
+            # For already_checked, only include the length and first few items to avoid huge keys
+            if "already_checked" in kwargs:
+                already_checked = kwargs["already_checked"]
+                if already_checked:
+                    sorted_kwargs = [(k, v) for k, v in sorted_kwargs if k != "already_checked"]
+                    sorted_kwargs.append(("already_checked_len", len(already_checked)))
+                    if already_checked:
+                        sorted_kwargs.append(("already_checked_first", str(already_checked[0].path)))
+            cache_key += f":{sorted_kwargs}"
+
+        cached_result = _scorer_cache.get(Path(cache_key))
+        if cached_result is not None:
+            return cached_result
+        result = func(tree, *args, **kwargs)
+        _scorer_cache.set(Path(cache_key), result)
+        return result
+
+    return wrapper
 
 
 class MetadataScore:
@@ -648,6 +753,7 @@ class DateScoreCard(BaseScoreCard):
 
 def similarity_score(s1: str, s2: str) -> int:
     """Returns the average similarity score between two strings using three different algorithms from -10 to 10 (with 0 being 50% similar, indeterminate)"""
+
     tsr = fuzz.token_sort_ratio(s1, s2)
     lcs = LCSseq.normalized_similarity(s1, s2) * 100
     lev = Levenshtein.normalized_similarity(s1, s2) * 100
@@ -925,7 +1031,7 @@ class MetadataProps:
             if not callable(v)
         ]
 
-        return columnar(
+        return columnar.columnar(
             data,
             headers=["key", "value"],
             terminal_width=1000,
@@ -940,6 +1046,7 @@ class MetadataProps:
         return f"MetadataScore\n" f"{self.table()}\n"
 
 
+@cached_scorer
 def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixed"] | None, float, float]:
     """Tries to determine if a directory is a container or mixed
 
@@ -1014,6 +1121,7 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
         return (None, 0.0, 0.0)
 
 
+@cached_scorer
 def score_flat(tree: "BooksTree") -> float:
     try:
         if tree.is_match:
@@ -1136,9 +1244,8 @@ def score_flat(tree: "BooksTree") -> float:
         return 0.0
 
 
-def score_single_standalone_file(
-    tree: "BooksTree", *, already_checked: list["BooksTree"] | None = None
-) -> tuple[Literal["standalone_file", "single"] | None, float, float]:
+@cached_scorer
+def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone_file", "single"] | None, float, float]:
     """
     Only determines score for files, not dirs.
 
@@ -1155,6 +1262,13 @@ def score_single_standalone_file(
         if not tree.is_file():
             return (None, 0.0, 0.0)
 
+        # Check if we've already processed this file in this pass
+        if already_checked.has(tree.path):
+            return (None, 0.0, 0.0)
+        already_checked.add(tree.path)
+
+        # tree.parent.tick(f"--- score_single_standalone_file: {tree.rel_path}")
+
         if (p := tree.parent) and (p.is_root or p.has_structure("container") or p.has_structure("series_parent")):
             return ("standalone_file", 1.0, 0.0)
         elif not p:
@@ -1167,6 +1281,7 @@ def score_single_standalone_file(
         # album_to_p_siblings_sim = 0.0
         # author_to_p_siblings_sim = 0.0
         if tree.depth > 1 and (p_files_have_tags := bool(tree.i.siblings_recursive.id3_tags)):
+            # tree.parent.tick(f" --- p_files_have_tags: {p_files_have_tags}")
             t: Id3Tags | None = tree.id3_tags
             # pp_album_sim = pp.i.files_recursive.similarity("id3_albums", fallback=0.0)
             # pp_author_sim = pp.i.files_recursive.similarity("id3_authors", fallback=0.0)
@@ -1178,7 +1293,7 @@ def score_single_standalone_file(
             p_author_sim = round(max(p_artist_sim, p_albumartist_sim), 3)
 
         if _only_child_in_parent := p and len(p.files) < 2 and not p.dirs:
-
+            # tree.parent.tick(f" --- only child in parent: {_only_child_in_parent}")
             if tree.depth < 3:
                 # if depth is < 3, a.k.a its parent's parent is the root, it must be single
                 # because root can't be a series/container.
@@ -1203,7 +1318,7 @@ def score_single_standalone_file(
         siblings_rels = []
 
         if not (only_file_in_parent := len(p.files) < 2):
-            ...
+            # tree.parent.tick(f" --- not only file in parent: {only_file_in_parent}")
 
             if tree.i.this_and_siblings.have_albums:
                 siblings_rels.append(
@@ -1234,20 +1349,22 @@ def score_single_standalone_file(
 
             siblings_rels.append(max(known_numbers_contiguity, all_numbers_contiguity))
 
+        # tree.parent.tick(f" --- siblings_rels: {siblings_rels}")
         siblings_sim = sum(siblings_rels) / len(siblings_rels) if siblings_rels else 0.0
         sibling_files_sim = p.i.files.similarity("pathnames", fallback=0.0) if p else 0.0
         siblings_with_part_or_chapter = truthiness([bool(basic_part_or_ch_pattern.search(t.name)) for t in p.files])
-
-        if tree.is_match:
-            ...
 
         parent_has_files_and_dirs = bool(p and (p.files or p.dirs))
         parent_has_multiple_dirs = bool(p and len(p.dirs) > 1)
         parent_has_mixed_content = parent_has_files_and_dirs or parent_has_multiple_dirs
 
+        # tree.parent.tick(f" --- checked parent for files/dirs")
         suffixes = list(set([f.path.suffix for f in p.files])) if p else []
+        # tree.parent.tick(f" --- suffixes: {suffixes}")
         has_mixed_file_types = len(suffixes) > 1 if p else False
+        # tree.parent.tick(f" --- has_mixed_file_types: {has_mixed_file_types}")
         sizes_gt_75mb = truthiness([is_gt_75mb(f.size) for f in p.files]) if p else False
+        # tree.parent.tick(f" --- sizes_gt_75mb: {sizes_gt_75mb}")
         sizes_sim = (
             get_size_similarity(
                 [f.size for f in p.files],
@@ -1257,8 +1374,11 @@ def score_single_standalone_file(
             if p and not only_file_in_parent
             else 0.0
         )
+        # tree.parent.tick(f" --- sizes_sim: {sizes_sim}")
         has_m4b_files = ".m4b" in suffixes if p else False
+        # tree.parent.tick(f" --- has_m4b_files: {has_m4b_files}")
         parent_name_sim = get_similarity([tree.name, p.name], methods=["token_set_ratio", "lcs"]) if p else 0.0
+        # tree.parent.tick(f" --- parent_name_sim: {parent_name_sim}")
 
         standalone_score = (
             +(0.5 - siblings_sim)  # Penalize if siblings are similar
@@ -1272,24 +1392,19 @@ def score_single_standalone_file(
             - (0.75 * siblings_with_part_or_chapter)  # Penalize if siblings have part or chapter in the name
             + (only_file_in_parent / 2)  # 1/2 weight for only file in parent, if it's not a single
         )
-
-        if tree.is_match:
-            ...
-
-        if already_checked is None:
-            already_checked = [tree]
+        # tree.parent.tick(f" --- standalone_score: {standalone_score}")
 
         sibling_files = [f for f in (tree.siblings or []) if f.is_file() and not f == tree]
 
+        # tree.parent.tick(f" --- sibling_files: {len(sibling_files)}")
+
         for f in sibling_files:
-            if f not in already_checked:
-                already_checked.append(f)
-                (_, s, _) = score_single_standalone_file(f, already_checked=already_checked)
+            if not already_checked.has(f.path):
+                (_, s, _) = score_single_standalone_file(f)
                 bonus = (-0.5 + s) / 10
                 standalone_score += bonus
-            if len(already_checked) >= len(sibling_files):
-                already_checked = None
-                break
+
+        # tree.parent.tick(f" --- done checking sibling files")
 
         return ("standalone_file", round(standalone_score, 3), 0.0)
     except Exception as e:
@@ -1299,6 +1414,7 @@ def score_single_standalone_file(
         return (None, 0.0, 0.0)
 
 
+@cached_scorer
 def score_series_book(tree: "BooksTree") -> float:
     """Slightly different from other scorers, this ignores non-standalone files (i.e., will return False for a flat series book's files)"""
     try:
@@ -1371,6 +1487,7 @@ def score_series_book(tree: "BooksTree") -> float:
         return 0.0
 
 
+@cached_scorer
 def score_series_parent(tree: "BooksTree") -> float:
     try:
         from src.lib.parsers import is_maybe_series_parent
@@ -1382,45 +1499,66 @@ def score_series_parent(tree: "BooksTree") -> float:
         if len(tree.children) <= 1:
             return 0.0
 
-        def check_series_book(c: "BooksTree"):
-            # Penalize children that are not dirs or likely standalone files
-            return (c.has_structure("series_book") or score_series_book(c) > 0.5) and (
-                c.is_dir() or score_single_standalone_file(c)[1] > 0.5
-            )
+        tree.tick(f"init score_series_parent for {tree.rel_path}")
+
+        def _check_series_book(c: "BooksTree"):
+            nonlocal tree
+            # Penalize for children that are not dirs or likely standalone files
+            # tree.tick(f"check_series_book for {c.rel_path}")
+            if c.has_structure("series_book") and c.is_dir():
+                # tree.tick(f"has structure series_book and is dir for {c.rel_path}")
+                return True
+            if c.is_file() and score_single_standalone_file(c)[1] > 0.5:
+                # tree.tick(f"is file and likely standalone for {c.rel_path}")
+                return True
+            return False
 
         series_parent_score = 0.0
         child_series_books_ratio = 0.0
-        series_parent_children = [c for c in tree.children if c.score_series_parent > 0.5]
+        series_parent_children = [c for c in tree.children if score_series_parent(c) > 0.5]
         if series_parent_children:
-            return -1 * max((c.score_series_parent for c in series_parent_children))
+            tree.tick(
+                f"series_parent_children detected for {tree.rel_path}, returning {max((score_series_parent(c) for c in series_parent_children))}"
+            )
+            return -1 * max((score_series_parent(c) for c in series_parent_children))
 
         series_book_score = 2 if tree.has_structure("series_book") else score_series_book(tree)
-        series_book_children = [c for c in tree.children if check_series_book(c)]
-        if tree.is_match:
-            ...
+        tree.tick(f"checking series_book_score for {len(tree.children)} children...")
+        series_book_children = [c for c in tree.children if _check_series_book(c)]
+        tree.tick(f"series_book_children: {series_book_children}")
 
         series_book_children_score = 0.0 if not tree.children else len(series_book_children) / len(tree.children)
         if tree.children and (child_series_books_ratio := len(series_book_children) / len(tree.children)):
             if child_series_books_ratio > 0.5:
                 series_parent_score = child_series_books_ratio
 
+        # tree.tick(f"checked children for series_book for {tree.rel_path}: {series_book_score}")
+
         if is_maybe_series_parent(tree.path) and (not (p := tree.parent) or not p.has_structure_like("series_parent")):
-            if tree.is_match:
-                ...
+            tree.tick(f"maybe series parent for {tree.rel_path}, returning {series_parent_score}")
             series_parent_score += 0.5
 
         if series_book_score and series_parent_score and series_book_score >= series_parent_score:
+            tree.tick(
+                f"series_book_score {series_book_score} >= series_parent_score {series_parent_score}, returning {0.5 - score_flat(tree)}"
+            )
             return 0.5 - score_flat(tree)
 
         files_have_tags = bool(tree.i.files_recursive.id3_tags)
+        tree.tick(f"files_have_tags for {tree.rel_path}: {files_have_tags}")
 
         base_score = 0.0
 
         if files_have_tags:
+            tree.tick(f"files_have_tags for {tree.rel_path}, calculating tag similarities")
             author_sim = tree.i.files_recursive.similarity("id3_authors", fallback=0.0)
             album_sim = tree.i.files_recursive.similarity("id3_albums", fallback=0.0)
             author_sim_distinct = tree.i.files_recursive.similarity("id3_authors", distinct=True, fallback=0.0)
             album_sim_distinct = tree.i.files_recursive.similarity("id3_albums", distinct=True, fallback=0.0)
+            tree.tick(f"author_sim for {tree.rel_path}: {author_sim}")
+            tree.tick(f"album_sim for {tree.rel_path}: {album_sim}")
+            tree.tick(f"author_sim_distinct for {tree.rel_path}: {author_sim_distinct}")
+            tree.tick(f"album_sim_distinct for {tree.rel_path}: {album_sim_distinct}")
 
             # If the author is dissimilar, it's probably not related at all (not a series parent)
             author_sim_diff = abs(author_sim - author_sim_distinct)
@@ -1440,6 +1578,8 @@ def score_series_parent(tree: "BooksTree") -> float:
                 base_score -= avg_album_sim / 2
                 base_score -= -0.5 + avg_author_sim / 2
 
+        tree.tick(f"base_score for {tree.rel_path}: {base_score}")
+
         # disc_nums_score += tags_offset
         # part_nums_score += tags_offset
 
@@ -1452,13 +1592,8 @@ def score_series_parent(tree: "BooksTree") -> float:
         # if tree.i.children.have_authors:
         #     id3_checks += int((tree.i.children.similarity("id3_authors", fallback=0.0)) > 0.9) / 3
 
-        if (
-            str(tree)
-            == "/Users/brandon/Dev/auto-m4b/src/tests/tmp/inbox/Nathan Lowell/Shaman's Tales from the Golden Age of the Solar Clipper"
-        ):
-            ...
-
         def get_nums_score(nums: Literal["series_nums", "start_nums", "part_nums"], score: Literal["+", "-"]):
+            tree.tick(f"get_nums_score for {tree.rel_path}, nums: {nums}, score: {score}")
 
             nums_cmpl = []
             nums_uniq = []
@@ -1475,15 +1610,19 @@ def score_series_parent(tree: "BooksTree") -> float:
             if nums_uniq:
                 num_score += sum(nums_uniq) / len(nums_uniq)
 
-            return -num_score if num_score and score == "+" else num_score
+            nums_score = -num_score if num_score and score == "+" else num_score
+            tree.tick(f"nums_score for {tree.rel_path}, nums: {nums}, score: {nums_score}")
+            return nums_score
 
         num_score = 0.0
 
         if tree.i.children.have_series_nums:
+            tree.tick(f"have_series_nums for {tree.rel_path}, calculating series_nums_score")
             # Series numbers are good, and we want them to be complete + unique
             num_score += get_nums_score("series_nums", "+") * 0.75
 
         if not files_have_tags and tree.i.children.have_start_nums:
+            tree.tick(f"have_start_nums for {tree.rel_path}, calculating start_nums_score")
             path_sim = tree.i.children.similarity("pathnames", distinct=True, include_curr=True, fallback=0.0)
             standalones_score = (
                 0.0
@@ -1492,16 +1631,20 @@ def score_series_parent(tree: "BooksTree") -> float:
             )
 
             if len(tree.i.children.start_nums) > 1:
+                tree.tick(f"have_start_nums for {tree.rel_path}, calculating start_nums_score")
                 # Low completion is more likely to be a series parent, high we can't be sure
                 # Low uniqueness is more likely to be a series parent, high we can't be sure
                 num_score += get_nums_score("start_nums", "-") / 4
             if len(tree.i.children.part_nums) > 1:
+                tree.tick(f"have_part_nums for {tree.rel_path}, calculating part_nums_score")
                 # Same as start numbers, part nums may indicate multi_disc or flat
                 num_score += get_nums_score("part_nums", "-") / 4
 
             flat_penalty = -1 * score_flat(tree)
+            tree.tick(f"flat_penalty for {tree.rel_path}: {flat_penalty}")
             # The more similar the pathnames are, the less likely this is a series parent
             path_sim_penalty = min(0.0, 0.5 - path_sim)
+            tree.tick(f"path_sim_penalty for {tree.rel_path}: {path_sim_penalty}")
 
             base_score = (
                 sum(
@@ -1514,24 +1657,18 @@ def score_series_parent(tree: "BooksTree") -> float:
                 )
                 / 5
             )
-
-        if (
-            str(tree)
-            == "/Users/brandon/Dev/auto-m4b/src/tests/tmp/inbox/Nathan Lowell/Shaman's Tales from the Golden Age of the Solar Clipper"
-        ):
-            ...
-            tree.i.children.series_nums
+            tree.tick(f"base_score for {tree.rel_path}: {base_score}")
 
         series_parent_score = base_score + num_score + child_series_books_ratio
         if bool(re.search(r"(?:\b|_)series(?:\b|_)", tree.name.lower(), re.I)):
             series_parent_score = max(series_parent_score + 0.75, 0.95)
+            tree.tick(f"series_parent_score from regex (?:\\b|_)series(?:\\b|_) {tree.rel_path}: {series_parent_score}")
         if tree.i.this.has_series_num or tree.i.this.has_start_num or tree.i.this.has_disc_num:
             # Penalize if the parent candidate has numbers, not very likely to be a series parent
             series_parent_score -= 0.4
+            tree.tick(f"series_parent_score from numbers for {tree.rel_path}: {series_parent_score}")
 
-        if series_parent_score > 1:
-            ...
-
+        tree.tick(f"returning series_parent_score for {tree.rel_path}: {series_parent_score}")
         return round(series_parent_score, 3)
     except Exception as e:
         if "pytest" in sys.modules:
@@ -1540,6 +1677,7 @@ def score_series_parent(tree: "BooksTree") -> float:
         return 0.0
 
 
+@cached_scorer
 def score_multi_parent(tree: "BooksTree") -> float:
     try:
         if not tree.parent or tree.is_root or tree.is_file():
@@ -1583,23 +1721,7 @@ def score_multi_parent(tree: "BooksTree") -> float:
         return 0.0
 
 
-# def score_multi_disc(tree: "BooksTree") -> float:
-#     try:
-#         if not tree.parent or tree.is_root:
-#             return 0.0
-
-#         if tree.is_match:
-#             ...
-
-#         if tree.is_file():
-#             return tree.i.this_and_siblings.disc_nums_completion or 0.0
-
-#         return tree.i.children.disc_nums_completion or tree.i.this_and_siblings.disc_nums_completion or 0.0
-#     except Exception as e:
-#         print_debug(f"Error scoring multi_disc: {e}")
-#         return 0.0
-
-
+@cached_scorer
 def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "multi_disc"] | None, float, float]:
     """
     Returns a tuple of (type, disc_nums_score, part_nums_score)
@@ -1692,6 +1814,7 @@ def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "
         return (None, 0.0, 0.0)
 
 
+@cached_scorer
 def tree_complexity(tree: "BooksTree") -> float:
     """
     Calculates the complexity of the tree structure based on:

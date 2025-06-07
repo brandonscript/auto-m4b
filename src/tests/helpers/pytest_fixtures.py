@@ -107,6 +107,17 @@ def load_test_fixture(
     cleanup_inbox: bool = False,
     max_file_size: int = 100 * 1024 * 1024,  # 100MB
 ):
+    start_time = time.time()
+    tick_time = start_time
+    testutils.print(f"Loading fixture '{name}'")
+    ticks = []
+
+    def tick(name: str, *args):
+        nonlocal tick_time
+        ticks.append((max(0, round(time.time() - tick_time, 4)), name, *args))
+        tick_time = time.time()
+        return ticks[-1]
+
     src_dir = FIXTURES_ROOT / name
     src_mp3 = src_dir.with_suffix(".mp3")
     src_m4b = src_dir.with_suffix(".m4b")
@@ -115,63 +126,96 @@ def load_test_fixture(
     if not src or not src.exists():
         raise FileNotFoundError(f"Fixture {name} not found. Does it exist in {FIXTURES_ROOT}?")
 
+    tick("found src")
+
     # List to track files that need shrinking
     files_to_shrink = []
 
     if src.is_dir():
         dst = TEST_DIRS.inbox / (override_name or name)
         dst.mkdir(parents=True, exist_ok=True)
+        tick("src is dir, made dst", dst)
 
-        for f in src.glob("**/*"):
+        src_globs = list(src.glob("**/*"))
+        tick(f"src.glob('**/*'), got {len(src_globs)} files")
+        for f in src_globs:
             if not f.is_file():
                 continue
             dst_f = dst / f.relative_to(src)
             src_size = f.stat().st_size
+            tick(f"{f.name}, src_size: {src_size}")
             dst_size = dst_f.stat().st_size if (dst_exists := dst_f.is_file()) else src_size
+            tick(f"{dst_f.name}, dst_size: {dst_size}")
             if dst_exists and src_size == min(dst_size, max_file_size):
                 continue
             dst_f.parent.mkdir(parents=True, exist_ok=True)
+            tick(f"shutil.copy({f}, {dst_f})")
             shutil.copy(f, dst_f)
+            tick(f"done copying")
             if max_file_size and is_audio_file(dst_f) and dst_size > max_file_size:
                 files_to_shrink.append((dst_f, max_file_size))
+                tick("appending to files_to_shrink")
 
         # if any files in dst are not in src, delete them
-        for f in dst.glob("**/*"):
+        dst_globs = list(dst.glob("**/*"))
+        tick(f"dst.glob('**/*'), got {len(dst_globs)} files, deleting files that don't exist in src")
+        for f in dst_globs:
             src_f = src / f.relative_to(dst)
             if f.is_file() and not src_f.exists():
                 f.unlink()
+                tick(f"deleted {f}")
     else:
         dst = TEST_DIRS.inbox / Path(override_name or name).with_suffix(src.suffix)
+        tick("src is file, made dst", dst)
+        if dst.with_suffix("").exists():
+            tick(f"dst.with_suffix('').exists(), deleting it")
         shutil.rmtree(dst.with_suffix(""), ignore_errors=True)
         src_size = src.stat().st_size
+        tick(f"src_size: {src_size}")
         dst_size = dst.stat().st_size if (dst_exists := dst.is_file()) else src_size
+        tick(f"dst_size: {dst_size}")
         if not dst_exists or src_size != min(dst_size, max_file_size):
+            tick(f"shutil.copy({src}, {dst})")
             shutil.copy(src, dst)
+            tick(f"done copying")
             if max_file_size and is_audio_file(dst) and dst_size > max_file_size:
                 files_to_shrink.append((dst, max_file_size))
-
+        tick(f"finding adjacent files with same basename as {src}")
         for f in find_adjacent_files_with_same_basename(src):
             dst_f = dst.with_suffix(f.suffix)
             f_size = f.stat().st_size
+            tick(f"{f.name}, f_size: {f_size}")
             dst_size = dst_f.stat().st_size if (dst_exists := dst_f.is_file()) else f_size
+            tick(f"{dst_f.name}, dst_size: {dst_size}")
             if not dst_exists or f_size != min(dst_size, max_file_size):
+                tick(f"shutil.copy({f}, {dst_f})")
                 shutil.copy(f, dst_f)
             if max_file_size and is_audio_file(dst_f) and dst_size > max_file_size:
                 files_to_shrink.append((dst_f, max_file_size))
+                tick("appending to files_to_shrink")
 
     if exclusive or match_filter is not None:
+        tick("setting match filter to", match_filter or name)
         testutils.set_match_filter(match_filter or name)
+        tick("done setting match filter")
 
     # Shrink files in parallel using multiprocessing
     if files_to_shrink:
+        tick(f"{len(files_to_shrink)} files to shrink")
         with mp.Pool(processes=mp.cpu_count()) as pool:
             pool.starmap(shrink_mp3_to_size, files_to_shrink)
+        tick("done shrinking files")
 
     converted = TEST_DIRS.converted / (override_name or name)
     converted_dir = converted.with_suffix("")
+    tick(f"Removing {converted} and {converted_dir}")
     rm_from_converted(override_name or name)
     shutil.rmtree(converted_dir, ignore_errors=True)
+    tick("done removing")
 
+    duration = time.time() - start_time
+    testutils.print(f"Loaded fixture '{name}' in {duration:.2f} seconds, yielding Audiobook()")
+    testutils.print(f"Got {len(ticks)} ticks")
     yield Audiobook(dst)
 
     if cleanup_inbox:

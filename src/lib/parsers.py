@@ -12,16 +12,13 @@ from typing import Any, cast, Literal, overload, TYPE_CHECKING, TypeVar
 import cachetools
 import cachetools.func
 from nltk import pos_tag, word_tokenize
-from spacy.ml import Doc
 
 from lib import nlp
 from lib.cleaners import clean_name_abbreviations
 from lib.ol_lookup import open_library_lookup_author
 from src.lib.misc import (
-    any_in,
     get_numbers_in_string,
     isorted,
-    iter_prev_curr_next,
     re_group,
 )
 from src.lib.nlp import (
@@ -500,240 +497,240 @@ def lookup_and_score_names(candidates: list[tuple[str, str, float]]) -> list[tup
     return [(n, l, sc) for n, (l, sc) in sorted(scores.items(), key=lambda item: item[1][1], reverse=True)]
 
 
-def get_nltk_names_smash(s: str) -> list[tuple[str, float]]:
-    from nltk import ne_chunk, pos_tag, word_tokenize
-    from nltk.tree import Tree
+# def get_nltk_names_smash(s: str) -> list[tuple[str, float]]:
+#     from nltk import ne_chunk, pos_tag, word_tokenize
+#     from nltk.tree import Tree
 
-    # Tokenize and process with NLTK
-    tokens = word_tokenize(s)
-    nltk_results = ne_chunk(pos_tag(tokens))
-    names = (
-        [("PERSON", x[0]) for x in get_nltk_names_smash(swap_firstname_lastname(s).replace(",", " "))]
-        if "," in s
-        else []
-    )
-    current_name = []
-    num_person_chunks = 0
-    # person_chunks = [r for r in nltk_results if isinstance(r, Tree) and r.label() == "PERSON"]
-    # num_person_chunks = len(person_chunks)
+#     # Tokenize and process with NLTK
+#     tokens = word_tokenize(s)
+#     nltk_results = ne_chunk(pos_tag(tokens))
+#     names = (
+#         [("PERSON", x[0]) for x in get_nltk_names_smash(swap_firstname_lastname(s).replace(",", " "))]
+#         if "," in s
+#         else []
+#     )
+#     current_name = []
+#     num_person_chunks = 0
+#     # person_chunks = [r for r in nltk_results if isinstance(r, Tree) and r.label() == "PERSON"]
+#     # num_person_chunks = len(person_chunks)
 
-    def _end_name():
-        nonlocal current_name, names
-        if current_name:
-            names.append(("PERSON", " ".join(current_name)))
-            current_name = []
+#     def _end_name():
+#         nonlocal current_name, names
+#         if current_name:
+#             names.append(("PERSON", " ".join(current_name)))
+#             current_name = []
 
-    def _is_proper_noun(tk: Any) -> bool:
-        if (
-            (isinstance(tk, tuple) and tk[1] in ["NNP", "NNPS"])
-            or _is_tree(tk)
-            and any_in([leaf[1] for leaf in cast(Tree, tk).leaves()], ["NNP", "NNPS"])
-        ):
-            return True
-        return False
+#     def _is_proper_noun(tk: Any) -> bool:
+#         if (
+#             (isinstance(tk, tuple) and tk[1] in ["NNP", "NNPS"])
+#             or _is_tree(tk)
+#             and any_in([leaf[1] for leaf in cast(Tree, tk).leaves()], ["NNP", "NNPS"])
+#         ):
+#             return True
+#         return False
 
-    def _is_non_name_char(c: str | tuple[str, str] | None) -> bool:
-        if not c:
-            return False
-        _c = c[0] if isinstance(c, tuple) else c
-        return bool(junk_chars_name_pattern.search(_c))
+#     def _is_non_name_char(c: str | tuple[str, str] | None) -> bool:
+#         if not c:
+#             return False
+#         _c = c[0] if isinstance(c, tuple) else c
+#         return bool(junk_chars_name_pattern.search(_c))
 
-    def _is_period(tk: Any) -> bool:
-        return isinstance(tk, tuple) and tk[0].strip() == "."
+#     def _is_period(tk: Any) -> bool:
+#         return isinstance(tk, tuple) and tk[0].strip() == "."
 
-    def _is_tuple(tk: Any) -> bool:
-        return isinstance(tk, tuple) and len(tk) == 2
+#     def _is_tuple(tk: Any) -> bool:
+#         return isinstance(tk, tuple) and len(tk) == 2
 
-    def _is_tree(tk: Any) -> bool:
-        return isinstance(tk, Tree)
+#     def _is_tree(tk: Any) -> bool:
+#         return isinstance(tk, Tree)
 
-    def _is_gpe_noun(tk: Any) -> bool:
-        return isinstance(tk, Tree) and tk.label() == "GPE" and tk.leaves()[0][1].startswith("NN")
+#     def _is_gpe_noun(tk: Any) -> bool:
+#         return isinstance(tk, Tree) and tk.label() == "GPE" and tk.leaves()[0][1].startswith("NN")
 
-    def _is_person(tk: Any) -> bool:
-        nonlocal num_person_chunks
-        if is_person := (isinstance(tk, Tree) and tk.label() == "PERSON"):
-            num_person_chunks += 1
-        return is_person
+#     def _is_person(tk: Any) -> bool:
+#         nonlocal num_person_chunks
+#         if is_person := (isinstance(tk, Tree) and tk.label() == "PERSON"):
+#             num_person_chunks += 1
+#         return is_person
 
-    def _is_abbreviated_name(tk: Any) -> bool:
-        return isinstance(tk, tuple) and (
-            bool(abbreviated_names_pattern.match(tk[0])) or bool(uppercase_1_3_letters_pattern.match(tk[0]))
-        )
+#     def _is_abbreviated_name(tk: Any) -> bool:
+#         return isinstance(tk, tuple) and (
+#             bool(abbreviated_names_pattern.match(tk[0])) or bool(uppercase_1_3_letters_pattern.match(tk[0]))
+#         )
 
-    def _is_part_of_name(prev: Any, curr: Any, nxt: Any) -> bool:
-        if _is_person(curr):
-            return True
-        if _is_gpe_noun(curr) and all(any((p is None, _is_abbreviated_name(p), _is_person(p))) for p in [prev, nxt]):
-            return True
-        if _is_non_name_char(curr[0]):
-            return False
-        if _is_proper_noun(curr) and _is_person(prev):
-            return True
-        if _is_proper_noun(nxt) and _is_person(curr):
-            return True
-        if _is_proper_noun(prev) and (_is_person(curr) or _is_period(curr)):
-            return True
-        if (_is_proper_noun(curr) or _is_period(curr)) and _is_person(nxt):
-            return True
-        if _is_abbreviated_name(curr):
-            return True
-        if _is_abbreviated_name(prev) and _is_proper_noun(curr):
-            return True
-        return False
+#     def _is_part_of_name(prev: Any, curr: Any, nxt: Any) -> bool:
+#         if _is_person(curr):
+#             return True
+#         if _is_gpe_noun(curr) and all(any((p is None, _is_abbreviated_name(p), _is_person(p))) for p in [prev, nxt]):
+#             return True
+#         if _is_non_name_char(curr[0]):
+#             return False
+#         if _is_proper_noun(curr) and _is_person(prev):
+#             return True
+#         if _is_proper_noun(nxt) and _is_person(curr):
+#             return True
+#         if _is_proper_noun(prev) and (_is_person(curr) or _is_period(curr)):
+#             return True
+#         if (_is_proper_noun(curr) or _is_period(curr)) and _is_person(nxt):
+#             return True
+#         if _is_abbreviated_name(curr):
+#             return True
+#         if _is_abbreviated_name(prev) and _is_proper_noun(curr):
+#             return True
+#         return False
 
-    prev = None
-    nxt = None
-    for i, tk in enumerate(nltk_results):
-        curr_tuple = cast(tuple[str, str], tk) if _is_tuple(tk) else (None, None)
-        curr_tree = cast(Tree, tk) if _is_tree(tk) else None
-        has_next = i < len(nltk_results) - 1
-        nxt = nltk_results[i + 1] if has_next else None
+#     prev = None
+#     nxt = None
+#     for i, tk in enumerate(nltk_results):
+#         curr_tuple = cast(tuple[str, str], tk) if _is_tuple(tk) else (None, None)
+#         curr_tree = cast(Tree, tk) if _is_tree(tk) else None
+#         has_next = i < len(nltk_results) - 1
+#         nxt = nltk_results[i + 1] if has_next else None
 
-        if _is_part_of_name(prev, tk, nxt) and not _is_non_name_char(curr_tuple[0]):
-            # Collect tokens that are part of a PERSON entity
-            if curr_tree:
-                current_name.append(" ".join(leaf[0] for leaf in curr_tree.leaves()))  # type: ignore
-            elif curr_tuple:
-                # append to newest part in current_name if len(current_name) > 0
-                if current_name and _is_period(tk):
-                    current_name[-1] += f"{curr_tuple[0]}"
-                else:
-                    current_name.append(curr_tuple[0])
-        else:
-            # Append completed name if we hit a non-PERSON chunk
-            _end_name()
+#         if _is_part_of_name(prev, tk, nxt) and not _is_non_name_char(curr_tuple[0]):
+#             # Collect tokens that are part of a PERSON entity
+#             if curr_tree:
+#                 current_name.append(" ".join(leaf[0] for leaf in curr_tree.leaves()))  # type: ignore
+#             elif curr_tuple:
+#                 # append to newest part in current_name if len(current_name) > 0
+#                 if current_name and _is_period(tk):
+#                     current_name[-1] += f"{curr_tuple[0]}"
+#                 else:
+#                     current_name.append(curr_tuple[0])
+#         else:
+#             # Append completed name if we hit a non-PERSON chunk
+#             _end_name()
 
-        prev = tk
+#         prev = tk
 
-    # Append the last collected name (if any)
-    if num_person_chunks > 0 and current_name:
-        names.append(("PERSON", " ".join(current_name)))
+#     # Append the last collected name (if any)
+#     if num_person_chunks > 0 and current_name:
+#         names.append(("PERSON", " ".join(current_name)))
 
-    # Handle short string edge case
-    if len(tokens) <= 3 and not names:  # Assume short strings might be a name
-        names = [
-            (
-                "UNKNOWN",
-                " ".join(
-                    (
-                        t
-                        for p, t, n in iter_prev_curr_next(tokens)
-                        if t and len(t) < 11 and not any(map(_is_non_name_char, [p, t, n]))
-                    )
-                ),
-            )
-        ]
+#     # Handle short string edge case
+#     if len(tokens) <= 3 and not names:  # Assume short strings might be a name
+#         names = [
+#             (
+#                 "UNKNOWN",
+#                 " ".join(
+#                     (
+#                         t
+#                         for p, t, n in iter_prev_curr_next(tokens)
+#                         if t and len(t) < 11 and not any(map(_is_non_name_char, [p, t, n]))
+#                     )
+#                 ),
+#             )
+#         ]
 
-    # Use nlp to double check
-    spaCy_people, _ = spaCy_extract(s)
-    names.extend([("PERSON_SPACY", p) for p in spaCy_people])
+#     # Use nlp to double check
+#     spaCy_people, _ = spaCy_extract(s)
+#     names.extend([("PERSON_SPACY", p) for p in spaCy_people])
 
-    # Check names, and if all the words in the name are generic, change the type to "GENERIC"
-    for name in names:
-        if all(is_generic_word(w) for w in to_words(name[1])):
-            name = ("GENERIC", name[1])
+#     # Check names, and if all the words in the name are generic, change the type to "GENERIC"
+#     for name in names:
+#         if all(is_generic_word(w) for w in to_words(name[1])):
+#             name = ("GENERIC", name[1])
 
-    # If we have multiple PERSON entities, score them and return the highest-scoring one
-    results = [(k, v) for k, v in lookup_and_score_names(names).items()]
-    if len(names) > 1:
+#     # If we have multiple PERSON entities, score them and return the highest-scoring one
+#     results = [(k, v) for k, v in lookup_and_score_names(names).items()]
+#     if len(names) > 1:
 
-        # Remove any results from the names list that are a subset of another result
-        # e.g., if we get ("Andrea Smith", "Andrea") and ("Andrea Smith", "Smith"), we only want to keep the former
-        return list(
-            filter(lambda x: not any(x[0] in n[0] for n in results if x != n), results),
-        )
+#         # Remove any results from the names list that are a subset of another result
+#         # e.g., if we get ("Andrea Smith", "Andrea") and ("Andrea Smith", "Smith"), we only want to keep the former
+#         return list(
+#             filter(lambda x: not any(x[0] in n[0] for n in results if x != n), results),
+#         )
 
-    return results
+#     return results
 
 
-def spaCy_extract_sm(s: str) -> tuple[list[str], list[str]]:
-    """Extracts objects and people from a string using spaCy's named entity recognition.
-    Returns a tuple of lists: (people, objects)
-    """
-    s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
-    doc: Doc = nlp(s)
-    objects = [tk for tk in doc.ents if tk.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG", "GPE", "LAW"]]
-    people = [tk for tk in doc.ents if tk.label_ in ["PERSON", "GPE"]]
-    junk = [tk for tk in doc if not tk.is_alpha]
+# def spaCy_extract_sm(s: str) -> tuple[list[str], list[str]]:
+#     """Extracts objects and people from a string using spaCy's named entity recognition.
+#     Returns a tuple of lists: (people, objects)
+#     """
+#     s = re.sub(r"[-_]", ",", strip_leading_nums_and_punct(s))
+#     doc: Doc = nlp(s)
+#     objects = [tk for tk in doc.ents if tk.label_ in ["WORK_OF_ART", "PRODUCT", "EVENT", "ORG", "GPE", "LAW"]]
+#     people = [tk for tk in doc.ents if tk.label_ in ["PERSON", "GPE"]]
+#     junk = [tk for tk in doc if not tk.is_alpha]
 
-    # Remove junk from people
-    people = [p for p in people if not any(j.text in p.text for j in junk)]
+#     # Remove junk from people
+#     people = [p for p in people if not any(j.text in p.text for j in junk)]
 
-    # Remove junk from objects
-    objects = [o for o in objects if not any(j.text in o.text for j in junk)]
+#     # Remove junk from objects
+#     objects = [o for o in objects if not any(j.text in o.text for j in junk)]
 
-    # If the same token is in both people and objects, keep the one that is nearest other
-    # found strings. E.g. For "Trenton Lee Stewart – The Mysterious Benedict Society", if the tokens are:
-    # people: ["Trenton", "Lee Stewart"]
-    # objects: ["Trenton", "The Mysterious Benedict Society"]
-    # We want to keep "Trenton Lee Stewart" and "The Mysterious Benedict Society"
-    # because "Trenton" is closer to "Lee Stewart" than it is to "The Mysterious Benedict Society"
-    duplicates = [o for o in objects if o in people]
-    o_ranges = [(s.find(o.text), len(o.text)) for o in objects if not o in duplicates]
-    p_ranges = [(s.find(p.text), len(p.text)) for p in people if not p in duplicates]
+#     # If the same token is in both people and objects, keep the one that is nearest other
+#     # found strings. E.g. For "Trenton Lee Stewart – The Mysterious Benedict Society", if the tokens are:
+#     # people: ["Trenton", "Lee Stewart"]
+#     # objects: ["Trenton", "The Mysterious Benedict Society"]
+#     # We want to keep "Trenton Lee Stewart" and "The Mysterious Benedict Society"
+#     # because "Trenton" is closer to "Lee Stewart" than it is to "The Mysterious Benedict Society"
+#     duplicates = [o for o in objects if o in people]
+#     o_ranges = [(s.find(o.text), len(o.text)) for o in objects if not o in duplicates]
+#     p_ranges = [(s.find(p.text), len(p.text)) for p in people if not p in duplicates]
 
-    # Find the range that is closest to the other range
-    for d in duplicates:
-        # Get the position (range) where the duplicate is in the original string
-        d_i = s.find(d.text)
-        # Find the distance from the duplicate to all the other ranges
-        o_dist = [abs(d_i - r[0]) for r in o_ranges]
-        p_dist = [abs(d_i - r[0]) for r in p_ranges]
-        if o_dist and p_dist:
-            # if closer to object, remove person
-            if min(o_dist) < min(p_dist):
-                people.remove(d)
-            # if closer to person, remove object
-            else:
-                objects.remove(d)
+#     # Find the range that is closest to the other range
+#     for d in duplicates:
+#         # Get the position (range) where the duplicate is in the original string
+#         d_i = s.find(d.text)
+#         # Find the distance from the duplicate to all the other ranges
+#         o_dist = [abs(d_i - r[0]) for r in o_ranges]
+#         p_dist = [abs(d_i - r[0]) for r in p_ranges]
+#         if o_dist and p_dist:
+#             # if closer to object, remove person
+#             if min(o_dist) < min(p_dist):
+#                 people.remove(d)
+#             # if closer to person, remove object
+#             else:
+#                 objects.remove(d)
 
-    clean_people = [p.text for p in people]
-    clean_objects = [o.text for o in objects]
+#     clean_people = [p.text for p in people]
+#     clean_objects = [o.text for o in objects]
 
-    # If any of the people are a substring of any object, strip the person from the object
-    # and vice-versa
-    for i, o in enumerate(objects):
-        for j, p in enumerate(people):
-            if p.text in o.text:
-                clean_objects[i] = leading_trailing_non_alphanum_pattern.sub("", o.text.replace(p.text, "")).strip()
-            if o.text in p.text:
-                clean_people[j] = leading_trailing_non_alphanum_pattern.sub("", p.text.replace(o.text, "")).strip()
+#     # If any of the people are a substring of any object, strip the person from the object
+#     # and vice-versa
+#     for i, o in enumerate(objects):
+#         for j, p in enumerate(people):
+#             if p.text in o.text:
+#                 clean_objects[i] = leading_trailing_non_alphanum_pattern.sub("", o.text.replace(p.text, "")).strip()
+#             if o.text in p.text:
+#                 clean_people[j] = leading_trailing_non_alphanum_pattern.sub("", p.text.replace(o.text, "")).strip()
 
-    # If any of the strings are contiguous in the original string, combine them.
-    # e.g., if people is ["Trenton", "Lee Stewart"] and objects is ["The", "Mysterious", "Benedict", "Society"],
-    # we want to combine "Trenton Lee Stewart" and "The Mysterious Benedict Society"
+#     # If any of the strings are contiguous in the original string, combine them.
+#     # e.g., if people is ["Trenton", "Lee Stewart"] and objects is ["The", "Mysterious", "Benedict", "Society"],
+#     # we want to combine "Trenton Lee Stewart" and "The Mysterious Benedict Society"
 
-    # Helper function to combine contiguous strings
-    def _combine_contiguous(strings: list[str], original: str) -> list[str]:
-        if not strings:
-            return []
+#     # Helper function to combine contiguous strings
+#     def _combine_contiguous(strings: list[str], original: str) -> list[str]:
+#         if not strings:
+#             return []
 
-        # Sort strings by their position in the original string
-        sorted_strings = sorted(strings, key=lambda x: original.find(x))
-        result = []
-        current = sorted_strings[0]
+#         # Sort strings by their position in the original string
+#         sorted_strings = sorted(strings, key=lambda x: original.find(x))
+#         result = []
+#         current = sorted_strings[0]
 
-        for next_str in sorted_strings[1:]:
-            # Check if strings are contiguous in the original string
-            current_end = original.find(current) + len(current)
-            next_start = original.find(next_str)
+#         for next_str in sorted_strings[1:]:
+#             # Check if strings are contiguous in the original string
+#             current_end = original.find(current) + len(current)
+#             next_start = original.find(next_str)
 
-            # If they are contiguous (allowing for whitespace/punctuation)
-            if next_start <= current_end + 1:  # +1 to allow for a single space/punctuation
-                current = f"{current} {next_str}".strip()
-            else:
-                result.append(current)
-                current = next_str
+#             # If they are contiguous (allowing for whitespace/punctuation)
+#             if next_start <= current_end + 1:  # +1 to allow for a single space/punctuation
+#                 current = f"{current} {next_str}".strip()
+#             else:
+#                 result.append(current)
+#                 current = next_str
 
-        result.append(current)
-        return result
+#         result.append(current)
+#         return result
 
-    # Combine contiguous strings for both people and objects
-    clean_people = _combine_contiguous(clean_people, s)
-    clean_objects = _combine_contiguous(clean_objects, s)
+#     # Combine contiguous strings for both people and objects
+#     clean_people = _combine_contiguous(clean_people, s)
+#     clean_objects = _combine_contiguous(clean_objects, s)
 
-    return clean_people, clean_objects
+#     return clean_people, clean_objects
 
 
 def spaCy_extract(s: str) -> tuple[list[tuple[str, str, float]], list[tuple[str, str, float]]]:

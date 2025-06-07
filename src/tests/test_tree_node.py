@@ -5,7 +5,7 @@ from src.tests.helpers.pytest_dumps import TEST_DIRS
 
 class test_tree_node:
 
-    def test_tree_has_id3_info(self, authors_guide_to_murder__flat_mp3: Audiobook, setup_teardown):
+    def test_tree_has_id3_info(self, requires_empty_inbox, authors_guide_to_murder__flat_mp3: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder")
         test_book = tree.dirs[authors_guide_to_murder__flat_mp3.path.name]
         assert len(test_book.files) == 37

@@ -89,7 +89,7 @@ class Audiobook(BaseModel):
                 # raise InboxStateError(
                 #     f"Book not found in inbox state, cannot attach tree to Audiobook instance: {path}"
                 # )
-        tree = tree or BooksTree(path_or_tree, scan_id3=False)
+        tree = tree or BooksTree(path_or_tree)
 
         super().__init__(path=path, tree=tree)
 

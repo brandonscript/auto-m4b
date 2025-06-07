@@ -7,13 +7,14 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, cast, TypeVar
 
+from lib.singleton import singleton
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.formatters import friendly_short_date
 from src.lib.fs_utils import find_root_from_path, try_relative_to
 from src.lib.hasher import Hasher
 from src.lib.inbox_item import get_item, get_key, InboxItem, InboxItemStatus
-from src.lib.misc import any_in, singleton
+from src.lib.misc import any_in
 from src.lib.strings import en
 from src.lib.term import print_debug, print_notice
 
@@ -144,13 +145,14 @@ class InboxState(Hasher):
         skip_failed_sync: bool = False,
         set_ready: bool = False,
         *,
-        scan_id3: bool = True,
+        scan_id3: bool | None = None,
         force: bool = False,
     ):
         from src.lib.config import cfg
 
-        if not force and time.time() - self._last_scan < cfg.WAIT_TIME:
-            return
+        if self._last_scan > 0 and self.ready:
+            if not force and time.time() - self._last_scan < cfg.WAIT_TIME:
+                return
 
         if self.stale:
             recheck_failed = True
@@ -161,8 +163,9 @@ class InboxState(Hasher):
         super().scan()
 
         if not self.tree:
-            self.tree = BooksTree(cfg.inbox_dir, scan_id3=scan_id3)
-        self.tree.scan()
+            # Only scan id3 info once, when initializing the tree
+            self.tree = BooksTree(cfg.inbox_dir)
+        self.tree.scan(scan_id3=False if scan_id3 is False else True)
         # self._tree.scan()
 
         found_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}
