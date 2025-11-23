@@ -5,9 +5,18 @@ import pickle
 import re
 import sqlite3
 import subprocess
+import warnings
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import cast, Literal, TypedDict
+
+# Suppress deprecation warning from thinc about torch.cuda.amp.autocast
+# This must be set before importing spacy, as thinc (spacy's dependency) may trigger the warning
+warnings.filterwarnings(
+    "ignore",
+    message=r".*torch\.cuda\.amp\.autocast.*is deprecated.*",
+    category=FutureWarning,
+)
 
 import nltk
 import spacy

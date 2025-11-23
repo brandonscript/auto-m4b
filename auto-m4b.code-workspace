@@ -59,6 +59,9 @@
       "titleBar.inactiveBackground": "#2a6f8599",
       "titleBar.inactiveForeground": "#e7e7e799"
     },
-    "peacock.color": "#2a6f85"
+    "peacock.color": "#2a6f85",
+    "cursorpyright.analysis.autoImportCompletions": true,
+    "cursorpyright.analysis.autoSearchPaths": true,
+    "cursorpyright.analysis.typeCheckingMode": "basic"
   }
 }

@@ -411,6 +411,7 @@ class InboxState(Hasher):
         waited_count = 0
         before_modified_hash = self.prev_hash if self.hash_age < cfg.SLEEP_TIME else self.curr_hash
         _banner_printed = False
+        items_before_wait = set(self._items.keys())
         # rec_mod = self.dir_was_recently_modified
         while self.dir_was_recently_modified:
             print_debug(f"{en.DEBUG_WAITING_FOR_INBOX} {waited_count + 1} ({before_modified_hash} → {self.curr_hash})")
@@ -418,10 +419,13 @@ class InboxState(Hasher):
             if not self.changed_after_waiting:
                 self.changed_after_waiting = self.next_hash != before_modified_hash
 
+            # Only print banner if new items were added (not just removed)
             if self.changed_after_waiting and not _banner_printed:
-                self.stale = True
-                print_banner(after=lambda: print_notice(f"{en.INBOX_RECENTLY_MODIFIED}\n"))
-                _banner_printed = True
+                new_items = set(self._items.keys()) - items_before_wait
+                if new_items:  # Only show message if there are actually new items
+                    self.stale = True
+                    print_banner(after=lambda: print_notice(f"{en.INBOX_RECENTLY_MODIFIED}\n"))
+                    _banner_printed = True
 
             waited_count += 1
             time.sleep(0.5)

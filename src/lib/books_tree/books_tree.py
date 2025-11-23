@@ -57,6 +57,7 @@ class BooksTree(BaseModel):
     root: "BooksTree | None" = None
     _match_filter: list[Path] | str | None = None
     _last_scan: float | None = None
+    _i: "TreeNodeSummary" = None  # type: ignore
     id3_tags: Id3Tags | None = None
     start_time: float | None = None
     ticks: list[tuple[float, str, Any]] = Field(default_factory=list)
@@ -168,7 +169,6 @@ class BooksTree(BaseModel):
         from src.lib.fs_utils import filter_depth, filter_ignored, only_audio_files
 
         self.start_time = time.time()
-        tick = self.tick
 
         root: Self | BooksTree = self if self.is_root or not self.root else self.root
 
@@ -176,24 +176,24 @@ class BooksTree(BaseModel):
             raise RuntimeError("scan() should only be called on the root of the tree")
 
         if not root.exists():
-            tick("root.exists() is False, returning self")
+            # tick("root.exists() is False, returning self")
             return self
 
         if root.is_file() and allow_file_root:
-            tick("root.is_file() and allow_file_root, returning self")
+            # tick("root.is_file() and allow_file_root, returning self")
             return self
 
         # Do a recursive glob of all files in the directory, and prepend the root so we can get standalone files
-        tick("getting rglob")
+        # tick("getting rglob")
         rglob = isorted([root.path, *root.path.rglob("*")])
-        tick("done getting rglob", len(rglob))
+        # tick("done getting rglob", len(rglob))
 
         self._files = []
         self._dirs = {}
 
         # Function to recursively add keys to the tree dict
         def _add_to_tree(at_path: Path, audio_files: Sequence[Path | BooksTree]):
-            tick("adding to tree", at_path, len(audio_files))
+            # tick("adding to tree", at_path, len(audio_files))
             rel_path = at_path.relative_to(root.path)
             parts = rel_path.parts
             subtree = self
@@ -201,45 +201,45 @@ class BooksTree(BaseModel):
             for i, part in enumerate(parts):
                 if part not in subtree._dirs:
                     parent_p = Path(root.path, *parts[: i + 1])
-                    tick("part not in subtree._dirs, adding parent_p", parent_p)
+                    # tick("part not in subtree._dirs, adding parent_p", parent_p)
                     if not match_filter_path(parent_p, self.match_filter, root=root):
-                        tick("parent_p not in match_filter, skipping")
+                        # tick("parent_p not in match_filter, skipping")
                         continue
-                    tick("parent_p in match_filter, adding to subtree")
+                    # tick("parent_p in match_filter, adding to subtree")
                     subtree._dirs[part] = BooksTree.cast(parent_p, root=root, match_filter=self.match_filter)
-                tick(f"subtree._dirs[{part}] =", subtree._dirs[part])
+                # tick(f"subtree._dirs[{part}] =", subtree._dirs[part])
                 subtree = subtree._dirs[part]
             if files := [*subtree._files, *audio_files]:
-                tick(f"subtree has files, adding {len(files)} to subtree")
+                # tick(f"subtree has files, adding {len(files)} to subtree")
                 subtree._files = isorted([BooksTree.cast(p, root=root, match_filter=self.match_filter) for p in files])
-                tick("done adding files to subtree", [f.rel_path for f in subtree._files])
-            else:
-                tick("subtree has no files, skipping")
+                # tick("done adding files to subtree", [f.rel_path for f in subtree._files])
+            # else:
+            # tick("subtree has no files, skipping")
 
-        tick("building tree of audio files and dirs")
+        # tick("building tree of audio files and dirs")
         # Build a tree of the audio files and dirs
         for d in [x for x in rglob if x.is_dir()]:
             # If d is not within the mindepth and maxdepth, skip it
             if not filter_depth(d, root.path, mindepth=mindepth, maxdepth=maxdepth):
-                tick("d not in mindepth and maxdepth, skipping")
+                # tick("d not in mindepth and maxdepth, skipping")
                 continue
 
             # If x is a dir, make sure the path and its parents exists in the tree
-            tick("d is a dir, getting audio files in dir")
+            # tick("d is a dir, getting audio files in dir")
             audio_files_in_dir = [
                 f
                 for f in only_audio_files(filter_ignored(rglob))
                 if f.parent == d and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
-            tick(f"done getting audio {len(audio_files_in_dir)} files in dir {d.relative_to(root.path)}")
+            # tick(f"done getting audio {len(audio_files_in_dir)} files in dir {d.relative_to(root.path)}")
             if audio_files_in_dir:
-                tick("about to call _add_to_tree(d)", d)
+                # tick("about to call _add_to_tree(d)", d)
                 _add_to_tree(d, audio_files_in_dir)
-            else:
-                tick("no audio files in dir, skipping")
+            # else:
+            # tick("no audio files in dir, skipping")
 
         # Add files from the current level to self.files
-        tick(f"adding files from current level to self.files, total is currently {len(self._files)}")
+        # tick(f"adding files from current level to self.files, total is currently {len(self._files)}")
         self._files = isorted(
             [
                 BooksTree.cast(f, root=root, match_filter=self.match_filter)
@@ -247,32 +247,32 @@ class BooksTree(BaseModel):
                 if f.parent == self.path and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
         )
-        tick(f"done adding files from current level to self.files, total is now {len(self._files)}")
+        # tick(f"done adding files from current level to self.files, total is now {len(self._files)}")
 
         self._last_scan = time.time()
-        tick("updating _last_scan to", self._last_scan)
+        # tick("updating _last_scan to", self._last_scan)
 
         if scan_id3 is True or (scan_id3 is None and determine_structure):
-            tick(f"scanning id3 tags because scan_id3 is {scan_id3}")
+            # tick(f"scanning id3 tags because scan_id3 is {scan_id3}")
             if self.is_root:
-                tick(f"self is root, scanning id3 tags recurseively ({len(self.files_recursive)} files)")
+                # tick(f"self is root, scanning id3 tags recurseively ({len(self.files_recursive)} files)")
                 for f in [f for f in self.files_recursive if not f.id3_tags]:
-                    tick(f"(root-leaf) scanning id3 tags for file {f.rel_path}")
+                    # tick(f"(root-leaf) scanning id3 tags for file {f.rel_path}")
                     f.id3_tags = t if (t := Id3Tags.from_file(f.path)) and not t.BAD else None
-                    tick(f"(root-leaf) done scanning id3 tags for file {f.rel_path}")
+                    # tick(f"(root-leaf) done scanning id3 tags for file {f.rel_path}")
             elif self.is_file() and not self.id3_tags:
-                tick(f"(self-is_file) scanning id3 tags for direct file {self.rel_path}")
+                # tick(f"(self-is_file) scanning id3 tags for direct file {self.rel_path}")
                 self.id3_tags = t if (t := Id3Tags.from_file(self.path)) and not t.BAD else None
-                tick(f"(self-is_file) done scanning id3 tags for file {self.rel_path}")
+                # # tick(f"(self-is_file) done scanning id3 tags for file {self.rel_path}")
 
-        tick("done scanning id3 tags")
+        # # tick("done scanning id3 tags")
         if determine_structure:
-            tick(f"determining structure for {self.rel_path}")
+            # # tick(f"determining structure for {self.rel_path}")
             self.determine_structure()
-            tick(f"done determining structure for {self.rel_path}")
-        total_time = round(time.time() - self.start_time, 4)
-        tick(f"done scanning {self.rel_path}", total_time)
-        print_debug(f"total time taken: {total_time} seconds", self.ticks)
+            # # tick(f"done determining structure for {self.rel_path}")
+        # total_time = round(time.time() - self.start_time, 4)
+        # # tick(f"done scanning {self.rel_path}", total_time)
+        # print_debug(f"total time taken: {total_time} seconds", self.ticks)
         return self
 
     @copy_kwargs(_scan)
@@ -562,7 +562,9 @@ class BooksTree(BaseModel):
 
     @property
     def i(self) -> TreeNodeSummary:
-        return TreeNodeSummary(self)
+        if self._i is None:
+            self._i = TreeNodeSummary(self)
+        return self._i
 
     @property
     def has_only_dirs(self):
@@ -904,13 +906,13 @@ class BooksTree(BaseModel):
             self.start_time = self.parent.start_time
             self.ticks = self.parent.ticks
 
-        self.tick("determine_structure", self.rel_path)
+        # self.tick("determine_structure", self.rel_path)
         root = parent.root or parent
 
         depth = len(self.path.relative_to(root.path).parts) if root else 0
 
         is_root = depth == 0
-        self.tick(f"is_root: {is_root}, depth: {depth}")
+        # self.tick(f"is_root: {is_root}, depth: {depth}")
 
         if (self.is_root and not is_root) or (not self.is_root and is_root):
             raise ValueError(
@@ -918,55 +920,55 @@ class BooksTree(BaseModel):
             )
 
         if is_root:
-            # self.tick("is_root, setting structures to _root_")
+            # self.# tick("is_root, setting structures to _root_")
             self.set_structures("_root_")
             if not self.dirs and not self.files:
-                # self.tick(f"no dirs or files, returning self.structure: {self.structure}")
+                # self.# tick(f"no dirs or files, returning self.structure: {self.structure}")
                 return self.structure
 
-            # self.tick("root.determine_structure for dirs (non-recursive)")
+            # self.# tick("root.determine_structure for dirs (non-recursive)")
             [d.determine_structure(parent=self) for d in self.dirs.values()]
-            # self.tick("done determining structure for dirs (non-recursive)")
-            # self.tick("root.determine_structure for files (non-recursive)")
+            # self.# tick("done determining structure for dirs (non-recursive)")
+            # self.# tick("root.determine_structure for files (non-recursive)")
             [f.determine_structure(parent=self) for f in self.files]
-            # self.tick("done determining structure for files (non-recursive)")
+            # self.# tick("done determining structure for files (non-recursive)")
             # Note: Disable this assertion when debugging with _match_filter_func()
             if self.children_without_structure_r:
                 raise ValueError(
                     f"Expected structure to be determined for: {'\n'.join([str(c) for c in self.children_without_structure_r])}"
                 )
-            # self.tick("root.determine_if_book_root for children (recursive)")
+            # self.# tick("root.determine_if_book_root for children (recursive)")
             [c.determine_if_book_root() for c in self.children_recursive]
-            # self.tick("done determining structure for root", self.rel_path)
+            # self.# tick("done determining structure for root", self.rel_path)
             return self.structure
 
         if self.structure:
-            self.tick(f"structure is already set to {self.structure}, returning")
+            # self.tick(f"structure is already set to {self.structure}, returning")
             return self.structure
 
         this_file = [self] if self.is_file() else []
         this_dir = [self] if self.is_dir() else []
 
         def check_dir(d: BooksTree):
-            # self.tick(f"(d) starting check_dir for {d.rel_path}")
+            # self.# tick(f"(d) starting check_dir for {d.rel_path}")
             single = bool(d.files) and all(f.has_structure("single") for f in d.files)
-            # self.tick(f"(d) done single: {single}")
+            # self.# tick(f"(d) done single: {single}")
             s_f = score_flat(d)
-            # self.tick(f"(d) done score_flat: {s_f}")
+            # self.# tick(f"(d) done score_flat: {s_f}")
             s_sb = score_series_book(d)
-            # self.tick(f"(d) done score_series_book: {s_sb}")
+            # self.# tick(f"(d) done score_series_book: {s_sb}")
             s_sp = score_series_parent(d)
-            # self.tick(f"(d) done score_series_parent: {s_sp}")
+            # self.# tick(f"(d) done score_series_parent: {s_sp}")
             s_mp = score_multi_parent(d)
-            # self.tick(f"(d) done score_multi_parent: {s_mp}")
+            # self.# tick(f"(d) done score_multi_parent: {s_mp}")
             multi, s_m_di, s_m_pt = score_multi_part_or_disc(d)
-            # self.tick(f"(d) done score_multi_part_or_disc: {s_m_di}, {s_m_pt}")
+            # self.# tick(f"(d) done score_multi_part_or_disc: {s_m_di}, {s_m_pt}")
             flat = s_f > 0.6 and all(s_f > x for x in (s_m_di, s_m_pt, s_sp))
-            # self.tick(f"(d) determined flat: {flat}")
+            # self.# tick(f"(d) determined flat: {flat}")
             series_parent = s_sp > 0.75 and s_sp > s_sb
-            # self.tick(f"(d) determined series_parent: {series_parent}")
+            # self.# tick(f"(d) determined series_parent: {series_parent}")
             multi_parent = s_mp > 0.75 and s_mp > s_sp
-            # self.tick(f"(d) determined multi_parent: {multi_parent}")
+            # self.# tick(f"(d) determined multi_parent: {multi_parent}")
             likely = None
             match True:
                 case _ if flat:
@@ -981,118 +983,118 @@ class BooksTree(BaseModel):
                     likely = "series_parent"
                 case _ if multi:
                     likely = multi
-            # self.tick(f"(d) likely: {likely}")
+            # self.# tick(f"(d) likely: {likely}")
             return likely, single, multi, flat, multi_parent, series_parent
 
         def check_nested(d: BooksTree):
             if (p := d.parent) and not p.is_root and (_is_only_dir_in_p := (len(p.dirs) < 2 and not p.files)):
                 p.add_structures("nested", recursive=True)
-                # self.tick(f"(p) added 'nested' to {p.rel_path} recursively")
+                # self.# tick(f"(p) added 'nested' to {p.rel_path} recursively")
             # elif p := d.parent:
-            # self.tick(f"(p) {p.rel_path} is not a nested dir, skipping")
+            # self.# tick(f"(p) {p.rel_path} is not a nested dir, skipping")
 
         def check_single_standalone_file(f: BooksTree):
-            # self.tick(f"(f) check_single_standalone_file: {f.rel_path}")
+            # self.# tick(f"(f) check_single_standalone_file: {f.rel_path}")
             s, st, si = score_single_standalone_file(f)
             if not s or (st < 0.5 and si < 0.5):
-                # self.tick(f"(f) not likely standalone: {s}, {st}, {si}")
+                # self.# tick(f"(f) not likely standalone: {s}, {st}, {si}")
                 return None
             f.add_structures(s)
             if f.is_file() and s == "single" and (p := f.parent) and p.is_dir():
-                # self.tick(f"(f) is file and likely single, bubbling up to parent: {p.rel_path}")
+                # self.# tick(f"(f) is file and likely single, bubbling up to parent: {p.rel_path}")
                 # Bubble up single structure to parent dir
                 p.add_structures("single")
             return s
 
         # File pass #1: standalone, single
-        # self.tick(
+        # self.# tick(
         #     f"file pass #1: standalone, single ({"this file" if self.is_file() else ""} + {len(self.files_recursive)} files_recursive)"
         # )
         for f in this_file + self.files_recursive:
-            # self.tick(f"(f) checking {f.rel_path}")
+            # self.# tick(f"(f) checking {f.rel_path}")
             check_single_standalone_file(f)
-            # self.tick(f"(f) done checking {f.rel_path}")
+            # self.# tick(f"(f) done checking {f.rel_path}")
 
         # self.ticks
 
         # Dir pass #1: single, multi-disc, multi-part, flat
-        # self.tick(
+        # self.# tick(
         #     f"dir pass #1: single, multi-disc, multi-part, flat ({"this dir" if this_dir else ""} + {len(self.dirs_recursive)} dirs_recursive)"
         # )
         for d in this_dir + self.dirs_recursive:
-            # self.tick(f"(d) checking {d.rel_path}")
+            # self.# tick(f"(d) checking {d.rel_path}")
             # If dir is empty, set it to 'empty'
             if not d.files and not d.dirs:
                 d.set_structures("empty")
-                # self.tick(f"(d) set structures to 'empty' for {d.rel_path}")
+                # self.# tick(f"(d) set structures to 'empty' for {d.rel_path}")
                 continue
 
             likely, _single, multi, _flat, _multi_parent, _series_parent = check_dir(d)
-            # self.tick(
+            # self.# tick(
             #     f"(d) got likely: {likely}, multi: {multi}, flat: {_flat}, multi_parent: {_multi_parent}, series_parent: {_series_parent}"
             # )
 
             match likely:
                 case ("single", _):
                     d.add_structures("single")
-                    # self.tick(f"(d) added 'single' to {d.rel_path}")
+                    # self.# tick(f"(d) added 'single' to {d.rel_path}")
                     check_nested(d)
                 case "multi_disc" | "multi_part":
                     assert multi, f"Expected multi_disc or multi_part, got {multi}"
                     if not d.structure:
                         d.set_structures(multi, "multi_parent")
-                        # self.tick(f"(d) set structures to {multi} and 'multi_parent' for {d.rel_path}")
+                        # self.# tick(f"(d) set structures to {multi} and 'multi_parent' for {d.rel_path}")
                     d.add_structures(multi, recursive=True)
-                    # self.tick(f"(d) added {multi} to {d.rel_path} recursively")
+                    # self.# tick(f"(d) added {multi} to {d.rel_path} recursively")
                     check_nested(d)
                 case "flat":
                     d.add_structures("flat", recursive=True)
-                    # self.tick(f"(d) added 'flat' to {d.rel_path} recursively")
+                    # self.# tick(f"(d) added 'flat' to {d.rel_path} recursively")
                     [
                         cc.add_structures("flatish", recursive=True)
                         for cc in d.children_recursive
                         if cc.is_dir() and d.files
                     ]
-                    # self.tick(f"(d) added 'flatish' to {len(d.children_recursive)} children_recursive")
+                    # self.# tick(f"(d) added 'flatish' to {len(d.children_recursive)} children_recursive")
                     check_nested(d)
                 case "multi_parent":
                     d.set_structures("multi_parent")
-                    # self.tick(f"(d) set structures to 'multi_parent' for {d.rel_path}")
+                    # self.# tick(f"(d) set structures to 'multi_parent' for {d.rel_path}")
                     [
                         dd.add_structures(l, recursive=True)
                         for dd in d.dirs.values()
                         if (l := check_dir(dd)[0]) and l and l != "multi_parent"
                     ]
-                    # self.tick(f"(d) added inherited structures to {d.rel_path} and {len(d.dirs)} dirs recursively")
+                    # self.# tick(f"(d) added inherited structures to {d.rel_path} and {len(d.dirs)} dirs recursively")
                     if "multi_disc" in d.list_structures_r:
                         d.add_structures("multi_disc")
-                        # self.tick(f"(d) added 'multi_disc' to {d.rel_path}")
+                        # self.# tick(f"(d) added 'multi_disc' to {d.rel_path}")
                     elif "multi_part" in d.list_structures_r:
                         d.add_structures("multi_part")
-                        # self.tick(f"(d) added 'multi_part' to {d.rel_path}")
+                        # self.# tick(f"(d) added 'multi_part' to {d.rel_path}")
                 case "series_parent":
                     d.set_structures("series_parent")
-                    # self.tick(f"(d) set structures to 'series_parent' for {d.rel_path}")
+                    # self.# tick(f"(d) set structures to 'series_parent' for {d.rel_path}")
                     [cc.add_structures("series_book", recursive=True) for cc in d.children_recursive]
-                    # self.tick(f"(d) added 'series_book' to {len(d.children_recursive)} children recursively")
+                    # self.# tick(f"(d) added 'series_book' to {len(d.children_recursive)} children recursively")
                     [
                         dd.add_structures(l, recursive=True)
                         for dd in d.dirs.values()
                         if (l := check_dir(dd)[0]) and l and l != "series_parent"
                     ]
-                    # self.tick(f"(d) added inherited structures to {d.rel_path} and {len(d.dirs)} dirs recursively")
+                    # self.# tick(f"(d) added inherited structures to {d.rel_path} and {len(d.dirs)} dirs recursively")
                     [f.add_structures(s) for f in d.files_recursive if (s := check_single_standalone_file(f))]
-                    # self.tick(f"(d) added {len(d.files_recursive)} files recursively")
-            # self.tick(f"(d) done #1 pass for {d.rel_path}")
+                    # self.# tick(f"(d) added {len(d.files_recursive)} files recursively")
+            # self.# tick(f"(d) done #1 pass for {d.rel_path}")
 
         # Child pass #2, for anything that doesn't yet have a structure
-        # self.tick(
+        # self.# tick(
         #     f"child pass #2: anything that doesn't yet have a structure ({"this file" if this_file else ""} + {"this dir" if this_dir else ""} + {len(self.children_without_structure_r)} children_without_structure_r)"
         # )
         for c in this_file + this_dir + self.children_without_structure_r:
             # x = "(d)" if c.is_dir() else "(f)" if c.is_file() else ""
             if c.structure:
-                # self.tick(f"{x} {c.rel_path} already has structure, weird... skipping")
+                # self.# tick(f"{x} {c.rel_path} already has structure, weird... skipping")
                 continue
 
             # sibs = c.siblings or []
@@ -1100,12 +1102,12 @@ class BooksTree(BaseModel):
             # _single_siblings_boost = len([s for s in sibs if s.has_structure("single")]) / len(sibs)
             if c.children and (_all_children_are_singles := all(c.has_structure("single") for c in c.children)):
                 c.set_structures("single")
-                # self.tick(f"{x} set structures to 'single' for {c.rel_path}")
+                # self.# tick(f"{x} set structures to 'single' for {c.rel_path}")
                 continue
 
             if (container_or_mixed := score_container_mixed(self)[0]) == "container":
                 c.set_structures(container_or_mixed)
-                # self.tick(f"{x} set structures to '{container_or_mixed}' for {c.rel_path}")
+                # self.# tick(f"{x} set structures to '{container_or_mixed}' for {c.rel_path}")
             # TODO: Don't apply mixed anywhere, only use unknown
             # elif c.is_file() and standalone_siblings_boost > 0.5:
             #     c.set_structures("standalone_file")
@@ -1113,15 +1115,15 @@ class BooksTree(BaseModel):
             #     c.set_structures("single")
             else:
                 c.set_structures("unknown", recursive=True)
-                # self.tick(f"{x} set structures to 'unknown' recursively for {c.rel_path}")
+                # self.# tick(f"{x} set structures to 'unknown' recursively for {c.rel_path}")
 
         # Dir pass #3: Determine uncaught nested for remaining dirs
-        # self.tick(
+        # self.# tick(
         #     f"dir pass #3: Determine uncaught nested for remaining dirs ({"this dir" if this_dir else ""} + {len([c for c in self.children_without_structure_r if c.is_dir()])} children_without_structure_r)"
         # )
         for d in this_dir + [c for c in self.children_without_structure_r if c.is_dir()]:
             if not (_only_one_dir_in_d := len(d.dirs) == 1) or (_has_files := bool(d.files)):
-                # self.tick(f"(d) {d.rel_path} has {len(d.dirs)} dirs and {len(d.files)} files, skipping")
+                # self.# tick(f"(d) {d.rel_path} has {len(d.dirs)} dirs and {len(d.files)} files, skipping")
                 continue
             if (inner_dir := list(d.dirs.values())[0]) and inner_dir.has_any_structure(
                 "flat", "multi_parent", "single"
@@ -1129,12 +1131,12 @@ class BooksTree(BaseModel):
                 # Bubble-up inner dir's structure to the parent
                 d.add_structures(*inner_dir.structure)
                 d.add_structures("nested", recursive=True)
-                # self.tick(f"(d) added {inner_dir.structure} and 'nested' to {d.rel_path} recursively")
-            # self.tick(f"(d) done dir pass #3 for {d.rel_path}")
+                # self.# tick(f"(d) added {inner_dir.structure} and 'nested' to {d.rel_path} recursively")
+            # self.# tick(f"(d) done dir pass #3 for {d.rel_path}")
 
-        # self.tick(f"done determine_structure for {self.rel_path}, returning {self.structure}")
-        if self.start_time:
-            self.tick(f"total time taken: {round(time.time() - self.start_time, 4)} seconds", self.ticks)
+        # self.# tick(f"done determine_structure for {self.rel_path}, returning {self.structure}")
+        # if self.start_time:
+        # self.tick(f"total time taken: {round(time.time() - self.start_time, 4)} seconds", self.ticks)
         return self.structure
 
     def has_structure(self, structure: BookStructure2):

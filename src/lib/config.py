@@ -635,7 +635,7 @@ class Config:
             current_version = subprocess.check_output(["m4b-tool", "--version"], timeout=10).decode().strip()
 
         elif has_docker := bool(self.docker_path):
-            # docker images -q sandreas/m4b-tool:latest
+            # docker images -q m4b-tool:latest
             install_script = "./scripts/install-docker-m4b-tool.sh"
 
             docker_exe = self.docker_path or "docker"
@@ -643,14 +643,14 @@ class Config:
                 return
             docker_image_exists = bool(
                 subprocess.check_output(
-                    [docker_exe, "images", "-q", "sandreas/m4b-tool:latest"],
+                    [docker_exe, "images", "-q", "m4b-tool:latest"],
                     timeout=10,
                 ).strip()
             )
 
             if not docker_image_exists:
                 raise RuntimeError(
-                    f"Could not find the image 'sandreas/m4b-tool:latest', run\n\n $ docker pull sandreas/m4b-tool:latest\n  # or\n $ {install_script}\n\nand try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+                    f"Could not find the image 'm4b-tool:latest', run\n\n $ {install_script}\n\nto build the correct version, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
                 )
 
             current_version = (
@@ -659,7 +659,7 @@ class Config:
                         docker_exe,
                         "run",
                         "--rm",
-                        "sandreas/m4b-tool:latest",
+                        "m4b-tool:latest",
                         "m4b-tool",
                         "--version",
                     ],
@@ -670,7 +670,12 @@ class Config:
             )
             docker_ready = True
 
-        if not re.search(r"v0.5", current_version):
+        # Check for v0.5, -prerelease, or docker build tags like latest-195-g0304329
+        if not (
+            re.search(r"v0\.5", current_version)
+            or re.search(r"-prerelease", current_version, re.IGNORECASE)
+            or re.search(r"latest-\d+", current_version)
+        ):
             raise RuntimeError(
                 f"m4b-tool version {current_version} is not supported, please install v0.5-prerelease (if using Docker, run {install_script} to install the correct version)"
             )
@@ -696,7 +701,7 @@ class Config:
                     f"{uid}:{gid}",
                     "-v",
                     f"{escaped_working_dir}:/mnt:rw",
-                    "sandreas/m4b-tool:latest",
+                    "m4b-tool:latest",
                 ]
                 if c
             ]
@@ -713,13 +718,23 @@ class Config:
                 raise RuntimeError(
                     f"Could not find 'docker' in PATH, please install Docker and try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
                 )
-            elif not docker_image_exists:
-                raise RuntimeError(
-                    f"Could not find the image 'sandreas/m4b-tool:latest', run\n\n $ docker pull sandreas/m4b-tool:latest\n  # or\n $ {install_script}\n\nand try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+            else:
+                docker_exe = self.docker_path or "docker"
+                if not self.is_docker_running():
+                    return
+                docker_image_exists = bool(
+                    subprocess.check_output(
+                        [docker_exe, "images", "-q", "m4b-tool:latest"],
+                        timeout=10,
+                    ).strip()
                 )
+                if not docker_image_exists:
+                    raise RuntimeError(
+                        f"Could not find the image 'm4b-tool:latest', run\n\n $ {install_script}\n\nto build the correct version, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+                    )
         else:
             raise RuntimeError(
-                f"Could not find '{self.m4b_tool}' in PATH, please install it and try again (see https://github.com/sandreas/m4b-tool).\nIf you are using Docker, make sure the image 'sandreas/m4b-tool:latest' is available, and you've aliased `m4b-tool` to run the container.\nFor easy Docker setup, run:\n\n$ {install_script}"
+                f"Could not find '{self.m4b_tool}' in PATH, please install it and try again (see https://github.com/sandreas/m4b-tool).\nIf you are using Docker, make sure the image 'm4b-tool:latest' is available (run {install_script} to build it).\nFor easy Docker setup, run:\n\n$ {install_script}"
             )
 
     @contextmanager

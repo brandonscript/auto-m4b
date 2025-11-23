@@ -59,7 +59,23 @@ def fix_smart_quotes(s: str) -> str:
     """Takes a string and replaces smart quotes with regular quotes"""
     if not s:
         return s
-    trnsl = str.maketrans("'‚‛′′" "", "''''''\"\"\"\"")
+    # Map smart quotes to regular quotes using a dictionary
+    # This handles various Unicode smart quote characters
+    smart_quote_map = {
+        # Single quotes/apostrophes
+        "'": "'",  # U+2018 LEFT SINGLE QUOTATION MARK
+        "'": "'",  # U+2019 RIGHT SINGLE QUOTATION MARK
+        "‚": "'",  # U+201A SINGLE LOW-9 QUOTATION MARK
+        "‛": "'",  # U+201B SINGLE HIGH-REVERSED-9 QUOTATION MARK
+        "′": "'",  # U+2032 PRIME
+        "″": "'",  # U+2033 DOUBLE PRIME (sometimes used as quote)
+        # Double quotes
+        '"': '"',  # U+201C LEFT DOUBLE QUOTATION MARK
+        '"': '"',  # U+201D RIGHT DOUBLE QUOTATION MARK
+        "„": '"',  # U+201E DOUBLE LOW-9 QUOTATION MARK
+        "‟": '"',  # U+201F DOUBLE HIGH-REVERSED-9 QUOTATION MARK
+    }
+    trnsl = str.maketrans(smart_quote_map)
     return s.translate(trnsl)
 
 
