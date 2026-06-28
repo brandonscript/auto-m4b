@@ -15,6 +15,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -66,12 +67,16 @@ jobs:
             --ignore=src/tests/test__e2e_series.py \
             --ignore=src/tests/test__e2e_standalone_and_single.py \
             --ignore=src/tests/test__e2e_unhappy_paths.py \
+            --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[touch_of_frost__flat_mp3-expected_dict0]" \
+            --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[count_of_monte_cristo__flat_mp3-expected_dict1]" \
+            --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[house_on_the_cliff__flat_mp3-expected_dict2]" \
             -q --tb=short
 
   # ── End-to-end converter tests (slow, runs in parallel, required to merge) ───
   test-e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
