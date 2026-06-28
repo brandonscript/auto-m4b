@@ -31,7 +31,7 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
-      - name: Cache Poetry virtualenv
+      - name: Cache Poetry virtualenv + spaCy model
         id: cache-venv
         uses: actions/cache@v4
         with:
@@ -45,6 +45,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Download spaCy model
+        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: poetry run python -m spacy download en_core_web_sm
 
       - name: Run unit & integration tests
@@ -75,7 +76,7 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
-      - name: Cache Poetry virtualenv
+      - name: Cache Poetry virtualenv + spaCy model
         id: cache-venv
         uses: actions/cache@v4
         with:
@@ -89,6 +90,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Download spaCy model
+        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: poetry run python -m spacy download en_core_web_sm
 
       - name: Run e2e tests
