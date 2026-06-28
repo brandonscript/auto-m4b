@@ -62,6 +62,9 @@ if should_update_nltk():
         # punkt_tab is required by webtext.words() in NLTK 3.8+ (replaces punkt)
         nltk.download("punkt_tab")
         nltk.download("punkt")
+        # averaged_perceptron_tagger_eng is required by nltk.pos_tag() in NLTK 3.8+
+        nltk.download("averaged_perceptron_tagger_eng")
+        nltk.download("averaged_perceptron_tagger")
         english_words = set(words.words())
         webtext_words = set(webtext.words())
     update_nltk_timestamp()
