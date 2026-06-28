@@ -75,12 +75,12 @@ def _clear_all_caches():
     for _cache_file in cfg.META_DIR.glob("nlp_cache*.db"):
         _cache_file.unlink(missing_ok=True)
 
-    # Fully destroy and recreate the InboxState singleton between tests so that
-    # failed/processed records, scan results, and match filters from one test
-    # cannot bleed into the next.  reset_inbox() alone only flushes memory;
-    # destroy() + InboxState() guarantees __init__ runs fresh.
+    # Destroy the InboxState singleton so that failed/processed records, scan
+    # results, and match filters from one test cannot bleed into the next.
+    # We do NOT eagerly recreate it here — tests that load fixtures will trigger
+    # a lazy recreation via set_match_filter() after the fixture files are in
+    # place, avoiding an expensive empty-inbox scan on every test setup.
     InboxState.destroy()  # type: ignore[attr-defined]
-    InboxState()
 
 
 @pytest.fixture(autouse=True, scope="function")

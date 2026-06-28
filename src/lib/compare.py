@@ -243,6 +243,12 @@ def get_size_similarity(
 
     sizes = [size * byte_multiplier for size in sizes if size >= ignore_smaller_than]
 
+    # After filtering, if fewer than 2 elements remain, handle edge cases
+    if not sizes:
+        return 0.0
+    if len(sizes) == 1 or all(size == sizes[0] for size in sizes):
+        return 1.0
+
     # Calculate the maximum absolute difference between any two sizes, ensuring it's at least 1
     max_diff = max(1, max(abs(a - b) for a, b in combinations(sizes, 2)))
 
