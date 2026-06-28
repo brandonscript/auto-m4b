@@ -35,8 +35,10 @@ jobs:
         id: cache-venv
         uses: actions/cache@v4
         with:
-          path: .venv
-          key: venv-v2-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
+          path: |
+            .venv
+            ~/nltk_data
+          key: venv-v3-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -47,6 +49,17 @@ jobs:
       - name: Download spaCy model
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: poetry run python -m spacy download en_core_web_sm
+
+      - name: Download NLTK data
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          poetry run python -c "
+          import nltk
+          nltk.download('words')
+          nltk.download('webtext')
+          nltk.download('punkt_tab')
+          nltk.download('punkt')
+          "
 
       - name: Run unit & integration tests
         run: |
@@ -80,8 +93,10 @@ jobs:
         id: cache-venv
         uses: actions/cache@v4
         with:
-          path: .venv
-          key: venv-v2-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
+          path: |
+            .venv
+            ~/nltk_data
+          key: venv-v3-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -92,6 +107,17 @@ jobs:
       - name: Download spaCy model
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: poetry run python -m spacy download en_core_web_sm
+
+      - name: Download NLTK data
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          poetry run python -c "
+          import nltk
+          nltk.download('words')
+          nltk.download('webtext')
+          nltk.download('punkt_tab')
+          nltk.download('punkt')
+          "
 
       - name: Run e2e tests
         run: |

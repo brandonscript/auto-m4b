@@ -59,6 +59,9 @@ if should_update_nltk():
     with contextlib.redirect_stdout(open(os.devnull, "w")):
         nltk.download("words")
         nltk.download("webtext")
+        # punkt_tab is required by webtext.words() in NLTK 3.8+ (replaces punkt)
+        nltk.download("punkt_tab")
+        nltk.download("punkt")
         english_words = set(words.words())
         webtext_words = set(webtext.words())
     update_nltk_timestamp()

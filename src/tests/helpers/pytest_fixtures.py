@@ -46,13 +46,16 @@ def setup_teardown():
 
 @pytest.fixture(autouse=True, scope="function")
 def clear_scorer_caches():
+    from src.lib.config import cfg
     from src.lib.scorers import _scorer_cache, already_checked
 
     _scorer_cache.clear()
     already_checked.clear()
+    cfg.FATAL_FILE.unlink(missing_ok=True)
     yield
     _scorer_cache.clear()
     already_checked.clear()
+    cfg.FATAL_FILE.unlink(missing_ok=True)
 
 
 @pytest.fixture(scope="function", autouse=False)
