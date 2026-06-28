@@ -10,3 +10,7 @@ docker-compose.yml
 sandbox/
 /m4b-tool
 *_cache.sqlite
+.venv*/
+Pipfile
+Pipfile.lock
+*.old

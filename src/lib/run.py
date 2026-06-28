@@ -1,6 +1,4 @@
-import re
 import shutil
-import subprocess
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -12,6 +10,7 @@ from tinta import Tinta
 from src.lib.audiobook import Audiobook
 from src.lib.config import AUDIO_EXTS, cfg
 from src.lib.formatters import (
+    friendly_date,
     human_elapsed_time,
     pluralize,
     pluralize_with_count,
@@ -21,8 +20,7 @@ from src.lib.converter import convert_book_native
 from src.lib.id3_utils import verify_and_update_id3_tags
 from src.lib.inbox_state import InboxItem, InboxState
 from src.lib.logger import log_global_results
-from src.lib.m4btool import M4bTool
-from src.lib.misc import re_group
+
 from src.lib.parsers import (
     roman_numerals_affect_file_order,
 )
@@ -47,6 +45,8 @@ from src.lib.term import (
     tint_light_grey,
     tint_path,
     tint_warning,
+    tinted_file,
+    tinted_m4b,
     wrap_brackets,
 )
 
@@ -555,19 +555,15 @@ def convert_book(book: Audiobook):
             f"Fatal: No audio files found in merge folder '{book.merge_dir}' – ensure that auto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
         )
 
-    if cfg.USE_NATIVE_CONVERTER:
-        return _convert_book_native_path(book)
-    return _convert_book_legacy_path(book)
-
-
-def _convert_book_native_path(book: Audiobook) -> "int | Literal[False]":
-    """Conversion path using the native Python converter."""
-    # Pre-extract cover art for m4a/m4b inputs (same as legacy path)
+    # Pre-extract cover art for m4a/m4b inputs
     if book.orig_file_type in ["m4a", "m4b"]:
         book.extract_cover_art()
 
-    m4btool = M4bTool(book)
-    m4btool.print_msg()
+    starttime_friendly = friendly_date()
+    if book.orig_file_type in ["m4a", "m4b"]:
+        smart_print(f"Starting merge/passthrough → {tinted_m4b()} at {tint_light_grey(starttime_friendly)}...")
+    else:
+        smart_print(f"Starting {tinted_file(book.orig_file_type)} → {tinted_m4b()} conversion at {tint_light_grey(starttime_friendly)}...")
 
     try:
         elapsed = convert_book_native(book)
@@ -590,79 +586,8 @@ def _convert_book_native_path(book: Audiobook) -> "int | Literal[False]":
         return False
 
     verify_and_update_id3_tags(book, in_dir="build")
+
     return elapsed
-
-
-def _convert_book_legacy_path(book: Audiobook) -> "int | Literal[False]":
-    """Conversion path using the legacy m4b-tool PHP/Docker subprocess."""
-    starttime = time.time()
-    m4btool = M4bTool(book)
-
-    err: "Literal[False] | str" = False
-
-    # if book is m4a or m4b, need to pre-extract cover art
-    if book.orig_file_type in ["m4a", "m4b"]:
-        book.extract_cover_art()
-
-    cmd = m4btool.build_cmd()
-
-    m4btool.print_msg()
-
-    if cfg.DEBUG:
-        print_dark_grey(m4btool.esc_cmd())
-
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if proc.stderr:
-        book.write_log(proc.stderr.decode())
-        nl()
-        raise RuntimeError(proc.stderr.decode())
-    else:
-        stdout = proc.stdout.decode()
-
-    if cfg.DEBUG:
-        smart_print(stdout)
-
-    if re.search(r"error", stdout, re.I):
-        err_blocks = [r"an error occured[\s\S]*?Array[\s\S]*?\)"]
-
-        ignorable_errors = [
-            r"failed to save key",
-            r"implicit conversion from float",
-            r"ffmpeg version .* or higher is .* likely to cause errors",
-        ]
-
-        # if any of the err_blocks do not match any of the ignorable errors, then it's a valid error
-        err = (
-            re_group(
-                re.search(
-                    rf"PHP (?:Warning|Fatal error):  ([\s\S]*?)Stack trace",
-                    stdout,
-                    re.I | re.M,
-                ),
-                1,
-            )
-            .replace("\n", "\n     ")
-            .strip()
-        )
-        if not err:
-            for block in [re_group(re.search(err, stdout, re.I)) for err in err_blocks]:
-                if block and not any(re.search(err, block) for err in ignorable_errors):
-                    err = re_group(re.search(rf"\[message\] => (.*$)", block, re.I | re.M), 1)
-        print_error(f"m4b-tool Error: {err}")
-        smart_print(f"See log file in {tint_light_grey(book.inbox_dir)} for details\n")
-    elif not book.build_file.exists():
-        print_error(f"Error: m4b-tool failed to convert [[{book}]], no output .m4b file was found")
-        err = f"m4b-tool failed to convert {book}, no output .m4b file was found"
-
-    if err:
-        stderr = proc.stderr.decode() if proc.stderr else ""
-        fail_book(book, reason=f"{err}\n{stderr}")
-        log_global_results(book, "FAILED", 0)
-        return False
-
-    verify_and_update_id3_tags(book, in_dir="build")
-
-    return int(time.time() - starttime)
 
 def move_desc_file(book: Audiobook):
     from src.lib.fs_utils import mv_file_into_dir
