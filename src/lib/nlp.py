@@ -91,8 +91,8 @@ def _load_spacy_model() -> spacy.language.Language:
         try:
             with _devnull():
                 return spacy.load(model)
-        except OSError:
-            print_debug(f"spaCy model '{model}' not found, trying to download...")
+        except (OSError, ValueError):
+            print_debug(f"spaCy model '{model}' not found or missing plugin, trying to download...")
             _ensure_pip()
             result = subprocess.run([sys.executable, "-m", "spacy", "download", model], capture_output=True)
             if result.returncode == 0:

@@ -39,13 +39,9 @@ jobs:
           key: venv-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
-        if: steps.cache-venv.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root
-
-      - name: Install project
         run: poetry install --no-interaction
 
-      - name: Install ffmpeg
+      - name: Install system dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Download spaCy model
@@ -87,13 +83,9 @@ jobs:
           key: venv-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
-        if: steps.cache-venv.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root
-
-      - name: Install project
         run: poetry install --no-interaction
 
-      - name: Install ffmpeg
+      - name: Install system dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
       - name: Download spaCy model
