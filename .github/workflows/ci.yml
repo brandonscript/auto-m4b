@@ -51,9 +51,12 @@ jobs:
         run: poetry run python -m spacy download en_core_web_sm
 
       - name: Download NLTK data
-        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
-          poetry run python -c "import nltk; nltk.download('popular')"
+          poetry run python -c "
+          import nltk
+          for pkg in ('popular', 'words', 'punkt_tab', 'averaged_perceptron_tagger_eng', 'maxent_ne_chunker_tab'):
+              nltk.download(pkg, quiet=False)
+          "
 
       - name: Run unit & integration tests
         run: |
@@ -103,9 +106,12 @@ jobs:
         run: poetry run python -m spacy download en_core_web_sm
 
       - name: Download NLTK data
-        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
-          poetry run python -c "import nltk; nltk.download('popular')"
+          poetry run python -c "
+          import nltk
+          for pkg in ('popular', 'words', 'punkt_tab', 'averaged_perceptron_tagger_eng', 'maxent_ne_chunker_tab'):
+              nltk.download(pkg, quiet=False)
+          "
 
       - name: Run e2e tests
         run: |

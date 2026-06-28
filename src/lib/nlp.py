@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module=r"thinc\..*")
 
 import nltk
 import spacy
-from nltk.corpus import webtext, words
+from nltk.corpus import words
 from spacy.language import Language
 from spacy.matcher import Matcher
 
@@ -45,8 +45,7 @@ def should_update_nltk() -> bool:
         return True
 
 
-english_words = set()
-webtext_words = set()
+english_words: set[str] = set()
 
 
 def update_nltk_timestamp():
@@ -55,18 +54,29 @@ def update_nltk_timestamp():
         json.dump({"last_update": datetime.now().isoformat()}, f)
 
 
-if should_update_nltk():
+def _load_nltk_data():
+    """Download required NLTK resources and load corpora. Fails gracefully."""
+    global english_words
     with contextlib.redirect_stdout(open(os.devnull, "w")):
-        # Download 'popular' bundle which includes words, webtext, punkt_tab,
-        # averaged_perceptron_tagger_eng, maxent_ne_chunker_tab, and all other
-        # commonly-needed resources. Avoids whack-a-mole with individual names.
-        nltk.download("popular")
+        # punkt_tab / averaged_perceptron_tagger_eng / maxent_ne_chunker_tab
+        # are required by word_tokenize, pos_tag, and ne_chunk in NLTK 3.8+.
+        for pkg in ("popular", "words", "punkt_tab", "averaged_perceptron_tagger_eng", "maxent_ne_chunker_tab"):
+            nltk.download(pkg, quiet=True)
+    try:
         english_words = set(words.words())
-        webtext_words = set(webtext.words())
+    except Exception:
+        pass  # Degrade gracefully; english_words stays empty
+
+
+if should_update_nltk():
+    _load_nltk_data()
     update_nltk_timestamp()
 else:
-    english_words = set(words.words())
-    webtext_words = set(webtext.words())
+    try:
+        english_words = set(words.words())
+    except Exception:
+        _load_nltk_data()
+        update_nltk_timestamp()
 
 nlp = None  # type: ignore
 
