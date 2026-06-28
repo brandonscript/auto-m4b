@@ -63,6 +63,8 @@ jobs:
           poetry run python -m pytest src/tests/ \
             --ignore=src/tests/test_converter_e2e.py \
             --ignore=src/tests/test__e2e_happy_paths.py \
+            --ignore=src/tests/test__e2e_series.py \
+            --ignore=src/tests/test__e2e_standalone_and_single.py \
             --ignore=src/tests/test__e2e_unhappy_paths.py \
             -q --tb=short
 
@@ -118,6 +120,8 @@ jobs:
           poetry run python -m pytest \
             src/tests/test_converter_e2e.py \
             src/tests/test__e2e_happy_paths.py \
+            src/tests/test__e2e_series.py \
+            src/tests/test__e2e_standalone_and_single.py \
             src/tests/test__e2e_unhappy_paths.py \
             --deselect="src/tests/test__e2e_unhappy_paths.py::test_unhappy_paths::test_no_matches_found" \
             -q --tb=short

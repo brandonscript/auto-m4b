@@ -599,6 +599,9 @@ def open_library_lookup_title(
             original_author=author,
             original_narrator=narrator,
         )
+    except requests.exceptions.HTTPError as e:
+        print_debug(f"Error looking up title  from Open Library: {e}")
+        return None
     except Exception as e:
         print_debug(f"Error looking up title {title} from Open Library: {e}")
         if "pytest" in sys.modules:
