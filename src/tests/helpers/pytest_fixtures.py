@@ -44,15 +44,53 @@ def setup_teardown():
         cfg.FATAL_FILE.unlink(missing_ok=True)
 
 
-@pytest.fixture(autouse=True, scope="function")
-def clear_scorer_caches():
+def _clear_all_caches():
     from src.lib.config import cfg
     from src.lib.scorers import _scorer_cache, already_checked
+    import src.lib.parsers as _parsers
 
     _scorer_cache.clear()
     already_checked.clear()
     cfg.FATAL_FILE.unlink(missing_ok=True)
+
+    # Clear all cachetools TTL caches in parsers so stale narrator/author
+    # results from one test don't bleed into the next via 5-minute TTL.
+    for _fn in (
+        _parsers.parse_names,
+        _parsers.is_maybe_series_parent,
+        _parsers.is_maybe_series_book,
+        _parsers.get_disc_num,
+        _parsers.is_maybe_multi_disc,
+        _parsers.is_maybe_multi_part,
+        _parsers.get_start_num,
+        _parsers.get_series_num,
+    ):
+        try:
+            _fn.cache.clear()  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
+
+    # Clear the NLP SQLite cache (stored in ~/.auto-m4b/) so stale entries
+    # from previous tests/runs don't return wrong narrator/author values.
+    for _cache_file in cfg.META_DIR.glob("nlp_cache*.db"):
+        _cache_file.unlink(missing_ok=True)
+
+    # Fully destroy and recreate the InboxState singleton between tests so that
+    # failed/processed records, scan results, and match filters from one test
+    # cannot bleed into the next.  reset_inbox() alone only flushes memory;
+    # destroy() + InboxState() guarantees __init__ runs fresh.
+    InboxState.destroy()  # type: ignore[attr-defined]
+    InboxState()
+
+
+@pytest.fixture(autouse=True, scope="function")
+def clear_scorer_caches():
+    _clear_all_caches()
     yield
+    # Only clear lightweight state on teardown to avoid interfering with other
+    # fixture teardowns that may still need InboxState or file paths to be valid.
+    from src.lib.config import cfg
+    from src.lib.scorers import _scorer_cache, already_checked
     _scorer_cache.clear()
     already_checked.clear()
     cfg.FATAL_FILE.unlink(missing_ok=True)
