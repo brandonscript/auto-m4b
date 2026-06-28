@@ -1,76 +1,83 @@
 import time
 from functools import cached_property
 from pathlib import Path
-from typing import Literal
-
-import cachetools
+from typing import cast, Literal
 
 from src.lib.audiobook import Audiobook
+from src.lib.books_tree import BooksTree
 from src.lib.formatters import human_elapsed_time, human_size
 from src.lib.fs_utils import (
-    find_base_dirs_with_audio_files,
     get_audio_size,
     hash_path_audio_files,
     last_updated_audio_files_at,
-    name_matches,
 )
-from src.lib.parsers import is_maybe_multi_book_or_series
 from src.lib.typing import DirName
 
 InboxItemStatus = Literal["new", "ok", "needs_retry", "failed", "gone"]
 
 
-def get_key(path_or_book: "str | Path | Audiobook | InboxItem") -> str:
+def get_key(path_or_book: "str | Path | BooksTree | Audiobook | InboxItem") -> str:
+    if isinstance(path_or_book, BooksTree):
+        return path_or_book.key or ""
     if isinstance(path_or_book, str):
         return path_or_book
     if isinstance(path_or_book, Path):
         return path_or_book.name
-    return path_or_book.key
+    return cast(str, path_or_book.key)
 
 
-def get_path(key_path_or_book: "str | Path | Audiobook | InboxItem") -> Path:
+def get_books_tree(
+    key_path_or_book: "str | Path | BooksTree | Audiobook | InboxItem",
+) -> BooksTree:
     from src.lib.config import cfg
 
-    if isinstance(key_path_or_book, str):
-        path = Path(key_path_or_book)
-        if not path.is_absolute():
-            return cfg.inbox_dir / key_path_or_book
-        return path
-    if isinstance(key_path_or_book, Path):
-        return key_path_or_book
-    if isinstance(key_path_or_book, Audiobook):
-        return key_path_or_book.inbox_dir
-    return key_path_or_book.path
+    instancetype = type(key_path_or_book).__name__
+
+    match instancetype:
+        case "BooksTree":
+            return cast(BooksTree, key_path_or_book)
+        case "Audiobook":
+            return cast(Audiobook, key_path_or_book).tree
+        case "str":
+            str_path = cast(str, key_path_or_book)
+            path = Path(str_path)
+            if not path.is_absolute():
+                path = cfg.inbox_dir / str_path
+            return BooksTree(path)
+        case "Path" | "PosixPath" | "WindowsPath":
+            return BooksTree(cast(Path, key_path_or_book))
+        case "InboxItem":
+            return cast(InboxItem, key_path_or_book).tree
+        case _:
+            raise ValueError(f"Invalid type: {instancetype}")
 
 
 def get_item(key_path_or_book: "str | Path | Audiobook | InboxItem") -> "InboxItem":
+    from src.lib.books_tree import BooksTree
     from src.lib.config import cfg
 
-    if isinstance(key_path_or_book, str):
-        return InboxItem(cfg.inbox_dir / key_path_or_book)
-    if isinstance(key_path_or_book, Path):
-        return InboxItem(key_path_or_book)
+    if isinstance(key_path_or_book, (str, Path)):
+        return InboxItem(BooksTree(cfg.inbox_dir / key_path_or_book, scan=False))
     if isinstance(key_path_or_book, Audiobook):
+        return InboxItem(key_path_or_book.tree)
+    if isinstance(key_path_or_book, BooksTree):
         return InboxItem(key_path_or_book)
-    return key_path_or_book
+    raise ValueError(f"Invalid type: {type(key_path_or_book)}")
 
 
 class InboxItem:
 
-    def __init__(self, book: str | Path | Audiobook):
-        from src.lib.config import cfg
+    def __init__(self, tree: BooksTree):
+        self.tree = tree
 
-        path = get_path(book)
-
-        self.is_dir = path.is_dir()
-        self.is_file = path.is_file()
+        self.is_dir = self.tree.path.is_dir()
+        self.is_file = self.tree.path.is_file()
 
         self._prev_hash = None
         self._last_updated: float | None = None
-        self._curr_hash = hash_path_audio_files(path)
+        self._curr_hash = hash_path_audio_files(self.tree.path)
         self._hash_changed: float = time.time()
-        self.key = str(path.relative_to(cfg.inbox_dir))
-        self.size = get_audio_size(path) if path.exists() else 0
+        self.size = get_audio_size(self.tree.path) if self.tree.path.exists() else 0
         self.status: InboxItemStatus = "new"
         self.failed_reason: str = ""
 
@@ -91,13 +98,24 @@ class InboxItem:
         return self.key.__hash__()
 
     def reload(self):
-        self = InboxItem(self.path)
+        self = InboxItem(self.tree)
 
-    @cached_property
+    def update_path(self, path: Path):
+        self.tree.path = path
+        new_key = self.tree.key
+        if new_key and (root := self.tree.root):
+            root.scan()
+            if new_tree := root.get(new_key):
+                self.tree = new_tree
+        self.reload()
+
+    @property
+    def key(self) -> str:
+        return cast(str, self.tree.key)
+
+    @property
     def path(self) -> Path:
-        from src.lib.config import cfg
-
-        return cfg.inbox_dir / self.key
+        return self.tree.path
 
     @cached_property
     def basename(self):
@@ -177,47 +195,47 @@ class InboxItem:
 
     @property
     def is_filtered(self):
-        from src.lib.config import cfg
-
-        return not name_matches(self.path.relative_to(cfg.inbox_dir), cfg.MATCH_FILTER)
+        return not self.tree.root or not self.tree in self.tree.root.books_and_series_f
 
     @property
-    def is_maybe_series_book(self):
-        return len(Path(self.key).parts) > 1
+    def is_series_book(self):
+        return self.tree.has_structure("series_book")
+        # return len(Path(self.key).parts) > 1
 
-    @cached_property
-    def is_maybe_series_parent(self):
-        return any(
-            [
-                is_maybe_multi_book_or_series(d.name)
-                for d in find_base_dirs_with_audio_files(self.path, ignore_errors=True)
-            ]
-        )
+    @property
+    def is_series_parent(self):
+        return self.tree.has_structure("series_parent")
+        # return any(
+        #     [
+        #         is_maybe_multiple_books_or_series(d.name)
+        #         for d in find_base_dirs_with_audio_files(self.path, ignore_errors=True)
+        #     ]
+        # )
 
-    @cached_property
+    @property
     def is_first_book_in_series(self):
         return (
-            self.is_maybe_series_book
+            self.is_series_book
             and (parent := self.series_parent)
             and (series_books := parent.series_books)
             and series_books[0] == self
         )
 
-    @cached_property
+    @property
     def is_last_book_in_series(self):
         return (
-            self.is_maybe_series_book
+            self.is_series_book
             and (parent := self.series_parent)
             and (series_books := parent.series_books)
             and series_books[-1] == self
         )
 
-    @cached_property
+    @property
     def series_parent(self):
         from src.lib.inbox_state import InboxState
 
         inbox = InboxState()
-        if not self.is_maybe_series_book:
+        if not self.is_series_book:
             return None
         return inbox.get(self.series_key)
 
@@ -226,52 +244,40 @@ class InboxItem:
         from src.lib.inbox_state import InboxState
 
         inbox = InboxState()
-        if not self.is_maybe_series_parent:
+        if not self.is_series_parent:
             return []
 
         return inbox.series_items_for_key(self.key)
 
-    @cached_property
-    def series_key(self):
-        from src.lib.config import cfg
+    @property
+    def series_key(self) -> None | str:
+        if not self.tree.root or not self.tree.has_structure("series_book"):
+            return None
 
-        return (
-            str(self.path.relative_to(cfg.inbox_dir).parent)
-            if self.is_maybe_series_book
-            else None
-        )
+        all_series_parents = list(filter(lambda x: x.has_structure("series_parent"), self.tree.root.books_and_series))
+        return next((p.key for p in all_series_parents if (k := self.tree.key) and p.key and k.startswith(p.key)), None)
 
-    @cached_property
+    @property
     def series_basename(self):
         from src.lib.config import cfg
 
         d = self.path.relative_to(cfg.inbox_dir)
-        return (
-            str(d.parent)
-            if len(d.parts) > 1 and d.parts[-1] == self.basename
-            else str(d)
-        )
+        return str(d.parent) if len(d.parts) > 1 and d.parts[-1] == self.basename else str(d)
 
     @property
-    @cachetools.func.ttl_cache(maxsize=6, ttl=10)
+    # @ttl_cache(maxsize=6, ttl=10)
     def num_books_in_series(self):
-        if not self.is_maybe_series_parent:
+        if not self.is_series_parent:
             return -1
         return len(self.series_books)
 
     @property
     def did_change(self) -> bool:
-        return (
-            True
-            if self.is_gone
-            else hash_path_audio_files(self.path) != self._curr_hash
-        )
+        return True if self.is_gone else hash_path_audio_files(self.path) != self._curr_hash
 
     @property
     def type(self) -> Literal["dir", "file", "gone"]:
-        return (
-            "dir" if self.path.is_dir() else "file" if self.path.is_file() else "gone"
-        )
+        return "dir" if self.path.is_dir() else "file" if self.path.is_file() else "gone"
 
     def to_dict(self, refresh_hash=False):
         h = self.hash if (refresh_hash or not self._curr_hash) else self._curr_hash
@@ -288,6 +294,7 @@ class InboxItem:
             "hash_age": self.hash_age,
             "status": status,
             "failed_reason": self.failed_reason,
+            "structure": self.tree.structure,
         }
 
     def to_audiobook(self, active_dir: DirName = "inbox") -> Audiobook:

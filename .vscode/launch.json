@@ -10,7 +10,14 @@
       "request": "launch",
       "envFile": "${workspaceFolder}/.env",
       "module": "src",
-      "args": ["-l", "1", "--env", "${workspaceFolder}/.env.local.stardust", "--debug"]
-    }
+      "justMyCode": true,
+      "args": [
+        "--env",
+        "${workspaceFolder}/.env.local.stardust",
+        "--debug",
+        "--test",
+      ]
+      // "args": ["-l", "1", "--env", "${workspaceFolder}/.env.local.stardust", "--debug"]
+    },
   ]
 }

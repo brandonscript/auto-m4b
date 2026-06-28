@@ -254,6 +254,35 @@ USER ${USERNAME}
 
 USER root
 
+# Install spaCy depending on os (linux, windows, or mac – and handle arm64)
+# arm64: spacy[apple]
+# all others: spacy
+
+# determine platform and if arm64
+RUN echo "---- INSTALL SPACY ----" && \
+    if [ "$(uname -m)" == "aarch64" ]; then \
+    pipenv run pip install "spacy[apple]<4"; \
+    else \
+    pipenv run pip install "spacy<4"; \
+    fi
+
+# Download spaCy model
+RUN echo "---- DOWNLOAD SPACY MODEL ----" && \
+    pipenv run python -m spacy download en_core_web_sm
+
+RUN echo "---- INSTALL NLTK ----" && \
+    pipenv run pip install nltk
+
+RUN echo "---- DOWNLOAD NLTK DATA ----" && \
+    pipenv run python -m nltk.downloader \
+    punkt \
+    punkt_tab \
+    averaged_perceptron_tagger \
+    averaged_perceptron_tagger_eng \
+    maxent_ne_chunker \
+    maxent_ne_chunker_tab \
+    words \
+    stopwords
 
 # RUN pipenv run pip install ffmpeg-python --force-reinstall
 

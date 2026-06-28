@@ -18,6 +18,7 @@ check_untyped_defs = true
 [tool.black]
 target-version = ['py312']
 preview = true
+line-length = 120
 
 [tool.isort]
 profile = "black"
@@ -30,7 +31,7 @@ force_sort_within_sections = false
 [tool.pyright]
 # verboseOutput = true
 pythonVersion = "3.12"
-extraPaths = [".venv/lib/python3.12/site-packages"]
+extraPaths = [".venv/lib/python3.12/site-packages", "/opt/homebrew/bin"]
 reportUnusedImport = "error"
 reportUnusedClass = "error"
 reportUnusedFunction = "error"
@@ -38,7 +39,7 @@ reportUnusedVariable = "error"
 
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 120
 indent-width = 4
 preview = true
 
@@ -69,7 +70,6 @@ combine-as-imports = true
 force-wrap-aliases = true
 order-by-type = false
 
-
 [tool.ruff.format]
 indent-style = "space"
 line-ending = "auto"
@@ -78,8 +78,86 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 minversion = "7.4"
-addopts = "-rP -vv --color=yes --capture=tee-sys --slow"
+addopts = "-rP -vv -s --color=yes --capture=tee-sys --slow --ignore=.venv"
 testpaths = ["src/tests"]
 python_files = ["*_test.py", "test_*.py"]
 python_classes = ["test_", "_test", "Test*"]
 python_functions = ["test_", "_test"]
+
+# ─── Native converter coverage gate ──────────────────────────────────────────
+# Unit tests (fast, no audio) cover the pure-logic modules (chapters, encoder,
+# ffmetadata, naturalsort) at ≥90%.  The merge.py orchestrator is exercised by
+# the slow integration tests that invoke real ffmpeg on fixture audio files.
+#
+# To run the full scoped coverage check (requires real ffmpeg + test fixtures):
+#   pytest src/tests/test_converter.py --cov=src/lib/converter --cov-fail-under=90 --slow
+#
+# Fidelity expectation (non-bit-exact): tests validate behavioral correctness —
+# valid .m4b output, correct chapter count/order/titles, total duration within a
+# small tolerance of the summed inputs — NOT byte-identical output vs. PHP
+# m4b-tool, since the encoder/muxer paths differ.
+
+[tool.coverage.run]
+source = ["src/lib/converter"]
+omit = ["*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.poetry]
+name = "auto-m4b"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+inflect = "^7.5.0"
+humanize = "^4.12.3"
+ffmpeg-python = "^0.2.0"
+numpy = { version = "<2", platform = "*" }
+pydantic = "^2.11.5"
+tinta = "0.1.7"
+python-dotenv = "^1.1.0"
+columnar = "^1.4.1"
+# python-ffmpeg = "^1.0.17" # No!
+cachetools = "^5.5.2"
+types-cachetools = "^5.5.0.20240820"
+rapidfuzz = "^3.13.0"
+bidict = "^0.23.1"
+regex = "^2024.11.6"
+mutagen = "^1.47.0"
+spacy = { version = "<4", extras = ["apple"], platform = "darwin" }
+spacy-curated-transformers = "^0.3.0"
+nltk = "^3.9.1"
+lazy = "^1.6"
+requests = "^2.32.3"
+requests-cache = "^1.2.1"
+transformers = "^4.52.4"
+protobuf = "^6.31.1"
+sentencepiece = "^0.2.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^25.1.0"
+mypy = "^1.15.0"
+pillow = "^11.2.1"
+pytest = "^8.3.5"
+pytest-asyncio = "^0.26.0"
+pytest-cov = "*"
+pytest-order = "^1.3.0"
+pytest-skip-slow = "^0.0.5"
+ruff = "^0.11.11"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+app = "src:main"
+forever = "src:main"
+tests = "pytest:main"
+# fix-ffprobe = "./scripts/fix-ffprobe.sh"
+# install-docker-m4b-tool = "./scripts/install-docker-m4b-tool.sh"
+# start-docker-m4b-tool = "./scripts/start-docker.sh"

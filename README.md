@@ -98,6 +98,28 @@ services:
 4. Move the book folder (which contains the m4b and chapters.txt files) to `/temp/merge`
 5. When the script runs it will re-chapterize the m4b and move it back to `/temp/untagged`
 
+## Running Locally (Development / Test Mode)
+
+Instead of Docker, you can run the app directly with Poetry. Use `--test` to load `.env.test`, which redirects all folders to `src/tests/tmp/` so nothing touches your real library.
+
+```bash
+# Run one pass over src/tests/tmp/inbox/ and exit
+poetry run app --test --max_loops 1
+
+# Watch the inbox continuously (Ctrl+C to stop)
+poetry run app --test
+
+# Process only a specific book (supports regex)
+poetry run app --test --max_loops 1 --match "Chanur"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--test` | Loads `.env.test`; uses `src/tests/tmp/` for all folders |
+| `--max_loops N` | Stop after N passes (omit or use `-1` to loop forever) |
+| `--match PATTERN` | Only process books whose folder name matches this string/regex |
+| `--debug` | Enable verbose debug output |
+
 ## Advanced Options
 
 #### Edit the script that is run

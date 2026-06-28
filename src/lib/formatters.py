@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -7,7 +8,8 @@ import cachetools.func
 import humanize
 import inflect
 
-from src.lib.typing import DurationFmt, MEMO_TTL, STANDARD_BITRATES
+from src.lib.books_tree import BooksTree
+from src.lib.typing import AudiobookFmt, DurationFmt, MEMO_TTL, STANDARD_BITRATES
 
 
 def log_date() -> str:
@@ -60,9 +62,7 @@ def get_nearest_standard_bitrate(bitrate: int) -> int:
     except IndexError:
         lower_bitrate = min_bitrate
     upper_bitrate = (
-        STANDARD_BITRATES[STANDARD_BITRATES >= bitrate_k][0]
-        if any(STANDARD_BITRATES >= bitrate_k)
-        else None
+        STANDARD_BITRATES[STANDARD_BITRATES >= bitrate_k][0] if any(STANDARD_BITRATES >= bitrate_k) else None
     )
 
     # should never happen, but if the upper bitrate is empty, then the bitrate is higher
@@ -74,18 +74,18 @@ def get_nearest_standard_bitrate(bitrate: int) -> int:
         diff = (upper_bitrate - lower_bitrate) // 4
 
         # if bitrate_k + diff is closer to bitrate_k than bitrate_k - diff, use upper bitrate
-        closest_bitrate = (
-            upper_bitrate if bitrate_k + diff >= bitrate_k else lower_bitrate
-        )
+        closest_bitrate = upper_bitrate if bitrate_k + diff >= bitrate_k else lower_bitrate
 
     return kb_or_b(int(closest_bitrate))
 
 
-def human_bitrate(file: Path) -> str:
+def human_bitrate(file: "BooksTree | Path") -> str:
     from src.lib.ffmpeg_utils import get_bitrate_py, is_variable_bitrate
 
-    std, actual = get_bitrate_py(file)
-    if is_variable_bitrate(file):
+    path = file.path if isinstance(file, BooksTree) else file
+
+    std, actual = get_bitrate_py(path)
+    if is_variable_bitrate(path):
         return f"~{round(actual / 1000)} kb/s"
     return f"{round(std / 1000)} kb/s"
 
@@ -167,9 +167,7 @@ def human_elapsed_time(delta_or_time: datetime | float, relative: bool = True) -
     return humanize.naturaldelta(delta)
 
 
-def pluralize(
-    count: int, singular: str | inflect.Word, plural: str | None = None
-) -> str:
+def pluralize(count: int, singular: str | inflect.Word, plural: str | None = None) -> str:
     p = inflect.engine()
     if count == 1:
         return str(singular)
@@ -179,9 +177,7 @@ def pluralize(
         return f"{singular}(s)"
 
 
-def pluralize_with_count(
-    count: int, singular: str | inflect.Word, plural: str | None = None
-) -> str:
+def pluralize_with_count(count: int, singular: str | inflect.Word, plural: str | None = None) -> str:
     return f"{count} {pluralize(count, singular, plural)}"
 
 
@@ -193,3 +189,37 @@ def listify(l: Iterable[Any], bul: str = "-", indent: int = 0) -> str:
 def ensure_dot(s: str) -> str:
     """Ensure extension (suffix) has a leading dot '.' character."""
     return s if s.startswith(".") else f".{s}"
+
+
+def strip_dot(s: str) -> str:
+    """Ensure extension (suffix) has no leading dot '.' character."""
+    return s.lstrip(".")
+
+
+@overload
+def to_audiobook_fmt(s: str, ignore_errors: Literal[False] = False) -> AudiobookFmt: ...
+
+
+@overload
+def to_audiobook_fmt(s: str, ignore_errors: Literal[True] = True) -> AudiobookFmt | None: ...
+
+
+def to_audiobook_fmt(s: str, ignore_errors: bool = False) -> AudiobookFmt | None:
+    from src.lib.fs_utils import is_audio_ext
+
+    if not is_audio_ext(s):
+        if not ignore_errors:
+            raise ValueError(f"Invalid audio format: {s}")
+        return None
+    return cast(AudiobookFmt, s.replace(".", ""))
+
+
+def truncate_middle(s: str, max_len: int) -> str:
+    if len(s) <= max_len:
+        return s
+    half_len = max_len // 2
+    return f"{s[:half_len]}...{s[-half_len:]}"
+
+
+def strip_leading_the(s: str) -> str:
+    return re.sub(r"^the\s+", "", s, flags=re.I)

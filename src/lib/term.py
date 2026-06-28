@@ -125,10 +125,7 @@ def was_prev_line_divider() -> bool:
 
 
 def is_banner(*lines: str) -> bool:
-    return any(
-        (l and ("auto-m4b •" in l or "ꨄ︎" in n))
-        for (l, n) in zip(list(lines), list(lines)[1:] + [""])
-    )
+    return any((l and ("auto-m4b •" in l or "ꨄ︎" in n)) for (l, n) in zip(list(lines), list(lines)[1:] + [""]))
 
 
 def found_banner_in_print_log() -> bool:
@@ -282,26 +279,16 @@ def box(*s: str, color: int | str = DEFAULT_COLOR):
     border(max_len + 2, l="╭", c="╌", r="╮")
     for l in lines:
         # pad the line with spaces to match the max length
-        smart_print(
-            Tinta()
-            .dark_grey("││")
-            .tint(color, Tinta.ljust(l, max_len))
-            .dark_grey("││")
-            .to_str()
-        )
+        smart_print(Tinta().dark_grey("││").tint(color, Tinta.ljust(l, max_len)).dark_grey("││").to_str())
     border(max_len + 2, l="╰", c="╌", r="╯")
 
 
 def print_grey(*args: Any, highlight_color: int | None = LIGHT_GREY_COLOR):
-    smart_print(
-        " ".join(map(str, args)), color=GREY_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=GREY_COLOR, highlight_color=highlight_color)
 
 
 def print_dark_grey(*args: Any, highlight_color: int | None = GREY_COLOR):
-    smart_print(
-        " ".join(map(str, args)), color=DARK_GREY_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=DARK_GREY_COLOR, highlight_color=highlight_color)
 
 
 def print_light_grey(*args: Any, highlight_color: int | None = GREY_COLOR):
@@ -313,21 +300,15 @@ def print_light_grey(*args: Any, highlight_color: int | None = GREY_COLOR):
 
 
 def print_mint(*args: Any, highlight_color: int | None = None):
-    smart_print(
-        " ".join(map(str, args)), color=MINT_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=MINT_COLOR, highlight_color=highlight_color)
 
 
 def print_green(*args: Any, highlight_color: int | None = None):
-    smart_print(
-        " ".join(map(str, args)), color=GREEN_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=GREEN_COLOR, highlight_color=highlight_color)
 
 
 def print_blue(*args: Any, highlight_color: int | None = None):
-    smart_print(
-        " ".join(map(str, args)), color=BLUE_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=BLUE_COLOR, highlight_color=highlight_color)
 
 
 def print_banana(*args: Any, highlight_color: int | None = None):
@@ -339,33 +320,23 @@ def print_banana(*args: Any, highlight_color: int | None = None):
 
 
 def print_purple(*args: Any, highlight_color: int | None = None):
-    smart_print(
-        " ".join(map(str, args)), color=PURPLE_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=PURPLE_COLOR, highlight_color=highlight_color)
 
 
 def print_amber(*args: Any, highlight_color: int | None = None):
-    smart_print(
-        " ".join(map(str, args)), color=AMBER_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=AMBER_COLOR, highlight_color=highlight_color)
 
 
 def print_orange(*args: Any, highlight_color: int | None = ORANGE_HIGHLIGHT_COLOR):
-    smart_print(
-        " ".join(map(str, args)), color=ORANGE_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=ORANGE_COLOR, highlight_color=highlight_color)
 
 
 def print_red(*args: Any, highlight_color: int | None = RED_HIGHLIGHT_COLOR):
-    smart_print(
-        " ".join(map(str, args)), color=RED_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=RED_COLOR, highlight_color=highlight_color)
 
 
 def print_pink(*args: Any, highlight_color: int | None = None):
-    smart_print(
-        " ".join(map(str, args)), color=PINK_COLOR, highlight_color=highlight_color
-    )
+    smart_print(" ".join(map(str, args)), color=PINK_COLOR, highlight_color=highlight_color)
 
 
 def print_debug(
@@ -481,20 +452,19 @@ def tinted_file(*args):
     return s
 
 
-def divider(
-    lead: str = "", trail: str = "", color: int = DARK_GREY_COLOR, width: int = 90
-):
+def divider(lead: str = "", trail: str = "", color: int = DARK_GREY_COLOR, width: int = 90):
     if was_prev_line_divider():
         return
     smart_print(lead + ("-" * width) + trail, color=color)
 
 
-def linebreak_path(path: Path, *, indent: int = 0, limit: int = -1) -> str:
+def linebreak_path(path: Path, *, indent: int = 0, limit: int = -1, truncate: int = 50) -> str:
     """Split a path string into multiple lines if it exceeds the limit. Returns a string.
     Args:
         path (str): The path to split
         limit (int, optional): The maximum length of each line. Defaults to 120.
         indent (int, optional): The number of spaces to indent each line. Defaults to 0.
+        truncate (int, optional): The number of characters to truncate each path segment to. Defaults to 50.
 
     Example:
         ```
@@ -505,6 +475,8 @@ def linebreak_path(path: Path, *, indent: int = 0, limit: int = -1) -> str:
         #     /some
         #     /file.mp3
         ```"""
+
+    from src.lib.formatters import truncate_middle
 
     output = ""
 
@@ -523,7 +495,9 @@ def linebreak_path(path: Path, *, indent: int = 0, limit: int = -1) -> str:
         curr_row = path_matrix[curr_idx]
         curr_row_len = len(str(Path(*(curr_row)))) if curr_row else 0
 
-        if curr_row_len + len(part) + 1 > limit:
+        if (after_len := curr_row_len + len(part) + 1) > limit:
+            if after_len > truncate:
+                part = truncate_middle(part, truncate)
             path_matrix.append([part])
         else:
             curr_row.append(part)

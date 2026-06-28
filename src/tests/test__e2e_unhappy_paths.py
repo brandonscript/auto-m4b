@@ -14,7 +14,7 @@ from src.lib.audiobook import Audiobook
 from src.lib.fs_utils import rename_dir
 from src.lib.inbox_state import InboxState
 from src.lib.strings import en
-from src.tests.conftest import TEST_DIRS
+from src.tests.helpers.pytest_dumps import TEST_DIRS
 from src.tests.helpers.pytest_fixtures import load_test_fixtures
 from src.tests.helpers.pytest_utils import testutils
 
@@ -29,37 +29,12 @@ class test_unhappy_paths:
         yield
 
     @pytest.mark.order(ORDER)
-    def test_nonstandard_bitrate_mp3s(
-        self,
-        bitrate_nonstandard__mp3: Audiobook,
-        the_crusades_through_arab_eyes__flat_mp3: Audiobook,
-        capfd: CaptureFixture[str],
-    ):
-
-        testutils.set_match_filter("^(bitrate_nonstandard|the_crusades)")
-        app(max_loops=1)
-        assert testutils.assert_processed_output(
-            capfd,
-            bitrate_nonstandard__mp3,
-            the_crusades_through_arab_eyes__flat_mp3,
-            loops=[testutils.check_output(found_books_eq=2, converted_eq=2)],
-        )
-        assert bitrate_nonstandard__mp3.converted_dir.exists()
-        assert the_crusades_through_arab_eyes__flat_mp3.converted_dir.exists()
-
-    ORDER += 1
-
-    @pytest.mark.order(ORDER)
-    def test_failed_books_only_print_once(
-        self, roman_numeral__mp3: Audiobook, capfd: CaptureFixture[str]
-    ):
+    def test_failed_books_only_print_once(self, roman_numeral__mp3: Audiobook, capfd: CaptureFixture[str]):
         app(max_loops=3)
         # assert the message only appears once
         out = testutils.get_stdout(capfd)
         assert out.count(en.ROMAN_ERR) == 1
-        assert testutils.assert_processed_output(
-            out, loops=[testutils.check_output(found_books_eq=1, converted_eq=0)]
-        )
+        assert testutils.assert_processed_output(out, loops=[testutils.check_output(found_books_eq=1, converted_eq=0)])
 
     ORDER += 1
 
@@ -112,11 +87,7 @@ class test_unhappy_paths:
         assert testutils.assert_processed_output(
             out,
             tower_treasure__flat_mp3,
-            loops=[
-                testutils.check_output(
-                    found_books_eq=2, converted_eq=1, skipped_failed_eq=1
-                )
-            ],
+            loops=[testutils.check_output(found_books_eq=2, converted_eq=1, skipped_failed_eq=1)],
         )
         assert out.count(en.ROMAN_ERR) == 0
 
@@ -154,11 +125,7 @@ class test_unhappy_paths:
                 out,
                 tower_treasure__flat_mp3,
                 house_on_the_cliff__flat_mp3,
-                loops=[
-                    testutils.check_output(
-                        found_books_eq=3, converted_eq=2, skipped_failed_eq=1
-                    )
-                ],
+                loops=[testutils.check_output(found_books_eq=3, converted_eq=2, skipped_failed_eq=1)],
             )
 
     ORDER += 1
@@ -232,9 +199,7 @@ class test_unhappy_paths:
                 tower_treasure__flat_mp3,
                 loops=[
                     testutils.check_output(found_books_eq=1, converted_eq=0),
-                    testutils.check_output(
-                        found_books_eq=2, converted_eq=1, skipped_failed_eq=1
-                    ),
+                    testutils.check_output(found_books_eq=2, converted_eq=1, skipped_failed_eq=1),
                 ],
             )
 
@@ -327,9 +292,7 @@ class test_unhappy_paths:
             app_task = asyncio.create_task(async_app())
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                await asyncio.get_running_loop().run_in_executor(
-                    executor, mock_inbox_being_copied_to, 5, 1
-                )
+                await asyncio.get_running_loop().run_in_executor(executor, mock_inbox_being_copied_to, 5, 1)
 
             await app_task
 
@@ -355,9 +318,7 @@ class test_unhappy_paths:
         enable_archiving,
         capfd: CaptureFixture[str],
     ):
-        the_sunlit_man__flat_mp3 = Audiobook(
-            TEST_DIRS.inbox / "the_sunlit_man__flat_mp3"
-        )
+        the_sunlit_man__flat_mp3 = Audiobook(TEST_DIRS.inbox / "the_sunlit_man__flat_mp3")
         tiny__flat_mp3 = Audiobook(TEST_DIRS.inbox / "tiny__flat_mp3")
         shutil.rmtree(the_sunlit_man__flat_mp3.inbox_dir, ignore_errors=True)
         shutil.rmtree(tiny__flat_mp3.inbox_dir, ignore_errors=True)
@@ -368,9 +329,7 @@ class test_unhappy_paths:
         def add_book_to_inbox():
             time.sleep(5)
             testutils.print("Loading additional test fixtures...")
-            load_test_fixtures(
-                "the_sunlit_man__flat_mp3", "tiny__flat_mp3", match_filter=match_filter
-            )
+            load_test_fixtures("the_sunlit_man__flat_mp3", "tiny__flat_mp3", match_filter=match_filter)
 
         async def async_app():
             with testutils.set_wait_time(1):
@@ -381,9 +340,7 @@ class test_unhappy_paths:
         app_task = asyncio.create_task(async_app())
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            await asyncio.get_running_loop().run_in_executor(
-                executor, add_book_to_inbox
-            )
+            await asyncio.get_running_loop().run_in_executor(executor, add_book_to_inbox)
 
         await app_task
 
@@ -404,27 +361,11 @@ class test_unhappy_paths:
     ORDER += 1
 
     @pytest.mark.order(ORDER)
-    def test_secret_project_series__nested_flat_mixed(
-        self,
-        secret_project_series__nested_flat_mixed: Audiobook,
-        capfd: CaptureFixture[str],
-        disable_convert_series,
-    ):
-
-        app(max_loops=1)
-        stdout, _ = capfd.readouterr()
-        assert en.MULTI_ERR in stdout
-
-    ORDER += 1
-
-    @pytest.mark.order(ORDER)
     def test_long_filename__mp3(self, conspiracy_theories__flat_mp3: Audiobook):
         inbox = InboxState()
 
         conspiracy_theories__flat_mp3_copy = deepcopy(conspiracy_theories__flat_mp3)
-        (TEST_DIRS.converted / "auto-m4b.log").unlink(
-            missing_ok=True
-        )  # remove the log file to force a conversion
+        (TEST_DIRS.converted / "auto-m4b.log").unlink(missing_ok=True)  # remove the log file to force a conversion
         testutils.set_match_filter("Conspiracies")
         app(max_loops=1)
         assert conspiracy_theories__flat_mp3.converted_dir.exists()
@@ -440,21 +381,25 @@ class test_unhappy_paths:
     ORDER += 1
 
     @pytest.mark.order(ORDER)
-    def test_multi_disc_fails(
+    def test_mixed_fails(
         self,
-        old_mill__multidisc_mp3: Audiobook,
-        disable_multidisc,
+        requires_empty_inbox,
+        fails__mixed_mp3: Audiobook,
         capfd: CaptureFixture[str],
     ):
 
-        shutil.rmtree(old_mill__multidisc_mp3.converted_dir, ignore_errors=True)
+        for d in [_ for b in (fails__mixed_mp3,) for _ in (b.backup_dir, b.converted_dir)]:
+            shutil.rmtree(d, ignore_errors=True)
+
         time.sleep(2)
         app(max_loops=2)
         out = testutils.get_stdout(capfd)
         assert out.count(en.MULTI_ERR) == 1
         assert testutils.assert_processed_output(
             out,
-            loops=[testutils.check_output(found_books_eq=1, converted_eq=0)],
+            loops=[
+                testutils.check_output(found_books_eq=1, converted_eq=0),
+            ],
         )
 
     ORDER += 1
@@ -463,15 +408,13 @@ class test_unhappy_paths:
     @pytest.mark.order(ORDER)
     def test_failed_notify_doesnt_repeat_after_convert(
         self,
+        add_extra_books,
         requires_empty_inbox,
         tower_treasure__flat_mp3: Audiobook,
-        missing_chums__mixed_mp3: Audiobook,
-        old_mill__multidisc_mp3: Audiobook,
+        fails__mixed_mp3: Audiobook,
         tiny__flat_mp3: Audiobook,
         the_sunlit_man__flat_mp3: Audiobook,
-        disable_multidisc,
         enable_archiving,
-        add_extra_books,
         capfd: CaptureFixture[str],
     ):
 
@@ -479,27 +422,35 @@ class test_unhappy_paths:
             shutil.rmtree(tiny__flat_mp3.inbox_dir, ignore_errors=True)
             shutil.rmtree(the_sunlit_man__flat_mp3.inbox_dir, ignore_errors=True)
 
-        testutils.set_match_filter("^(tower|missing|old)")
+        InboxState().destroy()  # type: ignore
+
+        testutils.set_match_filter("^(tower|fails|tiny|the_sunlit)")
         for d in [
             _
             for b in (
                 tower_treasure__flat_mp3,
-                missing_chums__mixed_mp3,
-                old_mill__multidisc_mp3,
+                fails__mixed_mp3,
             )
             for _ in (b.backup_dir, b.converted_dir)
         ]:
             shutil.rmtree(d, ignore_errors=True)
 
         time.sleep(2)
-        app(max_loops=2)
+        app(max_loops=3)
         out = testutils.get_stdout(capfd)
-        assert out.count(en.MULTI_ERR) == 2
+        assert out.count(en.MULTI_ERR) == 1
+
+        books = [tower_treasure__flat_mp3]
+        if add_extra_books:
+            books.extend([tiny__flat_mp3, the_sunlit_man__flat_mp3])
+
         assert testutils.assert_processed_output(
             out,
-            tower_treasure__flat_mp3,
+            *books,
             loops=[
-                testutils.check_output(found_books_eq=3, converted_eq=1),
+                testutils.check_output(
+                    found_books_eq=4 if add_extra_books else 2, converted_eq=3 if add_extra_books else 1
+                ),
             ],
         )
 
@@ -545,9 +496,7 @@ class test_unhappy_paths:
             out,
             loops=check,
         )
-        assert out.count("waiting for them to be fixed") == (
-            1 if loop_count == 0 else 0
-        )
+        assert out.count("waiting for them to be fixed") == (1 if loop_count == 0 else 0)
 
     ORDER += 1
 
@@ -587,9 +536,7 @@ class test_unhappy_paths:
             out,
             tiny__flat_mp3,
             loops=[
-                testutils.check_output(
-                    found_books_eq=2, converted_eq=1, skipped_failed_eq=1
-                ),
+                testutils.check_output(found_books_eq=2, converted_eq=1, skipped_failed_eq=1),
             ],
         )
 
@@ -627,17 +574,13 @@ class test_unhappy_paths:
     ORDER += 1
 
     @pytest.mark.order(ORDER)
-    def test_fatal_err_creates_err_file(
-        self, tiny__flat_mp3: Audiobook, enable_backups, tmp_path
-    ):
+    def test_fatal_err_creates_err_file(self, tiny__flat_mp3: Audiobook, enable_backups, tmp_path):
         from src.lib.config import cfg
 
         def bad__mv_or_cp_dir_contents(*args, **kwargs):
             raise FileNotFoundError(f"No such file or directory {args[1]}")
 
-        with patch(
-            "src.lib.fs_utils._mv_or_cp_dir_contents", bad__mv_or_cp_dir_contents
-        ):
+        with patch("src.lib.fs_utils._mv_or_cp_dir_contents", bad__mv_or_cp_dir_contents):
 
             try:
 

@@ -6,6 +6,7 @@ from typing import Any
 from columnar import columnar
 
 from src.lib.audiobook import Audiobook
+from src.lib.books_tree import BooksTree
 from src.lib.config import cfg
 from src.lib.formatters import log_date, log_format_elapsed_time, pluralize
 from src.lib.misc import re_group
@@ -24,7 +25,9 @@ LOG_HEADERS = [
     "Time",
 ]
 LOG_JUSTIFY = ["l", "l", "l", "r", "r", "r", "r", "r", "r", "r"]
-log_pattern = re.compile(r"(?P<date>^\d.*?)\s*(?P<result>SUCCESS|FAILED|UNKNOWN)\s*(?P<book_name>.+?(?=\d{1,3} kb/s|\d{2}\.\d kHz))\s*(?P<bitrate>~?\d+ kb/s)?\s*(?P<samplerate>[\d.]+ kHz)?\s*(?P<file_type>\.\w+)?\s*(?P<num_files>\d+ files?)?\s*(?P<size>[\d.]+\s*[bBkKMGi]+)?\s*(?P<duration>[\dhms:-]*)?\s*(?P<elapsed>\S+)?")
+log_pattern = re.compile(
+    r"(?P<date>^\d.*?)\s*(?P<result>SUCCESS|FAILED|UNKNOWN)\s*(?P<book_name>.+?(?=\d{1,3} kb/s|\d{2}\.\d kHz))\s*(?P<bitrate>~?\d+ kb/s)?\s*(?P<samplerate>[\d.]+ kHz)?\s*(?P<file_type>\.\w+)?\s*(?P<num_files>\d+ files?)?\s*(?P<size>[\d.]+\s*[bBkKMGi]+)?\s*(?P<duration>[\dhms:-]*)?\s*(?P<elapsed>\S+)?"
+)
 # TEST:
 # 2023-10-22 18:37:58-0700   FAILED    The Law of Attraction by Esther and Jerry Hicks    129 kb/s      44.1 kHz   .wma    85 files   336M         -
 
@@ -45,7 +48,6 @@ def log_global_results(
     # get current log data and load it into columns - split by tabs or spaces >= 2
 
     human_elapsed = log_format_elapsed_time(elapsed_s)
-
 
     if not log_file:
         log_file = cfg.GLOBAL_LOG_FILE
@@ -134,7 +136,7 @@ def log_global_results(
         no_borders=True,
         max_column_width=70,
         justify=LOG_JUSTIFY,
-        wrap_max=0, # don't wrap
+        wrap_max=0,  # don't wrap
     )
 
     table_cleaned = []
@@ -161,14 +163,11 @@ def get_log_entry(book_src: Path, log_file: Path | None = None) -> str:
     return log_entry
 
 
-def write_err_file(
-    file: Path, e: Any, component: str, stderr: str | None = None
-) -> None:
-    err_file = file.with_suffix(f".{component}-error.txt")
+def write_err_file(file: "BooksTree | Path", e: Any, component: str, stderr: str | None = None) -> None:
+    path = file.path if isinstance(file, BooksTree) else file
+    err_file = path.with_suffix(f".{component}-error.txt")
     err_file.touch(exist_ok=True)
     with open(err_file, "a") as f:
         full_stack = traceback.format_exc()
         stderr = f"\n\n{stderr}" if stderr else ""
         f.write(f"{full_stack}\n{str(e)}{stderr}")
-
-

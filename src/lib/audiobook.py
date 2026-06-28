@@ -1,12 +1,10 @@
-from functools import cached_property
 from math import floor
 from pathlib import Path
-from typing import cast, Literal, overload
+from typing import Literal, overload
 
-import cachetools
-import cachetools.func
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
+from src.lib.books_tree import BooksTree
 from src.lib.config import cfg
 from src.lib.ffmpeg_utils import (
     DurationFmt,
@@ -14,26 +12,23 @@ from src.lib.ffmpeg_utils import (
     get_duration,
     get_samplerate_py,
 )
-from src.lib.formatters import human_bitrate
+from src.lib.formatters import human_bitrate, to_audiobook_fmt
 from src.lib.fs_utils import (
     count_audio_files_in_dir,
-    cp_file_to_dir,
-    find_book_audio_files,
+    cp_file_into_dir,
     find_cover_art_file,
-    find_first_audio_file,
-    find_next_audio_file,
     get_size,
     hash_path_audio_files,
     last_updated_at,
 )
-from src.lib.id3_utils import extract_cover_art, extract_metadata
 from src.lib.misc import get_dir_name_from_path
-from src.lib.parsers import count_distinct_romans, extract_path_info
-from src.lib.typing import AudiobookFmt, BookStructure, DirName, SizeFmt
+from src.lib.parsers import count_distinct_romans, extract_path_info, get_year_from_date
+from src.lib.typing import AudiobookFmt, DirName, Id3TagDictWithDnumTnum, SizeFmt
 
 
 class Audiobook(BaseModel):
     path: Path
+    tree: BooksTree
     id3_title: str = ""
     id3_artist: str = ""
     id3_albumartist: str = ""
@@ -43,6 +38,8 @@ class Audiobook(BaseModel):
     id3_year: str = ""
     id3_comment: str = ""
     id3_composer: str = ""
+    id3_track_num: tuple[int, int] = (1, 1)
+    id3_disc_num: tuple[int, int] = (1, 1)
     has_id3_cover: bool = False
     fs_author: str = ""
     fs_title: str = ""
@@ -50,7 +47,7 @@ class Audiobook(BaseModel):
     fs_narrator: str = ""
     dir_extra_junk: str = ""
     file_extra_junk: str = ""
-    orig_file_type: AudiobookFmt = ""  # type: ignore
+    _orig_file_type: AudiobookFmt = None  # type: ignore
     orig_file_name: str = ""
     title: str = ""
     artist: str = ""
@@ -64,20 +61,43 @@ class Audiobook(BaseModel):
     narrator: str = ""
     title_is_partno: bool = False
     track_num: tuple[int, int] = (1, 1)
+    disc_num: tuple[int, int] = (1, 1)
     m4b_num_parts: int = 1
     _active_dir: DirName | None = None
 
-    def __init__(self, path: Path):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        if not path.is_absolute():
-            path = cfg.inbox_dir.resolve() / path
+    def __init__(self, path_or_tree: Path | BooksTree):
 
-        super().__init__(path=path)
+        path: Path = Path(path_or_tree) if isinstance(path_or_tree, (str, Path)) else path_or_tree.path
+        if not (tree := (path_or_tree if isinstance(path_or_tree, BooksTree) else None)):
+            from src.lib.inbox_state import InboxState
 
+            inbox_state = InboxState()
+            if from_state := inbox_state.get(path):
+                tree = from_state.tree
+            elif inbox_state.ready:
+                # from src.lib.inbox_state import InboxStateError
+                if inbox_state.is_empty():
+                    inbox_state.scan()
+
+                # if not inbox_state.is_empty():
+                #     x = inbox_state.get(path)
+                # else:
+                #     inbox_state.scan()
+
+                # raise InboxStateError(
+                #     f"Book not found in inbox state, cannot attach tree to Audiobook instance: {path}"
+                # )
+        tree = tree or BooksTree(path_or_tree)
+
+        super().__init__(path=path, tree=tree)
+
+        self.tree = tree
         self.path = path
+
         self._active_dir = get_dir_name_from_path(path)
-        if f := find_first_audio_file(self.path, ignore_errors=True):
-            self.orig_file_type = cast(AudiobookFmt, f.suffix.replace(".", ""))
+        self.orig_file_type
 
     def __str__(self):
         return f"{self.key}"
@@ -85,23 +105,86 @@ class Audiobook(BaseModel):
     def __repr__(self):
         return f"{self.key}"
 
-    def extract_path_info(self, quiet: bool = False):
-        return extract_path_info(self, quiet)
+    def extract_path_info(self, console: bool = False):
+        return extract_path_info(self, console)
 
-    def extract_metadata(self, quiet: bool = False):
-        return extract_metadata(self, quiet)
+    def extract_metadata(self, console: bool = False):
+        from src.lib.id3_utils import extract_metadata
+
+        return extract_metadata(self, console)
 
     def extract_cover_art(self):
+        from src.lib.id3_utils import extract_cover_art
+
         if self.cover_art_file:
             return self.cover_art_file
         try:
             extract_cover_art(self.sample_audio1, save_to_file=True)
-            self._inbox_cover_art_file = cast(Path, find_cover_art_file(self.path))
-            cp_file_to_dir(self._inbox_cover_art_file, self.merge_dir)
+            if art := self._inbox_cover_art_file:
+                cp_file_into_dir(art, self.merge_dir)
             return self.cover_art_file
         except Exception:
             # no cover art found, probably
             return None
+
+    def update_from_tags(self):
+        from src.lib.id3_tags import Id3Tags
+
+        new_tags = Id3Tags.from_file(self.sample_audio1, throw=False)
+        if not new_tags:
+            return
+        if new_tags.album:
+            self.album = new_tags.album
+            self.id3_album = new_tags.album
+        if new_tags.title:
+            self.title = new_tags.title
+            self.id3_title = new_tags.title
+        if new_tags.artist:
+            self.artist = new_tags.artist
+            self.id3_artist = new_tags.artist
+        if new_tags.albumartist:
+            self.albumartist = new_tags.albumartist
+            self.id3_albumartist = new_tags.albumartist
+        if new_tags.composer:
+            self.composer = new_tags.composer
+            self.narrator = new_tags.composer
+            self.id3_composer = new_tags.composer
+        if new_tags.date:
+            self.date = new_tags.date
+            self.id3_date = new_tags.date
+        if new_tags.track_num:
+            self.track_num = (new_tags.track_num, new_tags.track_total or new_tags.track_num)
+        if new_tags.disc_num:
+            self.disc_num = (new_tags.disc_num, new_tags.disc_total or new_tags.disc_num)
+        if new_tags.comment:
+            self.comment = new_tags.comment
+            self.id3_comment = new_tags.comment
+        if new_tags.sortalbum:
+            self.sortalbum = new_tags.sortalbum
+            self.id3_sortalbum = new_tags.sortalbum
+        if new_tags.year:
+            self.id3_year = new_tags.year
+        elif new_tags.date:
+            self.id3_year = get_year_from_date(new_tags.date)
+
+        return self
+
+    @property
+    def orig_file_type(self):
+        from src.lib.fs_utils import find_first_audio_file
+
+        if self._orig_file_type is not None:
+            return self._orig_file_type
+        if not (
+            orig_file_type := (
+                to_audiobook_fmt(f.suffix)
+                if not self.tree.is_root and (f := find_first_audio_file(self.path, ignore_errors=True))
+                else None
+            )
+        ):
+            return "mp3"
+        self._orig_file_type = orig_file_type
+        return self._orig_file_type
 
     @property
     def inbox_dir(self):
@@ -109,56 +192,83 @@ class Audiobook(BaseModel):
 
     @property
     def backup_dir(self) -> Path:
-        return cfg.backup_dir.resolve() / self.key
+        return cfg.backup_dir.resolve() / (self.key or "")
 
     @property
     def build_dir(self) -> Path:
-        return (cfg.build_dir.resolve() / self.basename).with_suffix("")
+        return cfg.build_dir.resolve() / (self.key or "")
 
     @property
     def build_tmp_dir(self) -> Path:
-        return self.build_dir / f"{self.basename}-tmpfiles"
+        return self.build_dir / f"~tmpfiles"
 
     @property
     def converted_dir(self) -> Path:
-        return (cfg.converted_dir.resolve() / self.basename).with_suffix("")
+        if (p := cfg.converted_dir.resolve() / (self.key or "")).suffix == ".m4b":
+            return p.with_suffix("")
+        return p
 
     @property
     def archive_dir(self) -> Path:
-        return cfg.archive_dir.resolve() / self.key
+        return cfg.archive_dir.resolve() / (self.key or "")
 
     @property
     def merge_dir(self) -> Path:
-        return cfg.merge_dir.resolve() / self.basename
+        return cfg.merge_dir.resolve() / (self.key or "")
 
     @property
     def build_file(self) -> Path:
+        from src.lib.fs_utils import find_first_audio_file
+
         if self.build_dir.suffix == ".m4b":
             return self.build_dir
         try:
-            return find_first_audio_file(self.build_dir, ".m4b")
+            return find_first_audio_file(self.build_dir, ext="m4b")
         except FileNotFoundError:
             return self.build_dir / f"{self.basename}.m4b"
 
     @property
     def converted_file(self) -> Path:
-        if self.converted_dir.suffix == ".m4b":
-            return self.converted_dir
+        from src.lib.config import cfg
+        from src.lib.fs_utils import find_first_audio_file
+
+        def _build_filename():
+            filename = b.with_suffix("") if (b := Path(self.basename)) and b.suffix == ".m4b" else b.with_suffix(".m4b")
+            return self.converted_dir / filename
+
+        def _find_m4b_matching_basename():
+            for f in self.converted_dir.rglob("*.m4b"):
+                if self.basename in f.stem or f.stem in self.basename:
+                    return f
+            return _build_filename()
+
+        if self.converted_dir == cfg.converted_dir:
+            if found := _find_m4b_matching_basename():
+                return found
+            return _build_filename()
         try:
-            return find_first_audio_file(self.converted_dir, ".m4b")
+            if found := _find_m4b_matching_basename():
+                return found
+            return find_first_audio_file(self.converted_dir, ext="m4b")
         except FileNotFoundError:
-            return self.converted_dir / f"{self.basename}.m4b"
+            return _build_filename()
 
-    @cached_property
+    @property
     def sample_audio1(self):
-        return find_first_audio_file(self.path)
+        from src.lib.fs_utils import find_first_audio_file
 
-    @cached_property
+        return find_first_audio_file(self.path, ignore_errors=False)
+
+    @property
     def sample_audio2(self):
-        return find_next_audio_file(self.sample_audio1)
 
-    def rescan_structure(self):
-        for attr in ["sample_audio1", "sample_audio2", "structure"]:
+        from src.lib.fs_utils import find_next_audio_file
+
+        return find_next_audio_file(self.path, first=self.sample_audio1, ignore_errors=True)
+
+    def rescan(self):
+        self.tree.scan(allow_non_root=True)
+        for attr in ["sample_audio1", "sample_audio2"]:
             try:
                 delattr(self, attr)
             except AttributeError:
@@ -166,40 +276,28 @@ class Audiobook(BaseModel):
             getattr(self, attr)
 
     def last_updated_at(self, for_dir: DirName = "inbox"):
-        return last_updated_at(
-            getattr(self, for_dir + "_dir"), only_file_exts=cfg.AUDIO_EXTS
-        )
+        return last_updated_at(getattr(self, for_dir + "_dir"), only_file_exts=cfg.AUDIO_EXTS)
 
     def hash(self, for_dir: DirName = "inbox"):
         return hash_path_audio_files(getattr(self, for_dir + "_dir"))
 
-    @cached_property
-    def structure(self) -> BookStructure:
-        return find_book_audio_files(self)[0]
-
-    def is_a(
-        self,
-        structure: BookStructure | tuple[BookStructure, ...],
-        fmt: AudiobookFmt | None = None,
-        *,
-        not_fmt: AudiobookFmt | tuple[AudiobookFmt | None, ...] | None = None,
-    ):
-        if not isinstance(structure, tuple):
-            structure = (structure,)
-        if not isinstance(not_fmt, tuple):
-            not_fmt = (not_fmt,)
-        not_fmt_matches = not not_fmt or self.orig_file_type not in not_fmt
-        fmt_matches = not fmt or self.orig_file_type == fmt
-        return self.structure in structure and fmt_matches and not_fmt_matches
+    @property
+    def is_flatish(self):
+        if not self.tree.has_structure_like("flat") or not self.tree.dirs:
+            return False
+        has_deep_files = len(self.tree.files_f) < len(self.tree.files_recursive_f)
+        same_album = (self.tree.i.files_recursive.similarity("id3_albums", fallback=0.0)) > 0.9
+        same_author = (self.tree.i.files_recursive.similarity("id3_authors", fallback=0.0)) > 0.9
+        return has_deep_files and same_album and same_author
 
     @property
     def is_maybe_series_book(self):
         # return self.structure == "multi_book_series"
-        return self._inbox_item.is_maybe_series_book if self._inbox_item else False
+        return self._inbox_item.is_series_book if self._inbox_item else False
 
     @property
     def is_maybe_series_parent(self):
-        return self._inbox_item.is_maybe_series_parent if self._inbox_item else False
+        return self._inbox_item.is_series_parent if self._inbox_item else False
 
     @property
     def is_first_book_in_series(self):
@@ -221,13 +319,16 @@ class Audiobook(BaseModel):
     def series_basename(self):
         return self._inbox_item.series_basename if self._inbox_item else None
 
-    @cachetools.func.ttl_cache(maxsize=6, ttl=20)
     @property
     def num_books_in_series(self):
         return self._inbox_item.num_books_in_series if self._inbox_item else -1
 
     def num_files(self, for_dir: DirName):
-        return count_audio_files_in_dir(getattr(self, for_dir + "_dir"))
+        d = for_dir + "_dir"
+        this_dir = getattr(self, d)
+        if for_dir == "inbox" and self.active_dir_name == "inbox" and self.tree:
+            return self.tree.count_files()
+        return count_audio_files_in_dir(this_dir, only_file_exts=cfg.AUDIO_EXTS)
 
     @property
     def num_roman_numerals(self):
@@ -269,17 +370,17 @@ class Audiobook(BaseModel):
 
     @property
     def log_file(self) -> Path:
-        return (
-            self.active_dir.parent if self.active_dir.is_file() else self.active_dir
-        ) / self.log_filename
+        return (self.active_dir.parent if self.active_dir.is_file() else self.active_dir) / self.log_filename
 
     def write_log(self, *s: str):
         self.log_file.touch(exist_ok=True)
+        # for each s, replace \n with a space
+        lines = [x.replace("\n", " ") for x in s]
         with open(self.log_file, "a+") as f:
             # if file is not empty, and last line is not empty, add a newline
             if f.tell() and (existing := f.readlines()) and existing[-1].strip():
                 f.write("\n")
-            line = " ".join(s)
+            line = " ".join(lines)
             # ensure newline at end of file
             if not line.endswith("\n"):
                 line += "\n"
@@ -291,6 +392,10 @@ class Audiobook(BaseModel):
     @property
     def active_dir(self) -> Path:
         return getattr(self, f"{self._active_dir or 'inbox'}_dir")
+
+    @property
+    def active_dir_name(self) -> DirName:
+        return self._active_dir or "inbox"
 
     @property
     def author(self):
@@ -308,23 +413,37 @@ class Audiobook(BaseModel):
             return f"{int(floor(khz))} kHz"
         return f"{round(khz, 1)} kHz"
 
-    @cached_property
+    @property
     def _inbox_cover_art_file(self):
         return find_cover_art_file(self.path)
 
     @property
-    def cover_art_file(self):
-        if not self._inbox_cover_art_file:
-            return None
-        merge_cover = self.merge_dir / self._inbox_cover_art_file.relative_to(
-            self.inbox_dir
-        )
-        if not merge_cover.exists():
-            cp_file_to_dir(self._inbox_cover_art_file, self.merge_dir)
-        return merge_cover
+    def _converted_cover_art_file(self):
+        return find_cover_art_file(self.converted_dir)
 
-    @cached_property
+    @property
+    def _merge_cover_art_file(self):
+        return find_cover_art_file(self.merge_dir)
+
+    @property
+    def cover_art_file(self):
+
+        if inbox_cover := self._inbox_cover_art_file:
+            if self.merge_dir.exists():
+                cp_file_into_dir(inbox_cover, self.merge_dir, overwrite_mode="skip-silent")
+        return next(
+            (
+                f
+                for f in iter((self._inbox_cover_art_file, self._converted_cover_art_file, self._merge_cover_art_file))
+                if f
+            ),
+            None,
+        )
+
+    @property
     def id3_cover(self):
+        from src.lib.id3_utils import extract_cover_art
+
         return extract_cover_art(self.sample_audio1, save_to_file=False)
 
     @property
@@ -336,7 +455,7 @@ class Audiobook(BaseModel):
 
     @property
     def key(self):
-        return str(self.path.relative_to(cfg.inbox_dir))
+        return self.tree.key
 
     @property
     def _inbox_item(self):
@@ -350,9 +469,7 @@ class Audiobook(BaseModel):
 
     @property
     def final_desc_file(self):
-        quality = f"{self.bitrate_friendly} @ {self.samplerate_friendly}".replace(
-            "kb/s", "kbps"
-        )
+        quality = f"{self.bitrate_friendly} @ {self.samplerate_friendly}".replace("kb/s", "kbps")
         return self.converted_dir / f"{self.basename} [{quality}].txt"
 
     def write_description_txt(self, out_path: Path | None = None):
@@ -365,9 +482,7 @@ class Audiobook(BaseModel):
         )
         converted_duration = get_duration(m4b_file, "human") if m4b_file else "N/A"
         converted_size = get_size(m4b_file, "human") if m4b_file else "N/A"
-        orig_basename = (
-            f"{'File' if self.path.is_file() else 'Folder'} name: {self.basename}"
-        )
+        orig_basename = f"{'File' if self.path.is_file() else 'Folder'} name: {self.basename}"
 
         content = f"""Book title: {self.title}
 Author: {self.author}
@@ -399,3 +514,15 @@ Size: {self.size("inbox", "human")}
             if k.startswith("_") or v is None or v == "":
                 continue
             print(f"- {k}: {v}")
+
+    def to_id3_tags(self) -> Id3TagDictWithDnumTnum:
+        return {
+            "title": self.title,
+            "artist": self.artist,
+            "album": self.album,
+            "albumartist": self.albumartist,
+            "composer": self.composer,
+            "date": self.date,
+            "track_num": self.track_num,
+            "disc_num": self.disc_num,
+        }

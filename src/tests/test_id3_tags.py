@@ -1,10 +1,14 @@
+import re
 from collections.abc import Callable
 
 import pytest
+from mutagen.id3._util import ID3NoHeaderError
 from mutagen.mp3 import HeaderNotFoundError
 
 from src.lib.audiobook import Audiobook
-from src.lib.id3_utils import extract_id3_tags, map_kid3_keys, write_id3_tags_mutagen
+from src.lib.id3_tags import extract_id3_tags
+from src.lib.id3_utils import map_kid3_keys, write_id3_tags_mutagen
+from src.lib.inbox_state import InboxState
 from src.lib.misc import increment
 from src.lib.parsers import (
     has_graphic_audio,
@@ -14,7 +18,7 @@ from src.tests.helpers.pytest_utils import testutils
 
 def test_tags_load_fails_for_non_audio_file(not_an_audio_file: Audiobook):
 
-    with pytest.raises(HeaderNotFoundError):
+    with pytest.raises(ID3NoHeaderError):
         write_id3_tags_mutagen(not_an_audio_file.sample_audio1, {})
 
 
@@ -29,7 +33,9 @@ def test_id3_extract_fails_for_corrupt_file(corrupt_audiobook: Audiobook):
     [
         (
             {
-                "comment": "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand, Colleen Delany as Narrator; Jon Vertullo as Cassian, and Amanda Forstrom as Morrigan; with Shawn K. Jain, Nora Achrati, Karenna Foley, Gabriel Michael, Natalie Van Sistine, Eva Wilhelm, Henry W. Kramer, Bianca Bryan, Renee Dorian, Matthew Bassett, Rob McFadyen, Ryan Carlo Dalusung, Yasmin Tuazon, Matthew Schleigh, Nanette Savard, Dan Delgado, Michael John Casey, Alejandro Ruiz, and Samantha Cooper"
+                "comment": (
+                    "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand, Colleen Delany as Narrator; Jon Vertullo as Cassian, and Amanda Forstrom as Morrigan; with Shawn K. Jain, Nora Achrati, Karenna Foley, Gabriel Michael, Natalie Van Sistine, Eva Wilhelm, Henry W. Kramer, Bianca Bryan, Renee Dorian, Matthew Bassett, Rob McFadyen, Ryan Carlo Dalusung, Yasmin Tuazon, Matthew Schleigh, Nanette Savard, Dan Delgado, Michael John Casey, Alejandro Ruiz, and Samantha Cooper"
+                )
             },
             {},
             {
@@ -159,6 +165,9 @@ def test_parse_combo_id3_tags(
     if "title" in test_dict2:
         test_dict2 = {**test_dict2, "title": increment(test_dict2["title"])}
 
+    assert blank_audiobook.sample_audio1
+    assert blank_audiobook.sample_audio2
+
     _got_tags = mock_id3_tags(
         (blank_audiobook.sample_audio1, test_dict1),
         (blank_audiobook.sample_audio2, test_dict2),
@@ -167,14 +176,10 @@ def test_parse_combo_id3_tags(
     book = Audiobook(blank_audiobook.sample_audio1).extract_metadata()
 
     for key in expected.keys():
-        assert (
-            getattr(book, key) == expected[key]
-        ), f"Expected {key} '{expected[key]}', got '{getattr(book, key)}'"
+        assert getattr(book, key) == expected[key], f"Expected {key} '{expected[key]}', got '{getattr(book, key)}'"
 
 
-def test_ignore_graphic_audio(
-    graphic_audio__single_m4b: Audiobook, capfd: pytest.CaptureFixture
-):
+def test_ignore_graphic_audio(graphic_audio__single_m4b: Audiobook, capfd: pytest.CaptureFixture):
 
     b = graphic_audio__single_m4b
     b.extract_metadata()
@@ -213,9 +218,7 @@ def test_ignore_graphic_audio(
     "test_dict, expected_author",
     [
         (
-            {
-                "comment": "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand"
-            },
+            {"comment": "Written by Sarah J. Maas - Performed by Melody Muze as Feyre, Anthony Palmini as Rhysand"},
             "Sarah J. Maas",
         ),
         (
@@ -249,7 +252,9 @@ def test_ignore_graphic_audio(
         ),
         (
             {
-                "comment": "When we rescued the first fluffy-eared princess, I didn't realize how lucky we’d been. She was a kind soul, and gentle-everything you’d imagine a sweet princess to be. Though atop the second tower, the next stripey-tailed princess bore a rage as wild as the sun. Her body burned hot like a furnace. But it was our job to help her return to normal-well, not our main job. Our journey took us from cold mountains to wild seas on a pirate ship. Our quest? To save the third-and last-princess, so we could halt The Witch King in his tracks."
+                "comment": (
+                    "When we rescued the first fluffy-eared princess, I didn't realize how lucky we’d been. She was a kind soul, and gentle-everything you’d imagine a sweet princess to be. Though atop the second tower, the next stripey-tailed princess bore a rage as wild as the sun. Her body burned hot like a furnace. But it was our job to help her return to normal-well, not our main job. Our journey took us from cold mountains to wild seas on a pirate ship. Our quest? To save the third-and last-princess, so we could halt The Witch King in his tracks."
+                )
             },
             "",
         ),
@@ -335,6 +340,14 @@ def test_parse_id3_date(
                 "narrator": "Richard Matthews",
             },
         ),
+        (
+            "house_on_the_cliff__flat_mp3",
+            {
+                "title": "The House on the Cliff, Version 3",
+                "author": "Franklin W. Dixon",
+                "narrator": "",
+            },
+        ),
     ],
     indirect=["indirect_fixture"],
 )
@@ -345,8 +358,8 @@ def test_parse_tags_from_fixtures(
 
     book = indirect_fixture
     book.extract_metadata()
-    tags1 = extract_id3_tags(book.sample_audio1)
-    tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
+    _tags1 = extract_id3_tags(book.sample_audio1)
+    _tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
 
     for key in expected_dict.keys():
         assert (
@@ -355,11 +368,67 @@ def test_parse_tags_from_fixtures(
 
 
 @pytest.mark.parametrize(
+    "indirect_fixture, expected_dict",
+    [
+        (
+            "touch_of_frost__flat_mp3",
+            {"title": "TouchofFrost", "author": "", "narrator": ""},
+        ),
+        (
+            "count_of_monte_cristo__flat_mp3",
+            {
+                "title": "The Count of Monte Cristo",
+                "author": "Alexandre Dumas",
+                "narrator": "Richard Matthews",
+            },
+        ),
+        (
+            "house_on_the_cliff__flat_mp3",
+            {
+                "title": "The House on the Cliff, Brown Cloth",
+                "author": "Franklin W. Dixon",
+                "narrator": "",
+            },
+        ),
+    ],
+    indirect=["indirect_fixture"],
+)
+def test_verify_tags_after_convert(
+    indirect_fixture: Audiobook,
+    expected_dict: dict[str, str],
+):
+
+    from src.auto_m4b import app
+
+    book = indirect_fixture
+    _orig_match_filter = InboxState().match_filter
+    testutils.set_match_filter(re.escape(book.path.stem))
+
+    app(max_loops=1)
+
+    book.extract_metadata()
+    _tags1 = extract_id3_tags(book.sample_audio1)
+    _tags2 = extract_id3_tags(book.sample_audio2) if book.sample_audio2 else {}
+    converted = Audiobook(book.converted_file).update_from_tags()
+    _converted_tags = extract_id3_tags(book.converted_file)
+
+    # Ensure converted file has the same tags as the expected
+    for key in expected_dict.keys():
+        assert (
+            getattr(converted, key) == expected_dict[key]
+        ), f"Expected {key} '{expected_dict[key]}', got '{getattr(converted, key)}'"
+
+    testutils.set_match_filter(_orig_match_filter)
+
+
+@pytest.mark.parametrize(
     "test_dict, expected_narrator",
     [
         (
             {
-                "comment": "Mysterious Benedict Society#1    Read by Del Roy                           Unabridged  13 hrs 17 min           Listening Library/Random House Audio"
+                "comment": (
+                    "Mysterious Benedict Society#1    Read by Del Roy                           Unabridged  13 hrs 17 min           Listening Library/Random House Audio"
+                )
             },
             "Del Roy",
         ),
@@ -375,7 +444,9 @@ def test_parse_tags_from_fixtures(
         (
             {
                 "artist": "H. D. Carlton",
-                "comment": "Death walks alongside me...but the reaper is no match for me. I'm trapped in a world full of monsters dressed as men, and those who aren't as they seem. They won't keep me forever. I no longer recognize the person I've become.",
+                "comment": (
+                    "Death walks alongside me...but the reaper is no match for me. I'm trapped in a world full of monsters dressed as men, and those who aren't as they seem. They won't keep me forever. I no longer recognize the person I've become."
+                ),
                 "composer": "Teddy Hamilton, Michelle Sparks",
             },
             "Teddy Hamilton, Michelle Sparks",

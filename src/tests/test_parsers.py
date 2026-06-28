@@ -14,12 +14,17 @@ from src.tests.helpers.pytest_utils import testutils
 from src.tests.test_cleaners import strip_partno_tests
 
 
-def test_extract_path_info(benedict_society__mp3):
+@pytest.mark.parametrize(
+    "expected, prop, indirect_fixture",
+    [
+        ("Trenton Lee Stewart", "fs_author", "benedict_society__mp3"),
+        ("The Mysterious Benedict Society", "fs_title", "benedict_society__mp3"),
+    ],
+    indirect=["indirect_fixture"],
+)
+def test_extract_path_info(expected, prop, indirect_fixture):
 
-    assert (
-        extract_path_info(benedict_society__mp3).fs_title
-        == "The Mysterious Benedict Society"
-    )
+    assert getattr(extract_path_info(indirect_fixture), prop) == expected
 
 
 def test_bitrate_vbr(bitrate_vbr__mp3: Audiobook):
@@ -97,9 +102,7 @@ def test_get_roman_numerals_dict(input, expected):
         ),
     ],
 )
-def test_roman_numerals_affect_file_order(
-    test_files: list[str], expected, tmp_path: Path
-):
+def test_roman_numerals_affect_file_order(test_files: list[str], expected, tmp_path: Path):
 
     from src.lib.parsers import roman_numerals_affect_file_order
 
@@ -226,6 +229,78 @@ def test_romans_find_all(test_case, expected):
 
 
 @pytest.mark.parametrize(
+    "int_or_roman, expected",
+    [
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (9, 9),
+        (10, 10),
+        (149, 149),
+        (310, 310),
+        ("001", 1),
+        ("01", 1),
+        ("1", 1),
+        ("55", 55),
+        ("0901", 901),
+        ("I", 1),
+        ("II", 2),
+        ("III", 3),
+        ("IV", 4),
+        ("V", 5),
+        ("VI", 6),
+        ("VII", 7),
+        ("VIII", 8),
+        ("IX", 9),
+        ("X", 10),
+        ("XI", 11),
+        ("XII", 12),
+        ("XIII", 13),
+        ("XIV", 14),
+        ("XV", 15),
+        ("XVI", 16),
+        ("XVII", 17),
+        ("XVIII", 18),
+        ("XIX", 19),
+        ("XX", 20),
+        ("XXI", 21),
+        ("XXII", 22),
+        ("XXIII", 23),
+        ("XXIV", 24),
+        ("XXV", 25),
+        ("XXVI", 26),
+        ("XXVII", 27),
+        ("XXVIII", 28),
+        ("XXIX", 29),
+        ("XXX", 30),
+        ("i", 1),
+        ("iI", 2),
+        ("IiI", 3),
+        ("Iv", 4),
+        ("V", 5),
+        ("v", 5),
+        ("vi", 6),
+        ("VIi", 7),
+        ("vIIi", 8),
+        ("ix", 9),
+        ("x", 10),
+        ("X", 10),
+        ("  I ", 1),
+        (" VI   ", 6),
+        # not roman numerals, but contain roman numeral chars
+        ("nothin'", -1),
+        ("investigator", -1),
+        ("codex", -1),
+    ],
+)
+def test_romans_to_int(int_or_roman, expected):
+
+    from src.lib.parsers import romans
+
+    assert romans.to_int(int_or_roman) == expected
+
+
+@pytest.mark.parametrize(
     "test_case, expected",
     [
         ("Bk1", False),
@@ -330,7 +405,6 @@ series_true_tests = [
     "#1",
     "#1",
     "# 1",
-    "01 - Pride Of Chanur",
     "Old Man's War Series/Old Man's War - John Scalzi",
     "Aleron Kong - The Land Alliances (Chaos Seeds #3)",
     "# 3 (Chaos Seeds) - Aleron Kong - The Land Alliances",
@@ -343,6 +417,7 @@ series_true_tests = [
     [
         *[(test_case, True) for test_case in series_true_tests],
         *[
+            ("01 - Pride Of Chanur", False),
             ("Book", False),
             ("The Fellowship of the Ring", False),
             ("The Fellowship of the Ring - Bk", False),
@@ -353,15 +428,15 @@ series_true_tests = [
         ],
     ],
 )
-def test_is_maybe_multi_book_or_series(test_case, expected):
+def test_is_maybe_multiple_books_or_series(test_case, expected):
 
-    from src.lib.parsers import is_maybe_multi_book_or_series
+    from src.lib.parsers import is_maybe_series_book
 
-    assert is_maybe_multi_book_or_series(test_case) == expected
-    assert is_maybe_multi_book_or_series(test_case.lower()) == expected
-    assert is_maybe_multi_book_or_series(test_case.title()) == expected
-    assert is_maybe_multi_book_or_series(test_case.capitalize()) == expected
-    assert is_maybe_multi_book_or_series(test_case.upper()) == expected
+    assert is_maybe_series_book(test_case) == expected
+    assert is_maybe_series_book(test_case.lower()) == expected
+    assert is_maybe_series_book(test_case.title()) == expected
+    assert is_maybe_series_book(test_case.capitalize()) == expected
+    assert is_maybe_series_book(test_case.upper()) == expected
 
 
 @pytest.mark.parametrize(
@@ -383,3 +458,39 @@ def test_contains_partno_or_ch(s1, s2, expected):
     from src.lib.parsers import contains_partno_or_ch
 
     assert contains_partno_or_ch(s1, s2) == expected
+
+
+@pytest.mark.parametrize(
+    "test_case, expected",
+    [
+        # fmt: off
+        ("Alexandre Dumas", [("Alexandre Dumas", 4.6)]),
+        ("Matthew Nicol", [("Matthew Nicol", 0.91)]),
+        ("Andrea Camilleri", [("Andrea Camilleri", 3.5)]),
+        ("Camilleri, Andrea", [("Andrea Camilleri", 3.5)]),
+        ("John S. Marr", [("John S. Marr", 2.35)]),
+        ("Marr, John S.", [("John S. Marr", 2.35)]),
+        ("Read by Leonard Porter", [("Leonard Porter", 1.2)]),
+        ("Read by J. Scott", [("J. Scott", 3.1)]),
+        ("Franklin W Dixon", [("Franklin W. Dixon", 3.6)]),
+        ("Franklin W. Dixon", [("Franklin W. Dixon", 3.8)]),
+        ("Colette Cœtre-Conté", [("Colette Cœtre-Conté", 1.8)]),
+        ("Alexandre Dumas The Count of Monte Cristo", [("Alexandre Dumas", 4.6), ("Monte Cristo", -0.125)]),
+        ("0100 _ Books on Tape _ The Count of Monte Cristo _ Alexandre Dumas", [("Alexandre Dumas", 4.6), ("Monte Cristo", -0.125)]),
+        ("The Lord of the Rings - J.R.R. Tolkien", [("J.R.R. Tolkien", 3.6)]),
+        ("The Lord of the Rings - Tolkien, J.R.R.", [("J.R.R. Tolkien", 3.6)]),
+        ("Old Man's War Series/Old Man's War - John Scalzi", [("John Scalzi", 3.8), ("Old Man", 0.751)]),
+        ("Aleron Kong - The Land Alliances (Chaos Seeds #3)", [("Aleron Kong", 2.3), ("Chaos Seeds", -0.175)]),
+        ("Melody Muze as Feyre", [('Melody Muze', 0.99), ('Feyre',  0.84)]),
+        # fmt: on
+    ],
+)
+def test_get_nlp_names(test_case, expected):
+
+    from src.lib.parsers import get_nlp_names
+
+    results = get_nlp_names(test_case, no_cache=True)
+    for (name, label, score), (exp_name, exp_score) in zip(results, expected):
+        assert name == exp_name
+        assert label.startswith("PER"), f"{name} does not start with PER____"
+        assert score == pytest.approx(exp_score, abs=0.1), f"{name} - score {score} != {exp_score} ±0.1"

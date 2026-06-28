@@ -8,108 +8,29 @@ import pytest
 from PIL import Image
 
 from src.lib.audiobook import Audiobook
+from src.lib.books_tree import BooksTree
+from src.lib.compare import calculate_gcs_percentage, find_greatest_common_string
 from src.lib.fs_utils import (
     filter_ignored,
-    find_book_audio_files,
     find_cover_art_file,
-    find_first_audio_file,
-    find_next_audio_file,
 )
 from src.lib.misc import isorted, re_group
-from src.lib.typing import BookStructure
 from src.tests.conftest import TEST_DIRS
-from src.tests.helpers.pytest_dirs import MOCKED
+from src.tests.helpers.pytest_dumps import MOCKED
+
+root = None
 
 
-@pytest.mark.parametrize(
-    "path, mindepth, maxdepth, expected",
-    [
-        # fmt: off
-        (TEST_DIRS.inbox, None, None, MOCKED.all_dirs_no_series),
-        (TEST_DIRS.inbox, 0, None, MOCKED.all_dirs_no_series),
-        (TEST_DIRS.inbox, None, 0, []),
-        (TEST_DIRS.inbox, 0, 0, []),
-        (TEST_DIRS.inbox, 0, 1, MOCKED.flat_dirs + [MOCKED.mixed_dir] + [MOCKED.single_dir_m4b, MOCKED.single_dir_mp3]),
-        (TEST_DIRS.inbox, 1, 1, MOCKED.flat_dirs + [MOCKED.mixed_dir] + [MOCKED.single_dir_mp3, MOCKED.single_dir_m4b]),
-        (TEST_DIRS.inbox, 1, 2, MOCKED.all_dirs_no_series),
-        (TEST_DIRS.inbox, 2, 2, [MOCKED.mixed_dir] + MOCKED.multi_dirs + [MOCKED.single_nested_dir_mp3]),
-        # fmt: on
-    ],
-)
-def test_find_base_dirs_with_audio_files(
-    path: Path,
-    mindepth: int,
-    maxdepth: int,
-    expected: list[Path],
-    mock_inbox,
-    setup_teardown,
-    enable_convert_series,
-):
-    from src.lib.fs_utils import find_base_dirs_with_audio_files
-
-    assert find_base_dirs_with_audio_files(path, mindepth, maxdepth) == isorted(
-        expected
-    )
+def inbox_books_tree():
+    global root
+    if not root:
+        root = BooksTree(TEST_DIRS.inbox)
+    return root
 
 
-@pytest.mark.parametrize(
-    "expected_structure, path",
-    [
-        *[("flat", d) for d in MOCKED.flat_dirs],
-        ("flat_nested", MOCKED.flat_nested_dir),
-        ("multi_book_series", MOCKED.multi_book_series_dir),
-        ("multi_disc", MOCKED.multi_disc_dir),
-        ("multi_part", MOCKED.multi_part_dir),
-        ("multi_nested", MOCKED.multi_nested_dir),
-        ("multi_mixed", MOCKED.mixed_dir),
-        ("standalone", MOCKED.standalone_mp3_1),
-        ("standalone", MOCKED.standalone_m4b),
-        ("single", MOCKED.single_dir_mp3),
-        ("empty", TEST_DIRS.inbox / "empty_dir"),
-    ],
-)
-def test_find_book_audio_files(
-    expected_structure: BookStructure,
-    path: Path,
-    mock_inbox,
-    setup_teardown,
-):
-    structure, _paths = find_book_audio_files(path)
-
-    assert structure == expected_structure
-
-
-@pytest.mark.parametrize(
-    "name, kwargs, expected",
-    [
-        ("include_parents", {"exclude_series_parents": False}, MOCKED.all_dirs),
-        ("exclude_parents", {"exclude_series_parents": True}, MOCKED.all_book_dirs),
-        ("default", {"only_series_parents": False}, MOCKED.all_dirs),
-        ("only_parents", {"only_series_parents": True}, [MOCKED.multi_book_series_dir]),
-    ],
-)
-def test_find_book_dirs_in_inbox(
-    name, kwargs, expected, mock_inbox, setup_teardown, enable_convert_series
-):
-    from src.lib.fs_utils import find_book_dirs_in_inbox
-
-    assert find_book_dirs_in_inbox(**kwargs) == expected
-
-
-def test_find_book_dirs_in_inbox_empty_if_series_off(
-    mock_inbox, setup_teardown, disable_convert_series
-):
-    from src.lib.fs_utils import find_book_dirs_in_inbox
-
-    assert find_book_dirs_in_inbox(only_series_parents=True) == []
-
-
-def test_find_standalone_books_in_inbox(
-    mock_inbox, setup_teardown, enable_convert_series
-):
-    from src.lib.fs_utils import find_standalone_books_in_inbox
-
-    assert find_standalone_books_in_inbox() == MOCKED.standalone_files
+@pytest.fixture
+def tree():
+    return BooksTree(TEST_DIRS.inbox)
 
 
 @pytest.mark.usefixtures("the_hobbit__multidisc_mp3")
@@ -117,7 +38,7 @@ def test_find_standalone_books_in_inbox(
     "test_path, predicted, expected",
     [
         (
-            MOCKED.multi_book_series_dir,
+            MOCKED.series_parent_dir,
             [
                 "mock_book_series - ch. 1.mp3",
                 "mock_book_series - ch. 2.mp3",
@@ -217,9 +138,7 @@ def test_flatten_multidisc_book(
 
     flatten_files_in_dir(test_path, on_conflict="skip")
 
-    after_files = list(
-        isorted([f.name for f in filter_ignored(test_path.iterdir()) if f.is_file()])
-    )
+    after_files = list(isorted([f.name for f in filter_ignored(test_path.iterdir()) if f.is_file()]))
     assert before_files == predicted
     assert after_files == expected
 
@@ -227,9 +146,7 @@ def test_flatten_multidisc_book(
     # put each file if it matches `Disc 0(?P<disc_number>\d)` into a dir (make if needed) J.R.R. Tolkien - The Hobbit - Disc <disc_number>
     for f in test_path.iterdir():
         if f.is_file() and "Disc" in f.name:
-            disc_number = re_group(
-                re.search(r"Disc 0(?P<disc_number>\d)", f.name), "disc_number"
-            )
+            disc_number = re_group(re.search(r"Disc 0(?P<disc_number>\d)", f.name), "disc_number")
             disc_dir = test_path / f"J.R.R. Tolkien - The Hobbit - Disc {disc_number}"
             disc_dir.mkdir(exist_ok=True)
             f.rename(disc_dir / f.name)
@@ -238,7 +155,7 @@ def test_flatten_multidisc_book(
 @pytest.mark.parametrize(
     "test_files, expected",
     [
-        (MOCKED.multi_book_series_dir, True),
+        (MOCKED.series_parent_dir, True),
         (MOCKED.multi_disc_dir, False),
         (MOCKED.multi_disc_dir_with_extras, False),
     ],
@@ -253,21 +170,6 @@ def test_flattening_files_affects_order(
     assert flattening_files_in_dir_affects_order(test_files) == expected
 
 
-def test_find_first_audio_file(tower_treasure__flat_mp3: Audiobook):
-    assert (
-        find_first_audio_file(tower_treasure__flat_mp3.path)
-        == tower_treasure__flat_mp3.path / "towertreasure4_01_dixon_64kb.mp3"
-    )
-
-
-def test_find_next_audio_file(tower_treasure__flat_mp3: Audiobook):
-    first_audio_file = find_first_audio_file(tower_treasure__flat_mp3.path)
-    assert (
-        find_next_audio_file(first_audio_file)
-        == tower_treasure__flat_mp3.path / "towertreasure4_02_dixon_64kb.mp3"
-    )
-
-
 def test_find_recently_modified_files_and_dirs():
     from src.lib.config import cfg
     from src.lib.fs_utils import find_recently_modified_files_and_dirs
@@ -279,9 +181,7 @@ def test_find_recently_modified_files_and_dirs():
     # create a file
     time.sleep(0.5)
     (TEST_DIRS.inbox / "recently_modified_file.mp3").touch()
-    recents = find_recently_modified_files_and_dirs(
-        TEST_DIRS.inbox, 5, only_file_exts=cfg.AUDIO_EXTS
-    )
+    recents = find_recently_modified_files_and_dirs(TEST_DIRS.inbox, 5, only_file_exts=cfg.AUDIO_EXTS)
     assert recents[0][0] == TEST_DIRS.inbox / "recently_modified_file.mp3"
     # remove the file
     (TEST_DIRS.inbox / "recently_modified_file.mp3").unlink()
@@ -305,9 +205,7 @@ def test_was_recently_modified():
     (nested_dir / "recently_modified_file.mp3").unlink()
 
 
-def test_last_updated_at(
-    old_mill__multidisc_mp3: Audiobook, capfd: pytest.CaptureFixture[str]
-):
+def test_last_updated_at(old_mill__multidisc_mp3: Audiobook, capfd: pytest.CaptureFixture[str]):
     from src.lib.fs_utils import last_updated_at
 
     inbox_last_updated = last_updated_at(TEST_DIRS.inbox)
@@ -353,26 +251,16 @@ def test_hash_dir_ignores_log_files(
     from src.lib.fs_utils import hash_path
 
     baseline_inbox_hash = hash_path(TEST_DIRS.inbox, only_file_exts=[".mp3"])
-    baseline_mill_hash = hash_path(
-        old_mill__multidisc_mp3.path, only_file_exts=[".mp3"]
-    )
-    baseline_tower_hash = hash_path(
-        tower_treasure__flat_mp3.path, only_file_exts=[".mp3"]
-    )
+    baseline_mill_hash = hash_path(old_mill__multidisc_mp3.path, only_file_exts=[".mp3"])
+    baseline_tower_hash = hash_path(tower_treasure__flat_mp3.path, only_file_exts=[".mp3"])
 
     # create a bunch of log files
     for d in [old_mill__multidisc_mp3.path, tower_treasure__flat_mp3.path]:
         (d / "test-auto-m4b.log").touch()
 
     assert hash_path(TEST_DIRS.inbox, only_file_exts=[".mp3"]) == baseline_inbox_hash
-    assert (
-        hash_path(old_mill__multidisc_mp3.path, only_file_exts=[".mp3"])
-        == baseline_mill_hash
-    )
-    assert (
-        hash_path(tower_treasure__flat_mp3.path, only_file_exts=[".mp3"])
-        == baseline_tower_hash
-    )
+    assert hash_path(old_mill__multidisc_mp3.path, only_file_exts=[".mp3"]) == baseline_mill_hash
+    assert hash_path(tower_treasure__flat_mp3.path, only_file_exts=[".mp3"]) == baseline_tower_hash
 
     # remove the log files
     for d in [old_mill__multidisc_mp3.path, tower_treasure__flat_mp3.path]:
@@ -387,16 +275,10 @@ def test_hash_dir_respects_only_file_exts(
 
     try:
         baseline_inbox_hash = hash_path(TEST_DIRS.inbox, only_file_exts=[".mp3"])
-        baseline_mill_hash = hash_path(
-            old_mill__multidisc_mp3.path, only_file_exts=[".mp3"]
-        )
-        baseline_tower_hash = hash_path(
-            tower_treasure__flat_mp3.path, only_file_exts=[".mp3"]
-        )
+        baseline_mill_hash = hash_path(old_mill__multidisc_mp3.path, only_file_exts=[".mp3"])
+        baseline_tower_hash = hash_path(tower_treasure__flat_mp3.path, only_file_exts=[".mp3"])
 
-        for d in [
-            old_mill__multidisc_mp3.path / d for d in ["Disc 1", "Disc 2", "Disc 3"]
-        ]:
+        for d in [old_mill__multidisc_mp3.path / d for d in ["Disc 1", "Disc 2", "Disc 3"]]:
             # make a bunch of non-mp3 files
             for ext in [".txt", ".jpg", ".png", ".pdf"]:
                 (d / f"non_mp3_file{ext}").touch()
@@ -408,26 +290,16 @@ def test_hash_dir_respects_only_file_exts(
         for ext in [".txt", ".jpg", ".png", ".pdf"]:
             (tower_treasure__flat_mp3.path / f"non_mp3_file{ext}").touch()
 
-        assert (
-            hash_path(TEST_DIRS.inbox, only_file_exts=[".mp3"]) != baseline_inbox_hash
-        )
-        assert (
-            hash_path(old_mill__multidisc_mp3.path, only_file_exts=[".mp3"])
-            != baseline_mill_hash
-        )
-        assert (
-            hash_path(tower_treasure__flat_mp3.path, only_file_exts=[".mp3"])
-            == baseline_tower_hash
-        )
+        assert hash_path(TEST_DIRS.inbox, only_file_exts=[".mp3"]) != baseline_inbox_hash
+        assert hash_path(old_mill__multidisc_mp3.path, only_file_exts=[".mp3"]) != baseline_mill_hash
+        assert hash_path(tower_treasure__flat_mp3.path, only_file_exts=[".mp3"]) == baseline_tower_hash
     finally:
         # remove all the extra files
         for f in [
             *old_mill__multidisc_mp3.path.rglob("*"),
             *tower_treasure__flat_mp3.path.rglob("*"),
         ]:
-            if f.is_file() and (
-                f.suffix in [".txt", ".jpg", ".png", ".pdf"] or f.stat().st_size == 0
-            ):
+            if f.is_file() and (f.suffix in [".txt", ".jpg", ".png", ".pdf"] or f.stat().st_size == 0):
                 f.unlink()
 
 
@@ -453,9 +325,7 @@ def test_find_cover_art_file(the_sunlit_man__flat_mp3: Audiobook):
         (100000, 70565, True),
     ],
 )
-def test_find_cover_art_file_ignores_too_small_files(
-    size: int, expect_size: int, is_valid: bool, tmp_path: Path
-):
+def test_find_cover_art_file_ignores_too_small_files(size: int, expect_size: int, is_valid: bool, tmp_path: Path):
 
     w = h = int(size**0.5)
 
@@ -473,8 +343,93 @@ def test_find_cover_art_file_ignores_too_small_files(
 
         img.save(tmp_path / "cover.jpg")
 
-    assert (tmp_path / "cover.jpg").stat().st_size == pytest.approx(
-        expect_size, rel=0.1
-    )
+    assert (tmp_path / "cover.jpg").stat().st_size == pytest.approx(expect_size, rel=0.1)
 
     assert bool(find_cover_art_file(tmp_path)) == is_valid
+
+
+class test_greatest_common_string:
+    def test_gcs_percent(self):
+
+        files = [
+            "i_like_candy_and_chocolate - part_01.txt",
+            "i_like_candy_and_chocolate - part_02.txt",
+            "i_like_candy_and_chocolate - part_03.txt",
+            "i_like_candy_and_chocolate - note.txt",
+        ]
+
+        gcs = find_greatest_common_string(files)
+        percentage = calculate_gcs_percentage(files)
+
+        assert gcs == "i_like_candy_and_chocolate - "
+        assert percentage == pytest.approx(0.725, rel=0.01)
+
+    def test_gcs_percent_with_different_files(self):
+
+        files = [
+            "different_file_01.txt",
+            "another_file_02.txt",
+            "yet_another_file_03.txt",
+            "file_42.txt",
+        ]
+
+        gcs = find_greatest_common_string(files)
+        percentage = calculate_gcs_percentage(files)
+
+        assert gcs == "file_"
+        assert percentage == pytest.approx(0.217, rel=0.01)
+
+    def test_gcs_percent_with_similar_files(self):
+
+        files = [
+            "similar_file_01.txt",
+            "similar_file_02.txt",
+            "similar_file_03.txt",
+            "similar_file_04.txt",
+        ]
+
+        gcs = find_greatest_common_string(files)
+        percentage = calculate_gcs_percentage(files)
+
+        assert gcs == "similar_file_0"
+        assert percentage == pytest.approx(0.737, rel=0.01)
+
+    def test_gcs_percent_with_no_common_string(self):
+
+        files = [
+            "file_one.txt",
+            "fjle_two.txt",
+            "fkle_three.txt",
+            "flle_four.txt",
+        ]
+
+        gcs = find_greatest_common_string(files, min_chars=5)
+        percentage = calculate_gcs_percentage(files, min_chars=5)
+
+        assert gcs == None
+        assert percentage == pytest.approx(0.0, rel=0.01)
+
+
+class test_get_similarity:
+
+    @pytest.mark.parametrize(
+        "strings, expected",
+        [
+            (["hello", "hello"], 1.0),
+            (["hello", "hello"], 1.0),
+            (["hello", "hello"], 1),
+            (["01 In Ashes Born", "02 To Fire Called", "03 By Darkness Forged"], 0.34),
+            (
+                [
+                    "01 In Ashes Born/Seeker's Tales (Solar Clipper Universe) Book 1 - In Ashes Born.m4a",
+                    "02 To Fire Called A Seekers Tale from the Golden Age of the Solar Clipper, Book 2 (Unabridged)/To Fire Called A Seekers Tale from the Golden Age of the Solar Clipper, Book 2 (Unabridged).m4a",
+                    "03 By Darkness Forged A Seeker's Tale from the Golden Age of the Solar Clipper, Book 3/By Darkness Forged A Seeker's Tale from the Golden Age of the Solar Clipper, Book 3.m4a",
+                ],
+                0.56,
+            ),
+        ],
+    )
+    def test_similarity_of_strings(self, strings: list[str], expected: int | float):
+        from src.lib.compare import get_similarity
+
+        assert get_similarity(strings) == pytest.approx(expected, rel=0.01)

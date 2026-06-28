@@ -17,4 +17,4 @@ def test_copy_to_working_dir(house_on_the_cliff__flat_mp3: Audiobook):
     )
     merge_cover = house_on_the_cliff__flat_mp3.merge_dir / "houseonthecliff_2307.jpg"
     assert merge_cover.exists()
-    assert house_on_the_cliff__flat_mp3.cover_art_file == merge_cover
+    assert house_on_the_cliff__flat_mp3._merge_cover_art_file == merge_cover

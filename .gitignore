@@ -9,3 +9,4 @@ docker-compose.yml
 ._*
 sandbox/
 /m4b-tool
+*_cache.sqlite

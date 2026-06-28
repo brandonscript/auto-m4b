@@ -2,6 +2,7 @@ import argparse
 import functools
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,8 @@ from multiprocessing import cpu_count
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TypeVar
 
-from src.lib.formatters import listify
+from lib.singleton import singleton
+from src.lib.constants import AUDIO_EXTS, DEFAULT_SLEEP_TIME, DEFAULT_WAIT_TIME, IGNORE_FILES, OTHER_EXTS
 from src.lib.misc import (
     get_git_root,
     is_boolish,
@@ -29,55 +31,12 @@ from src.lib.misc import (
     parse_int,
     pathify,
     set_typed_env_var,
-    singleton,
     to_json,
 )
-from src.lib.strings import en
-from src.lib.term import nl, print_amber, print_banana, print_debug, print_error
-from src.lib.typing import OverwriteMode
+from src.lib.term import nl, print_amber, print_debug, print_error
+from src.lib.typing import OnComplete, OverwriteMode
 
-DEFAULT_SLEEP_TIME: float = 10
-DEFAULT_WAIT_TIME: float = 5
-AUDIO_EXTS = [".mp3", ".m4a", ".m4b", ".wma"]
-OTHER_EXTS = [
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".bmp",
-    ".tiff",
-    ".webp",
-    ".heic",
-    ".svg",
-    ".epub",
-    ".mobi",
-    ".azw",
-    ".pdf",
-    ".txt",
-    ".log",
-]
-
-IGNORE_FILES = [
-    ".DS_Store",
-    "._*",
-    ".AppleDouble",
-    ".LSOverride",
-    ".Spotlight-V100",
-    ".Trashes",
-    "__MACOSX",
-    "Desktop.ini",
-    "ehthumbs.db",
-    "Thumbs.db",
-    "@eaDir",
-]
-
-WORKING_DIRS = [
-    "BUILD_FOLDER",
-    "MERGE_FOLDER",
-    "TRASH_FOLDER",
-]
-
-OnComplete = Literal["archive", "delete", "test_do_nothing"]
+AUDIO_EXTS = AUDIO_EXTS
 
 parser = argparse.ArgumentParser(exit_on_error=False)
 parser.add_argument("--env", help="Path to .env file", type=Path)
@@ -113,6 +72,15 @@ parser.add_argument(
     type=str,
     default=None,
 )
+parser.add_argument(
+    "--crash_protection",
+    help="Enable/disable crash protection (--crash_protection=off to disable). Default is True.",
+    action="store",
+    nargs="?",
+    const=True,
+    default=True,
+    type=lambda x: False if str(x).lower() in ("off", "false", "no", "n", "0") else True,
+)
 
 T = TypeVar("T", bound=object)
 D = TypeVar("D")
@@ -130,7 +98,7 @@ def pick(a: T, b, default: None = None) -> T | None: ...
 def pick(a, b, default: T) -> T: ...
 
 
-def pick(a: T, b, default: D = None) -> T | D:
+def pick(a: T, b, default: D = None) -> T | D:  # type: ignore
     if a is not None:
         return cast(T | D, a)
     if b is not None:
@@ -203,6 +171,7 @@ class AutoM4bArgs:
     test: bool | None
     max_loops: int
     match_filter: str | None
+    crash_protection: bool | None
 
     def __init__(
         self,
@@ -211,6 +180,7 @@ class AutoM4bArgs:
         test: bool | None = None,
         max_loops: int | None = None,
         match_filter: str | None = None,
+        crash_protection: bool | None = None,
     ):
         args = parser.parse_known_args()[0]
 
@@ -219,6 +189,7 @@ class AutoM4bArgs:
         self.test = pick(test, args.test, None)
         self.max_loops = pick(max_loops, args.max_loops, -1)
         self.match_filter = pick(match_filter, args.match_filter)
+        self.crash_protection = pick(crash_protection, args.crash_protection, True)
 
     def __str__(self) -> str:
         return to_json(self.__dict__)
@@ -239,13 +210,9 @@ def ensure_dir_exists_and_is_writable(path: Path, throw: bool = True) -> None:
 
     if not is_writable:
         if throw:
-            raise PermissionError(
-                f"{path} is not writable by current user, please fix permissions and try again"
-            )
+            raise PermissionError(f"{path} is not writable by current user, please fix permissions and try again")
         else:
-            print_warning(
-                f"Warning: {path} is not writable by current user, this may result in data loss"
-            )
+            print_warning(f"Warning: {path} is not writable by current user, this may result in data loss")
             return
 
 
@@ -253,11 +220,20 @@ def ensure_dir_exists_and_is_writable(path: Path, throw: bool = True) -> None:
 def use_pid_file():
     from src.lib.config import cfg
 
+    if not cfg.CRASH_PROTECTION:
+        # Delete the fatal file if it exists
+        if cfg.FATAL_FILE.exists():
+            cfg.FATAL_FILE.unlink()
+
     # read the pid file and look for a line starting with `FATAL` in all caps, if so, the app crashed and we should exit
-    if cfg.FATAL_FILE.exists():
-        err = f"auto-m4b fatally crashed on last run, once the problem is fixed, please delete the following lock file to continue:\n\n {cfg.FATAL_FILE}\n\n{cfg.FATAL_FILE.open().read()}"
-        print_error(err)
-        raise RuntimeError(err)
+    if cfg.FATAL_FILE.exists() and cfg.CRASH_PROTECTION:
+        age = time.time() - cfg.FATAL_FILE.stat().st_mtime
+        if age > 30:
+            cfg.FATAL_FILE.unlink()
+        else:
+            err = f"auto-m4b fatally crashed on last run, once the problem is fixed, please delete the following lock file to continue:\n\n {cfg.FATAL_FILE}\n\n{cfg.FATAL_FILE.open().read()}"
+            print_error(err)
+            raise RuntimeError(err)
 
     already_exists = cfg.PID_FILE.is_file()
 
@@ -265,9 +241,7 @@ def use_pid_file():
         cfg.PID_FILE.touch()
         current_local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pid = os.getpid()
-        cfg.PID_FILE.write_text(
-            f"auto-m4b started at {current_local_time}, watching {cfg.inbox_dir} - pid={pid}\n"
-        )
+        cfg.PID_FILE.write_text(f"auto-m4b started at {current_local_time}, watching {cfg.inbox_dir} - pid={pid}\n")
 
     try:
         yield already_exists
@@ -277,13 +251,13 @@ def use_pid_file():
 
 @singleton
 class Config:
-    _env: dict[str, Any] = {}
     _dotenv_src: Any = None
     _USE_DOCKER = False
     _last_debug_print: str = ""
 
     def __init__(self):
         """Do a first load of the environment variables in case we need them before the app runs."""
+        self._env: dict[str, Any] = {}
         self.load_env(quiet=True)
 
     def startup(self, args: AutoM4bArgs | None = None):
@@ -297,37 +271,32 @@ class Config:
                 if self.SLEEP_TIME and not "pytest" in sys.modules:
                     time.sleep(min(2, self.SLEEP_TIME / 2))
 
-                if not pid_exists and not InboxState().loop_counter > 1:
+                if not pid_exists and not InboxState().loop_counter:
                     print_mint("\nStarting auto-m4b...")
                     print_grey(self.info_str)
                     if env_msg:
                         print_dark_grey(env_msg)
 
-                    beta_features = [
-                        (
-                            en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
-                            self.FLATTEN_MULTI_DISC_BOOKS,
-                        ),
-                        (en.FEATURE_CONVERT_SERIES, self.CONVERT_SERIES),
-                    ]
+                    # beta_features = [
+                    # (
+                    #     en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
+                    #     self.FLATTEN_MULTI_DISC_BOOKS,
+                    # ),
+                    # ]
 
                     if test_debug_msg := (
                         "TEST + DEBUG modes on"
                         if self.TEST and self.DEBUG
-                        else (
-                            "TEST mode on"
-                            if self.TEST
-                            else "DEBUG mode on" if self.DEBUG else ""
-                        )
+                        else ("TEST mode on" if self.TEST else "DEBUG mode on" if self.DEBUG else "")
                     ):
                         print_amber(test_debug_msg)
 
-                    if beta_msg := (
-                        f"[Beta] features are enabled:\n{listify([f for f, b in beta_features if b])}\n"
-                        if any(b for _f, b in beta_features)
-                        else ""
-                    ):
-                        print_banana(beta_msg)
+                    # if beta_msg := (
+                    #     f"[Beta] features are enabled:\n{listify([f for f, b in beta_features if b])}\n"
+                    #     if any(b for _f, b in beta_features)
+                    #     else ""
+                    # ):
+                    #     print_banana(beta_msg)
 
         nl()
 
@@ -397,17 +366,23 @@ class Config:
     def sleeptime_friendly(self):
         """If it can be represented as a whole number, do so as {number}s
         otherwise, show as a float rounded to 1 decimal place, e.g. 0.1s"""
-        return (
-            f"{int(self.SLEEP_TIME)}s"
-            if self.SLEEP_TIME.is_integer()
-            else f"{self.SLEEP_TIME:.1f}s"
-        )
+        return f"{int(self.SLEEP_TIME)}s" if self.SLEEP_TIME.is_integer() else f"{self.SLEEP_TIME:.1f}s"
 
-    # @cached_property
-    # def MAX_CHAPTER_LENGTH(self):
+    @env_property(typ=str, default="")
+    def _OPEN_LIBRARY_USER_AGENT(self):
+        """The user agent to use when querying the Open Library API.
+        Make sure you follow their rules for identifying your application:
+        https://openlibrary.org/developers/api
 
-    #     max_chapter_length = self.get_env_var("MAX_CHAPTER_LENGTH", "15,30")
-    #     return ",".join(str(int(x) * 60) for x in max_chapter_length.split(","))
+        Make sure you use your own email address, and a unique
+        name other than `auto-m4b`.
+
+        This env var should be in the following format:
+
+        OPEN_LIBRARY_USER_AGENT=MyAppName/1.0 (myemail@example.com)
+        """
+
+    OPEN_LIBRARY_USER_AGENT = _OPEN_LIBRARY_USER_AGENT
 
     @env_property(
         typ=str,
@@ -422,17 +397,21 @@ class Config:
 
     @cached_property
     def max_chapter_length_friendly(self):
-        return (
-            "-".join(
-                [str(int(int(t) / 60)) for t in self.MAX_CHAPTER_LENGTH.split(",")]
-            )
-            + "m"
-        )
+        return "-".join([str(int(int(t) / 60)) for t in self.MAX_CHAPTER_LENGTH.split(",")]) + "m"
 
     @env_property(typ=bool, default=False)
     def _USE_FILENAMES_AS_CHAPTERS(self): ...
 
     USE_FILENAMES_AS_CHAPTERS = _USE_FILENAMES_AS_CHAPTERS
+
+    @env_property(typ=bool, default=True)
+    def _USE_NATIVE_CONVERTER(self):
+        """Use the native Python converter instead of m4b-tool (PHP/Docker).
+        Default is True.  Set USE_NATIVE_CONVERTER=N to fall back to the
+        legacy m4b-tool path."""
+        ...
+
+    USE_NATIVE_CONVERTER = _USE_NATIVE_CONVERTER
 
     @env_property(typ=bool, default="pytest" in sys.modules)
     def _TEST(self): ...
@@ -449,15 +428,10 @@ class Config:
 
     BACKUP = _BACKUP
 
-    @env_property(typ=bool, default=False)
-    def _FLATTEN_MULTI_DISC_BOOKS(self): ...
+    @env_property(typ=bool, default=True)
+    def _CRASH_PROTECTION(self): ...
 
-    FLATTEN_MULTI_DISC_BOOKS = _FLATTEN_MULTI_DISC_BOOKS
-
-    @env_property(typ=bool, default=False)
-    def _CONVERT_SERIES(self): ...
-
-    CONVERT_SERIES = _CONVERT_SERIES
+    CRASH_PROTECTION: bool = _CRASH_PROTECTION
 
     @property
     def MAX_LOOPS(self):
@@ -475,12 +449,23 @@ class Config:
 
     @cached_property
     def m4b_tool_version(self):
-        """Runs m4b-tool --version"""
-        return (
-            subprocess.check_output(f"{self.m4b_tool} m4b-tool --version", shell=True)
-            .decode()
-            .strip()
-        )
+        """Returns the converter version string.
+
+        When USE_NATIVE_CONVERTER is True, returns 'm4b-tool-py <version>'
+        without invoking any subprocess.  Otherwise falls back to running the
+        legacy m4b-tool binary/Docker image.
+        """
+        if self.USE_NATIVE_CONVERTER:
+            try:
+                from src import __version__ as _ver  # type: ignore[attr-defined]
+
+                return f"m4b-tool-py {_ver}"
+            except Exception:
+                return "m4b-tool-py (native)"
+        try:
+            return subprocess.check_output(f"{self.m4b_tool} m4b-tool --version", shell=True, stderr=subprocess.DEVNULL).decode().strip()
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            return "m4b-tool (unavailable)"
 
     @cached_property
     def _m4b_tool(self):
@@ -496,7 +481,9 @@ class Config:
         info = f"{self.CPU_CORES} CPU cores / "
         info += f"{self.sleeptime_friendly} sleep / "
         info += f"Max ch. length: {self.max_chapter_length_friendly} / "
-        if self.USE_DOCKER:
+        if self.USE_NATIVE_CONVERTER:
+            info += self.m4b_tool_version
+        elif self.USE_DOCKER:
             info += f"{self.m4b_tool_version} (Docker)"
         else:
             info += f"{self.m4b_tool_version}"
@@ -522,12 +509,26 @@ class Config:
 
     @cached_property
     def USE_DOCKER(self):
-        self.check_m4b_tool()
+        try:
+            self.check_m4b_tool()
+        except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError):
+            self._USE_DOCKER = False
         return self._USE_DOCKER
+
+    @cached_property
+    def META_DIR(self):
+        meta_dir = Path.home() / ".auto-m4b"
+        if not meta_dir.exists():
+            meta_dir.mkdir(parents=True, exist_ok=True)
+        return meta_dir
 
     @cached_property
     def docker_path(self):
         env_path = self.load_path_env("DOCKER_PATH", allow_empty=True)
+        # Discard a configured DOCKER_PATH that doesn't exist on this machine
+        # (e.g. a machine-specific .env.local file loaded on the wrong host).
+        if env_path and not env_path.exists():
+            env_path = None
         return env_path or shutil.which("docker")
 
     @cached_property
@@ -573,6 +574,18 @@ class Config:
     def trash_dir(self):
         return self.working_dir / "trash"
 
+    @property
+    def all_roots(self):
+        return [
+            self.inbox_dir,
+            self.converted_dir,
+            self.archive_dir,
+            self.backup_dir,
+            self.build_dir,
+            self.merge_dir,
+            self.trash_dir,
+        ]
+
     @cached_property
     def GLOBAL_LOG_FILE(self):
         log_file = self.converted_dir / "auto-m4b.log"
@@ -586,7 +599,7 @@ class Config:
         return pid_file
 
     @cached_property
-    def FATAL_FILE(self):
+    def FATAL_FILE(self) -> Path:
         fatal_file = self.tmp_dir / "fatal.log"
         return fatal_file
 
@@ -621,35 +634,77 @@ class Config:
             except AttributeError:
                 pass
 
-    def check_m4b_tool(self):
-        has_native_m4b_tool = bool(shutil.which(self.m4b_tool))
-        if has_native_m4b_tool:
-            return True
-
-        # docker images -q sandreas/m4b-tool:latest
-        has_docker = bool(self.docker_path)
-        docker_exe = self.docker_path or "docker"
-        docker_image_exists = has_docker and bool(
-            subprocess.check_output(
-                [docker_exe, "images", "-q", "sandreas/m4b-tool:latest"],
-                timeout=10,
-            ).strip()
-        )
-        docker_ready = has_docker and docker_image_exists
-        current_version = (
-            (
-                subprocess.check_output(["m4b-tool", "--version"], timeout=10)
-                .decode()
-                .strip()
+    def is_docker_running(self):
+        out = ""
+        if not (d := self.docker_path) or not Path(d).exists():
+            raise FileNotFoundError(
+                f"Could not find 'docker' executable at {d}, please ensure Docker is in your PATH or set DOCKER_PATH to the correct path"
             )
-            if not docker_ready
-            else (
+        docker_exe = self.docker_path or "docker"
+        try:
+            proc = subprocess.run(
+                [docker_exe, "ps"],
+                timeout=2,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            out = proc.stderr.decode() or proc.stdout.decode()
+            if not proc.returncode == 0:
+                raise subprocess.CalledProcessError(proc.returncode, "docker ps", out)
+            return True
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Could not find 'docker' in PATH, please install Docker and try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+            ) from e
+        except subprocess.CalledProcessError:
+            raise RuntimeError(
+                out or "Docker is not running or is not accessible. Make sure Docker is running and try again."
+            )
+
+    def check_m4b_tool(self):
+        if self.USE_NATIVE_CONVERTER:
+            # Native converter needs no PHP/Docker dependency — skip all checks.
+            return
+
+        env_use_docker_raw = os.getenv("USE_DOCKER", self.env.get("USE_DOCKER", ""))
+        # Treat USE_DOCKER=N/No/false/0 as explicitly disabled; empty string
+        # or any truthy string means "enabled or auto-detect".
+        env_use_docker_disabled = str(env_use_docker_raw).strip().lower() in ("n", "no", "false", "0")
+        env_use_docker = bool(env_use_docker_raw) and not env_use_docker_disabled
+        has_native_m4b_tool = bool(shutil.which(self.m4b_tool))
+        docker_ready = False
+        current_version = ""
+        install_script = ""
+        docker_exe = ""
+        if has_native_m4b_tool and not env_use_docker:
+            current_version = subprocess.check_output(["m4b-tool", "--version"], timeout=10).decode().strip()
+
+        elif not env_use_docker_disabled and (has_docker := bool(self.docker_path)):
+            # docker images -q m4b-tool:latest
+            install_script = "./scripts/install-docker-m4b-tool.sh"
+
+            docker_exe = self.docker_path or "docker"
+            if not self.is_docker_running():
+                return
+            docker_image_exists = bool(
+                subprocess.check_output(
+                    [docker_exe, "images", "-q", "m4b-tool:latest"],
+                    timeout=10,
+                ).strip()
+            )
+
+            if not docker_image_exists:
+                raise RuntimeError(
+                    f"Could not find the image 'm4b-tool:latest', run\n\n $ {install_script}\n\nto build the correct version, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+                )
+
+            current_version = (
                 subprocess.check_output(
                     [
                         docker_exe,
                         "run",
                         "--rm",
-                        "sandreas/m4b-tool:latest",
+                        "m4b-tool:latest",
                         "m4b-tool",
                         "--version",
                     ],
@@ -658,13 +713,16 @@ class Config:
                 .decode()
                 .strip()
             )
-        )
-        env_use_docker = bool(
-            os.getenv("USE_DOCKER", self.env.get("USE_DOCKER", False))
-        )
-        install_script = "./scripts/install-docker-m4b-tool.sh"
+            docker_ready = True
 
-        if not re.search(r"v0.5", current_version):
+        # Check for v0.5, -prerelease, or docker build tags like latest-195-g0304329.
+        # Only run when we actually retrieved a version string; an empty string
+        # just means no tool was found/used, which the branches below handle.
+        if current_version and not (
+            re.search(r"v0\.5", current_version)
+            or re.search(r"-prerelease", current_version, re.IGNORECASE)
+            or re.search(r"latest-\d+", current_version)
+        ):
             raise RuntimeError(
                 f"m4b-tool version {current_version} is not supported, please install v0.5-prerelease (if using Docker, run {install_script} to install the correct version)"
             )
@@ -676,6 +734,9 @@ class Config:
             # Set the m4b_tool to the docker image
             # create working_dir if it does not exist
             self.working_dir.mkdir(parents=True, exist_ok=True)
+            escaped_working_dir = str(self.working_dir)
+            if " " in str(self.working_dir):
+                escaped_working_dir = shlex.quote(str(self.working_dir))
             self._m4b_tool = [
                 c
                 for c in [
@@ -686,8 +747,8 @@ class Config:
                     "-u",
                     f"{uid}:{gid}",
                     "-v",
-                    f"{self.working_dir}:/mnt:rw",
-                    "sandreas/m4b-tool:latest",
+                    f"{escaped_working_dir}:/mnt:rw",
+                    "m4b-tool:latest",
                 ]
                 if c
             ]
@@ -704,13 +765,23 @@ class Config:
                 raise RuntimeError(
                     f"Could not find 'docker' in PATH, please install Docker and try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
                 )
-            elif not docker_image_exists:
-                raise RuntimeError(
-                    f"Could not find the image 'sandreas/m4b-tool:latest', run\n\n $ docker pull sandreas/m4b-tool:latest\n  # or\n $ {install_script}\n\nand try again, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+            else:
+                docker_exe = self.docker_path or "docker"
+                if not self.is_docker_running():
+                    return
+                docker_image_exists = bool(
+                    subprocess.check_output(
+                        [docker_exe, "images", "-q", "m4b-tool:latest"],
+                        timeout=10,
+                    ).strip()
                 )
+                if not docker_image_exists:
+                    raise RuntimeError(
+                        f"Could not find the image 'm4b-tool:latest', run\n\n $ {install_script}\n\nto build the correct version, or set USE_DOCKER to N to use the native m4b-tool (if installed)"
+                    )
         else:
             raise RuntimeError(
-                f"Could not find '{self.m4b_tool}' in PATH, please install it and try again (see https://github.com/sandreas/m4b-tool).\nIf you are using Docker, make sure the image 'sandreas/m4b-tool:latest' is available, and you've aliased `m4b-tool` to run the container.\nFor easy Docker setup, run:\n\n$ {install_script}"
+                f"Could not find '{self.m4b_tool}' in PATH, please install it and try again (see https://github.com/sandreas/m4b-tool).\nIf you are using Docker, make sure the image 'm4b-tool:latest' is available (run {install_script} to build it).\nFor easy Docker setup, run:\n\n$ {install_script}"
             )
 
     @contextmanager
@@ -718,11 +789,7 @@ class Config:
         msg = ""
         self._args = args or AutoM4bArgs()
 
-        self.TEST = (
-            self._args.test
-            if self._args.test is not None
-            else (self.TEST or "pytest" in sys.modules)
-        )
+        self.TEST = self._args.test if self._args.test is not None else (self.TEST or "pytest" in sys.modules)
 
         if self.args.env:
             if self._dotenv_src != self.args.env:
@@ -746,9 +813,7 @@ class Config:
         yield "" if quiet else msg
 
     @overload
-    def load_path_env(
-        self, key: str, default: Path, allow_empty: bool = ...
-    ) -> Path: ...
+    def load_path_env(self, key: str, default: Path, allow_empty: bool = ...) -> Path: ...
 
     @overload
     def load_path_env(
@@ -766,15 +831,11 @@ class Config:
         allow_empty: Literal[False] = False,
     ) -> Path: ...
 
-    def load_path_env(
-        self, key: str, default: Path | None = None, allow_empty: bool = True
-    ) -> Path | None:
+    def load_path_env(self, key: str, default: Path | None = None, allow_empty: bool = True) -> Path | None:
         v = self.get_env_var(key, default=default)
         path = Path(v).expanduser() if v else default
         if not path and not allow_empty:
-            raise EnvironmentError(
-                f"{key} is not set, please make sure to set it in a .env file or as an ENV var"
-            )
+            raise EnvironmentError(f"{key} is not set, please make sure to set it in a .env file or as an ENV var")
         return path.resolve() if path else None
 
     @overload

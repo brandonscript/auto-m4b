@@ -7,9 +7,13 @@ from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
-from src.lib.config import AUDIO_EXTS, cfg
-from src.lib.formatters import ensure_dot, friendly_date, human_size
-from src.lib.misc import isorted, sh, try_get_stat_mtime
+from src.lib.config import AUDIO_EXTS
+from src.lib.misc import (
+    flatlist,
+    isorted,
+    sh,
+    try_get_stat_mtime,
+)
 from src.lib.term import (
     print_error,
     print_grey,
@@ -17,10 +21,9 @@ from src.lib.term import (
     print_warning,
 )
 from src.lib.typing import (
+    AudiobookFmt,
     BookHashesDict,
-    BookStructure,
     copy_kwargs_omit_first_arg,
-    InboxDirMap,
     Operation,
     OVERWRITE_MODES,
     OverwriteMode,
@@ -29,19 +32,32 @@ from src.lib.typing import (
 )
 
 if TYPE_CHECKING:
-    from src.lib.audiobook import Audiobook
+    from src.lib.books_tree import BooksTree
+
+    pass
 
 
-@overload
-def find_files_in_dir(
-    d: Path,
-    *,
-    resolve: Literal[False] = False,
-    ignore_files: list[str] = [],
-    only_file_exts: list[str] = [],
-    mindepth: int | None = None,
-    maxdepth: int | None = None,
-) -> list[str]: ...
+def filter_paths_by_depth(
+    paths: Iterable[Path], root: Path, mindepth: int | None = None, maxdepth: int | None = None
+) -> list[Path]:
+    """
+    Parameters:
+    paths (list[Path]): The paths to filter.
+    root (Path): The root path to use for depth calculation.
+    mindepth (int | None, optional): The minimum depth of directories to search. This is 0-based,
+                                        so a mindepth of 0 includes files directly in the base directory.
+                                        Defaults to None, which includes all depths.
+    maxdepth (int | None, optional): The maximum depth of directories to search. This is 0-based,
+                                        so a maxdepth of 0 includes only files directly in the base directory.
+                                        Defaults to None, which includes all depths.
+    """
+
+    def depth(p: Path) -> int:
+        return len(p.parts) - len(root.parts)
+
+    return [
+        p for p in paths if (mindepth is None or depth(p) >= mindepth) and (maxdepth is None or depth(p) <= maxdepth)
+    ]
 
 
 @overload
@@ -49,19 +65,31 @@ def find_files_in_dir(
     d: Path,
     *,
     resolve: Literal[True] = True,
-    ignore_files: list[str] = [],
-    only_file_exts: list[str] = [],
+    ignore_files: list[str] | None = None,
+    only_file_exts: list[str] | None = None,
     mindepth: int | None = None,
     maxdepth: int | None = None,
 ) -> list[Path]: ...
+
+
+@overload
+def find_files_in_dir(
+    d: Path,
+    *,
+    resolve: Literal[False] = False,
+    ignore_files: list[str] | None = None,
+    only_file_exts: list[str] | None = None,
+    mindepth: int | None = None,
+    maxdepth: int | None = None,
+) -> list[str | Path]: ...
 
 
 def find_files_in_dir(  # type: ignore
     d: Path,
     *,
     resolve: bool | None = None,
-    ignore_files: list = [],
-    only_file_exts: list[str] = [],
+    ignore_files: list | None = None,
+    only_file_exts: list[str] | None = None,
     mindepth: int | None = None,
     maxdepth: int | None = None,
 ) -> list[str | Path]:
@@ -73,33 +101,34 @@ def find_files_in_dir(  # type: ignore
     resolve (bool, optional): Whether to resolve to absolute paths. Defaults to False (only returns files relative to the base directory).
     ignore_files (list[str], optional): A list of file names to ignore. Defaults to [].
     only_file_exts (list[str], optional): A list of file extensions to include in the count. Defaults to AUDIO_EXTS.
-    mindepth (int | None, optional): The minimum depth of directories to search. This is 0-based, so a mindepth of 0 includes files directly in the base directory. Defaults to None, which includes all depths.
-    maxdepth (int | None, optional): The maximum depth of directories to search. This is 0-based, so a maxdepth of 0 includes only files directly in the base directory. Defaults to None, which includes all depths.
+    mindepth (int | None, optional): The minimum depth of directories to search.
+    maxdepth (int | None, optional): The maximum depth of directories to search.
 
     Returns:
     list[str | Path]: A list of file names (str) or Path objects (if absolute=True)
     """
+    from src.lib.formatters import ensure_dot
+
+    ignore_files = ignore_files or []
+    only_file_exts = [ensure_dot(ext) for ext in only_file_exts or []]
 
     if d.is_file():
-        raise NotADirectoryError(f"Error: {d} is not a directory")
+        raise NotADirectoryError(f"'find_files_in_dir': {d} is a file, not a directory")
 
-    def depth(p: Path) -> int:
-        return len(p.parts) - len(d.parts)
-
-    return [
-        f if resolve else str(f.relative_to(d))
-        for f in isorted(d.rglob("*"))
-        if all(
-            [
-                f.is_file(),
-                not f.name.startswith("."),
-                f.name not in ignore_files,
-                not only_file_exts or f.suffix in only_file_exts,
-                mindepth is None or depth(f) >= mindepth,
-                maxdepth is None or depth(f) <= maxdepth,
-            ]
-        )
-    ]
+    return isorted(
+        [
+            f if resolve else str(f.relative_to(d))
+            for f in filter_paths_by_depth(d.rglob("*"), d, mindepth, maxdepth)
+            if all(
+                [
+                    f.is_file(),
+                    not f.name.startswith("."),
+                    f.name not in ignore_files,
+                    not only_file_exts or f.suffix in only_file_exts,
+                ]
+            )
+        ]
+    )
 
 
 def count_audio_files_in_dir(
@@ -115,8 +144,8 @@ def count_audio_files_in_dir(
     Parameters:
     d (Path): The base directory to start the search from.
     only_file_exts (list[str], optional): A list of file extensions to include in the count. Defaults to AUDIO_EXTS.
-    mindepth (int | None, optional): The minimum depth of directories to search. This is 0-based, so a mindepth of 0 includes files directly in the base directory. Defaults to None, which includes all depths.
-    maxdepth (int | None, optional): The maximum depth of directories to search. This is 0-based, so a maxdepth of 0 includes only files directly in the base directory. Defaults to None, which includes all depths.
+    mindepth (int | None, optional): The minimum depth of directories to search.
+    maxdepth (int | None, optional): The maximum depth of directories to search.
 
     Returns:
     int: The number of audio files found.
@@ -133,33 +162,18 @@ def count_audio_files_in_dir(
     return len(audio_files)
 
 
-def count_audio_files_in_inbox() -> int:
-    from src.lib.config import cfg
-
-    return count_audio_files_in_dir(cfg.inbox_dir, only_file_exts=cfg.AUDIO_EXTS)
-
-
-def count_standalone_books_in_inbox() -> int:
-    return len(find_standalone_books_in_inbox())
+@overload
+def get_size(path: Path, fmt: Literal["bytes"] = "bytes", only_file_exts: list[str] = []) -> int: ...
 
 
 @overload
-def get_size(
-    path: Path, fmt: Literal["bytes"] = "bytes", only_file_exts: list[str] = []
-) -> int: ...
+def get_size(path: Path, fmt: Literal["human"] = "human", only_file_exts: list[str] = []) -> str: ...
 
 
-@overload
-def get_size(
-    path: Path, fmt: Literal["human"] = "human", only_file_exts: list[str] = []
-) -> str: ...
-
-
-def get_size(
-    path: Path, fmt: SizeFmt = "bytes", only_file_exts: list[str] = []
-) -> str | int:
+def get_size(path: Path, fmt: SizeFmt = "bytes", only_file_exts: list[str] = []) -> str | int:
     # takes a file or directory and returns the size in either bytes or human readable format, only counting audio files
     # if no path specified, assume current directory
+    from src.lib.formatters import human_size
 
     if not path.exists():
         raise FileNotFoundError(f"Cannot get size, '{path}' does not exist")
@@ -167,7 +181,7 @@ def get_size(
     def file_ext_ok(f: Path) -> bool:
         return f.suffix in only_file_exts if only_file_exts else True
 
-    size: int
+    size: int = -1
 
     # if path is a file, return its size
     if path.is_file():
@@ -175,12 +189,14 @@ def get_size(
             raise ValueError(f"File {path} is not an audio file")
         size = path.stat().st_size
     elif path.is_dir():
-        size = sum(
-            f.stat().st_size
-            for f in path.glob("**/*")
-            if f.is_file() and file_ext_ok(f)
-        )
+        size = sum(f.stat().st_size for f in path.glob("**/*") if f.is_file() and file_ext_ok(f))
     return human_size(size) if fmt == "human" else size
+
+
+def sizes_match(path1: Path, path2: Path) -> bool | None:
+    if not path1.is_file() or not path2.is_file():
+        return None
+    return get_size(path1) == get_size(path2)
 
 
 @overload
@@ -204,9 +220,7 @@ def is_ok_to_delete(
     src_dir_size = get_size(path, fmt="bytes")
 
     if ignore_hidden:
-        files = [
-            f for f in path.rglob("*") if f.is_file() and not f.name.startswith(".")
-        ]
+        files = [f for f in path.rglob("*") if f.is_file() and not f.name.startswith(".")]
 
     else:
         files = [f for f in path.rglob("*") if f.is_file()]
@@ -250,9 +264,7 @@ def check_src_dst(
         raise NotADirectoryError(f"Destination parent dir {dst.parent} does not exist")
 
     if dst_type == "file" and dst.is_file() and overwrite_mode == "skip":
-        raise FileExistsError(
-            f"Destination file {dst} already exists and overwrite mode is 'skip'"
-        )
+        raise FileExistsError(f"Destination file {dst} already exists and overwrite mode is 'skip'")
 
     return True
 
@@ -261,29 +273,21 @@ def src_and_dst_are_on_same_partition(src: Path, dst: Path) -> bool:
     return src.stat().st_dev == dst.stat().st_dev
 
 
-def rm_dir(
-    dir_path: Path, ignore_errors: bool = False, even_if_not_empty: bool = False
-):
+def rm_dir(dir_path: Path, ignore_errors: bool = False, even_if_not_empty: bool = False):
     # Remove the directory and handle errors
     if not dir_path.is_dir():
         return
     if not is_ok_to_delete(dir_path) and not even_if_not_empty:
         if ignore_errors:
             return
-        raise OSError(
-            f"Unable to delete {dir_path}, please delete it manually and try again"
-        )
+        raise OSError(f"Unable to delete {dir_path}, please delete it manually and try again")
     shutil.rmtree(dir_path, ignore_errors=True)
 
 
 def rm_all_empty_dirs(dir_path: Path):
     # Recursively remove all empty directories in the current directory, using ok_to_del
     for current_dir in dir_path.glob("**"):
-        if (
-            current_dir.is_dir()
-            and not any(current_dir.iterdir())
-            and is_ok_to_delete(current_dir)
-        ):
+        if current_dir.is_dir() and not any(current_dir.iterdir()) and is_ok_to_delete(current_dir):
             rm_dir(current_dir, ignore_errors=True)
 
 
@@ -343,10 +347,14 @@ def _mv_or_cp_dir_contents(
     if not check_src_dst(src_dir, "dir", dst_dir, "dir", overwrite_mode):
         raise FileNotFoundError("Source or destination directory does not exist")
 
+    if not any(src_dir.iterdir()):
+        # print_notice(f"No files found in {src_dir}, skipping")
+        return
+
     # Check for files that may require overwriting
-    files_common_to_both = set(
-        find_files_in_dir(src_dir, ignore_files=ignore_files)
-    ) & set(find_files_in_dir(dst_dir, ignore_files=ignore_files))
+    files_common_to_both = set(find_files_in_dir(src_dir, ignore_files=ignore_files)) & set(
+        find_files_in_dir(dst_dir, ignore_files=ignore_files)
+    )
 
     # remove files that are in silent_files from files_common_to_both
     files_common_to_both = [f for f in files_common_to_both if f not in silent_files]
@@ -355,16 +363,10 @@ def _mv_or_cp_dir_contents(
         if overwrite_mode == "overwrite":
             print_warning(f"Warning: Some files in {dst_dir} will be overwritten:")
         else:
-            print_error(
-                f"Error: Some files already exist in {dst_dir} and will not be {verbed}:"
-            )
+            print_error(f"Error: Some files already exist in {dst_dir} and will not be {verbed}:")
 
         for file in files_common_to_both:
             print_grey(f"     - {file}")
-
-    if not any(src_dir.iterdir()):
-        # print_notice(f"No files found in {src_dir}, skipping")
-        return
 
     def ok_to_mv_or_cp(src_file: Path, dst_file: Path) -> bool:
 
@@ -382,7 +384,11 @@ def _mv_or_cp_dir_contents(
 
     files_not_verbed = []
 
-    for src_file in src_dir.glob("*"):
+    src_paths = list(src_dir.glob("*"))
+
+    for src_file in src_paths:
+
+        src_rel_path = src_file.relative_to(src_dir)
         if src_file.is_dir():
             _mv_or_cp_dir_contents(
                 operation,
@@ -392,14 +398,17 @@ def _mv_or_cp_dir_contents(
                 ignore_files=ignore_files,
                 only_file_exts=only_file_exts,
             )
-        dst_file = dst_dir / src_file.name
-        if ok_to_mv_or_cp(src_file, dst_file):
-            if operation == "copy":
-                shutil.copy2(src_file, dst_file)
-            elif operation == "move":
-                shutil.move(src_file, dst_file)
-            if not dst_file.is_file():
-                files_not_verbed.append(src_file)
+        else:
+            dst_file = dst_dir / src_rel_path
+            if str(src_rel_path) in files_common_to_both or sizes_match(src_file, dst_file):
+                continue
+            if ok_to_mv_or_cp(src_file, dst_file):
+                if operation == "copy":
+                    shutil.copy2(src_file, dst_file)
+                elif operation == "move":
+                    shutil.move(src_file, dst_file)
+                if not dst_file.is_file():
+                    files_not_verbed.append(src_file)
 
     # files_not_in_right = set(find_files(src_dir, ignore_files)) - set(
     #     find_files(dst_dir, ignore_files)
@@ -415,17 +424,11 @@ def _mv_or_cp_dir_contents(
             raise FileNotFoundError(err)
 
     # Remove the source directory if empty and conditions permit, if moving
-    if (
-        rm_empty_src_dir
-        and operation == "move"
-        and is_ok_to_delete(src_dir, only_file_exts=only_file_exts)
-    ):
+    if rm_empty_src_dir and operation == "move" and is_ok_to_delete(src_dir, only_file_exts=only_file_exts):
         try:
             rm_dir(src_dir)
         except OSError:
-            print_warning(
-                f"Warning: {src_dir} was not deleted after {verbing} files because it is not empty"
-            )
+            print_warning(f"Warning: {src_dir} was not deleted after {verbing} files because it is not empty")
 
 
 @copy_kwargs_omit_first_arg(_mv_or_cp_dir_contents)
@@ -478,11 +481,15 @@ def _mv_or_copy_dir(
 
 @copy_kwargs_omit_first_arg(_mv_or_copy_dir)
 def mv_dir(*args, **kwargs):
+    """Moves a directory into the destination dir, creating the destination directory if it does not
+    exist. For example, mv_dir('/path/to/src', '/path/to_other/dst') will result in /path/to_other/dst/src."""
     _mv_or_copy_dir("move", *args, **kwargs)
 
 
 @copy_kwargs_omit_first_arg(_mv_or_copy_dir)
 def cp_dir(*args, **kwargs):
+    """Copies a directory into the destination dir, creating the destination directory if it does not
+    exist. For example, cp_dir('/path/to/src', '/path/to_other/dst') will result in /path/to_other/dst/src."""
     _mv_or_copy_dir("copy", *args, **kwargs)
 
 
@@ -496,19 +503,17 @@ def rename_dir(dir_path: Path, new_name: str | Path, ignore_errors: bool = False
         if ignore_errors:
             return
         raise e
-    if dst.exists() and (dst.is_file() or not dir_is_empty_ignoring_hidden_files(dst)):
+    if dst.exists() and (dst.is_file() or not dir_is_empty_ignoring_files(dst)):
         if ignore_errors:
             return
         raise FileExistsError(
             f"{dir_path} cannot be renamed to {new_name}, a file or folder with that name already exists"
         )
 
-    _mv_or_cp_dir_contents(
-        "move", dir_path, dst, overwrite_mode="skip", keep_src_dir=False
-    )
+    _mv_or_cp_dir_contents("move", dir_path, dst, overwrite_mode="skip", keep_src_dir=False)
 
 
-def mv_file_to_dir(
+def mv_file_into_dir(
     source_file: Path,
     dst_dir: Path,
     *,
@@ -517,26 +522,23 @@ def mv_file_to_dir(
 ) -> None:
     check_src_dst(source_file, "file", dst_dir, "dir", overwrite_mode)
 
-    dst_file = (
-        dst_dir / source_file.name if new_filename is None else dst_dir / new_filename
-    )
+    dst_file = dst_dir / source_file.name if new_filename is None else dst_dir / new_filename
+    str_overwrite_mode = str(overwrite_mode)
 
     if dst_file.exists():
-        if overwrite_mode == "skip":
-            raise FileExistsError(
-                f"Destination file '{dst_file}' already exists and overwrite mode is 'skip'"
-            )
-        elif overwrite_mode != "overwrite-silent":
-            print_warning(
-                f"Warning: '{dst_file}' already exists and will be overwritten"
-            )
+        if "skip" in str_overwrite_mode:
+            if not "silent" in str_overwrite_mode:
+                raise FileExistsError(f"Destination file '{dst_file}' already exists and overwrite mode is 'skip'")
+            return
+        elif not "silent" in str_overwrite_mode:
+            print_warning(f"Warning: '{dst_file}' already exists and will be overwritten")
         dst_file.unlink(missing_ok=True)
 
     # Move the file
     shutil.move(source_file, dst_file)
 
 
-def cp_file_to_dir(
+def cp_file_into_dir(
     source_file: Path,
     dst_dir: Path,
     new_filename: str | None = None,
@@ -546,13 +548,15 @@ def cp_file_to_dir(
     check_src_dst(source_file, "file", dst_dir, "dir", overwrite_mode)
 
     dst_file = dst_dir / new_filename if new_filename else dst_dir / source_file.name
+    str_overwrite_mode = str(overwrite_mode)
 
-    if dst_file.is_file() and overwrite_mode == "skip":
-        raise FileExistsError(
-            f"Destination file {dst_file} already exists and overwrite mode is 'skip'"
-        )
-    if dst_file.is_file() and overwrite_mode != "overwrite-silent":
-        print_warning(f"Warning: {dst_file} already exists and will be overwritten")
+    if dst_file.is_file():
+        if "skip" in str_overwrite_mode:
+            if not "silent" in str_overwrite_mode:
+                raise FileExistsError(f"Destination file {dst_file} already exists and overwrite mode is 'skip'")
+            return
+        elif not "silent" in str_overwrite_mode:
+            print_warning(f"Warning: {dst_file} already exists and will be overwritten")
 
     # Copy the file
     shutil.copy2(source_file, dst_dir)
@@ -562,7 +566,7 @@ def cp_file_to_dir(
         shutil.move(dst_dir / source_file.name, dst_file)
 
 
-def dir_is_empty_ignoring_hidden_files(d: Path) -> bool:
+def dir_is_empty_ignoring_files(d: Path) -> bool:
     if not d.is_dir():
         return True
     return not any(filter_ignored(f for f in d.iterdir() if not f.name.startswith(".")))
@@ -579,7 +583,7 @@ def flatten_files_in_dir(
         raise NotADirectoryError(f"Error: {path} is not a directory")
 
     # if path is a dir, get all files in the dir and its subdirs
-    files = [f for f in filter_ignored(isorted(path.rglob("*"))) if f.is_file()]
+    files = [f for f in filter_ignored(list(isorted(path.rglob("*")))) if f.is_file()]
     new_files = []
     for f in files:
         new_files.append(path / f.name)
@@ -587,9 +591,7 @@ def flatten_files_in_dir(
             # if file would overwrite an existing file, raise or skip
             if (path / f.name).exists():
                 if on_conflict == "raise":
-                    raise FileExistsError(
-                        f"Error: {path / f.name} already exists in the directory"
-                    )
+                    raise FileExistsError(f"Error: {path / f.name} already exists in the directory")
                 elif on_conflict == "skip":
                     continue
             shutil.move(f, path / f.name)
@@ -597,7 +599,7 @@ def flatten_files_in_dir(
     # remove the subdirs
     if not preview:
         for d in path.rglob("*"):
-            if d.is_dir() and dir_is_empty_ignoring_hidden_files(d):
+            if d.is_dir() and dir_is_empty_ignoring_files(d):
                 shutil.rmtree(d, ignore_errors=True)
 
     return new_files
@@ -606,9 +608,7 @@ def flatten_files_in_dir(
 def flattening_files_in_dir_affects_order(path: Path) -> bool:
     """Compares the order of files in a directory, both before and after flattening, by checking if the file names are in the same order."""
 
-    files_flat = [
-        f.name for f in filter_ignored(flatten_files_in_dir(path, preview=True))
-    ]
+    files_flat = [f.name for f in filter_ignored(flatten_files_in_dir(path, preview=True))]
     files_flat_sorted = isorted(list(set(files_flat)))
     if len(files_flat) != len(files_flat_sorted):
         return True
@@ -628,230 +628,90 @@ def name_matches(name: Any, match_filter: str | None = None) -> bool:
     return re.search(match_filter, str(name), re.I) is not None
 
 
-def find_base_dirs_with_audio_files(
-    root: Path,
-    mindepth: int | None = None,
-    maxdepth: int | None = None,
+@overload
+def try_relative_to(p: str, root: str) -> str | None: ...
+
+
+@overload
+def try_relative_to(p: Path, root: Path) -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: str, root: Path) -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: Path, root: str) -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: "BooksTree", root: "BooksTree") -> str | Path | None: ...
+
+
+@overload
+def try_relative_to(p: str, root: "BooksTree") -> Path | None: ...
+
+
+@overload
+def try_relative_to(p: Path, root: "BooksTree") -> Path | None: ...
+
+
+def try_relative_to(p: "str | Path | BooksTree", root: "str | Path | BooksTree") -> str | Path | None:
+    from src.lib.books_tree import BooksTree
+
+    try:
+        _p = p.path if isinstance(p, BooksTree) else Path(p)
+        _root = root.path if isinstance(root, BooksTree) else Path(root)
+        rel = _p.relative_to(_root)
+        if isinstance(_p, str) and isinstance(rel, Path):
+            return str(rel)
+        return cast(Path, rel)
+    except ValueError:
+        return None
+
+
+def find_audio_files_in_dir(
+    d: Path,
     ignore_errors: bool = False,
+    only_file_exts: list[str] = [],
 ) -> list[Path]:
-    """Given a root directory, returns a list of all base directories that contain audio files. E.g.,
-    if the root directory is '/path/to' and contains:
-    - /path/to/folder1/file1
-    - /path/to/folder1/folder2/file2
-    - /path/to/folder1/folder2/file3
-    - /path/to/folder1/folder2/file4
-    - /path/to/folder2/file1
-    - /path/to/folder2/file2
-    - /path/to/folder2/folder3/file3
+    """Given a path, returns a list of audio files immediately within the directory (does not search subdirectories)."""
 
-    then the return value will be:
-    - /path/to/folder1
-    - /path/to/folder2
-    """
-
-    if not root.is_dir():
+    if not d.is_dir():
         if ignore_errors:
             return []
-        raise NotADirectoryError(f"Error: {root} is not a directory")
+        raise NotADirectoryError(f"Error: {d} is not a directory")
+
+    return only_audio_files(filter_ignored(isorted(d.glob("*"))))
+
+
+def is_valid_dir(root: Path, d: Path, mindepth: int | None = None, maxdepth: int | None = None) -> bool:
+    """Checks if a directory is valid based on the specified conditions."""
 
     def depth(p: Path) -> int:
         return len(p.parts) - len(root.parts)
 
-    def is_valid_dir(_d: Path) -> bool:
-        return _d.is_dir() and all(
-            [
-                count_audio_files_in_dir(_d, mindepth=0, maxdepth=1) > 0,
-                mindepth is None or depth(_d) >= mindepth,
-                maxdepth is None or depth(_d) <= maxdepth,
-            ]
-        )
-
-    all_roots_with_audio_files = list(
-        set(
-            [
-                root / d.relative_to(root).parts[0]
-                for d in root.rglob("*")
-                if is_valid_dir(d)
-            ]
-        )
-    )
-
-    return list(isorted(all_roots_with_audio_files))
-
-
-def find_book_dirs_in_inbox(
-    exclude_series_parents: bool = False, only_series_parents: bool = False
-):
-    from src.lib.config import cfg
-
-    if all([only_series_parents, exclude_series_parents]):
-        raise ValueError(
-            "`exclude_series_parents` and `only_series_parents` cannot both be True"
-        )
-
-    book_dirs = find_base_dirs_with_audio_files(cfg.inbox_dir, mindepth=1)
-
-    if not cfg.CONVERT_SERIES:
-        return [] if only_series_parents else book_dirs
-
-    books_info = [(d, *find_book_audio_files(d)) for d in book_dirs]
-    # look in each book dir to see if it is maybe a multi-book series
-    for path, structure, _ in books_info.copy():
-        if structure == "multi_book_series":
-            if only_series_parents:
-                continue
-            parent_idx = book_dirs.index(path)
-            series_book_dirs = find_base_dirs_with_audio_files(path, mindepth=1)
-            # splice the series book dirs into the main list
-            book_dirs[parent_idx + 1 : parent_idx + 1] = series_book_dirs
-            if exclude_series_parents:
-                book_dirs.remove(path)
-        elif only_series_parents:
-            book_dirs.remove(path)
-
-    return book_dirs
-
-
-def find_book_dirs_for_series(parent_dir: Path):
-
-    return find_base_dirs_with_audio_files(parent_dir, mindepth=1)
-
-
-def find_standalone_books_in_inbox():
-    return isorted(
+    return d.is_dir() and all(
         [
-            file
-            for ext in AUDIO_EXTS
-            for file in cfg.inbox_dir.glob(f"*{ext}")
-            if len(file.relative_to(cfg.inbox_dir).parts) == 1
+            count_audio_files_in_dir(d, mindepth=0, maxdepth=1) > 0,
+            mindepth is None or depth(d) >= mindepth,
+            maxdepth is None or depth(d) <= maxdepth,
         ]
     )
 
 
-def find_adjacent_files_with_same_basename(
-    path: Path, only_file_exts: list[str] = []
-) -> list[Path]:
+def find_book_dirs_for_series(parent_dir: "BooksTree"):
+
+    return parent_dir.books
+
+
+def find_adjacent_files_with_same_basename(path: Path, only_file_exts: list[str] = []) -> list[Path]:
     return isorted(
         [
             f
             for f in path.parent.glob(f"{path.stem}.*")
             if f.is_file() and (not only_file_exts or f.suffix in only_file_exts)
         ]
-    )
-
-
-def find_books_in_inbox():
-
-    return isorted(find_book_dirs_in_inbox() + find_standalone_books_in_inbox())
-
-
-def find_book_audio_files(
-    book: "Audiobook | Path",
-) -> tuple[BookStructure, InboxDirMap]:
-    """Given a book directory, returns a tuple of the book's directory structure type, and a map of the book's audio files."""
-    from src.lib.config import cfg
-    from src.lib.parsers import (
-        is_maybe_multi_book_or_series,
-        is_maybe_multi_disc,
-        is_maybe_multi_part,
-    )
-
-    path = book if isinstance(book, Path) else book.inbox_dir
-
-    if path.is_file():
-        return ("standalone", [(path,)])
-
-    all_audio_files = find_files_in_dir(
-        path, resolve=True, only_file_exts=cfg.AUDIO_EXTS
-    )
-    root_audio_files = [f for f in all_audio_files if f.parent == path]
-
-    if not all_audio_files:
-        return ("empty", [])
-
-    if len(all_audio_files) == 1:
-        return ("single", [(all_audio_files[0],)])
-
-    root_audio_files_tuples: InboxDirMap = [(f,) for f in root_audio_files]
-
-    if len(root_audio_files) == len(all_audio_files):
-        return ("flat", root_audio_files_tuples)
-
-    # generate a dictionary of nested audio files keyed by the directory they're in
-    nested_audio_files_dict = {
-        d: [f for f in all_audio_files if f.parent == d]
-        for d in [f.parent for f in all_audio_files]
-        if d != path and d.is_dir()
-    }
-
-    nested_audio_dirs = nested_audio_files_dict.keys()
-
-    if not root_audio_files and len(nested_audio_files_dict) == 1:
-        first_nested_dir = next(iter(nested_audio_dirs))
-        return (
-            "flat_nested",
-            [
-                (
-                    first_nested_dir,
-                    nested_audio_files_dict[first_nested_dir],
-                )
-            ],
-        )
-
-    # if audio files exist in more than one level, return the structure as "multi_mixed"
-    number_of_different_levels = len(
-        set([len(f.relative_to(path).parts) for f in all_audio_files])
-    )
-    if number_of_different_levels > 1:
-        nested_dirs_tuples: InboxDirMap = [
-            (d, nested_audio_files_dict[d]) for d in nested_audio_files_dict
-        ]
-        return (
-            "multi_mixed",
-            cast(InboxDirMap, root_audio_files_tuples + nested_dirs_tuples),
-        )
-
-    multi_disc = any(is_maybe_multi_disc(d.name) for d in nested_audio_dirs)
-    multi_part = any(is_maybe_multi_part(d.name) for d in nested_audio_dirs)
-    book_series = False
-
-    if not multi_disc and not multi_part:
-        if not (
-            book_series := any(
-                is_maybe_multi_book_or_series(d.name) for d in nested_audio_dirs
-            )
-        ):
-            nested_basenames = [
-                str(d.relative_to(cfg.inbox_dir)) for d in nested_audio_dirs
-            ]
-            if any("series" in str(d).lower() for d in nested_basenames):
-                book_series = any(
-                    is_maybe_multi_book_or_series(b) for b in nested_basenames
-                )
-
-    file_map = [
-        *[(f,) for f in root_audio_files],
-        *[
-            (d, find_files_in_dir(d, resolve=True, only_file_exts=cfg.AUDIO_EXTS))
-            for d in nested_audio_dirs
-        ],
-    ]
-
-    struc: BookStructure
-    if book_series:
-        struc = "multi_book_series"
-    elif multi_disc:
-        struc = "multi_disc"
-    elif multi_part:
-        struc = "multi_part"
-    elif len(nested_audio_dirs) > 0 and number_of_different_levels == 1:
-        struc = "multi_nested"
-    else:
-        struc = "multi_mixed"
-
-    return (
-        struc,
-        file_map,
     )
 
 
@@ -876,15 +736,11 @@ def clean_dir(dir_path: Path) -> None:
 
     # Check if the directory is writable
     if not os.access(dir_path, os.W_OK):
-        raise PermissionError(
-            f"'{dir_path}' is not writable by current user, please fix permissions and try again"
-        )
+        raise PermissionError(f"'{dir_path}' is not writable by current user, please fix permissions and try again")
 
     # Check if the directory is empty
     if any(filter_ignored(dir_path.iterdir())):
-        raise OSError(
-            f"'{dir_path}' is not empty, please empty it manually and try again"
-        )
+        raise OSError(f"'{dir_path}' is not empty, please empty it manually and try again")
 
 
 def clean_dirs(dirs: list[Path]) -> None:
@@ -892,56 +748,83 @@ def clean_dirs(dirs: list[Path]) -> None:
         clean_dir(d)
 
 
-def rm_dirs(
-    dirs: list[Path], ignore_errors: bool = False, even_if_not_empty: bool = True
-) -> None:
+def rm_dirs(dirs: list[Path], ignore_errors: bool = False, even_if_not_empty: bool = True) -> None:
     for d in dirs:
         rm_dir(d, ignore_errors, even_if_not_empty)
 
 
 @overload
 def find_first_audio_file(
-    path: Path, ext: str | None = None, ignore_errors: Literal[False] = False
+    path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: Literal[False] = False
 ) -> Path: ...
+
+
 @overload
 def find_first_audio_file(
-    path: Path, ext: str | None = None, ignore_errors: Literal[True] = True
+    path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: Literal[True] = True
 ) -> Path | None: ...
 
 
+@overload
 def find_first_audio_file(
-    path: Path, ext: str | None = None, ignore_errors: bool = False
-) -> Path | None:
+    path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: bool = True
+) -> Path | None: ...
 
-    exts = [ensure_dot(ext)] if ext else AUDIO_EXTS
-    if path.is_file() and path.suffix in exts:
+
+def find_first_audio_file(path: Path, *, ext: AudiobookFmt | None = None, ignore_errors: bool = False) -> Path | None:
+    from src.lib.formatters import strip_dot
+
+    if path.is_file():
         return path
 
-    audio_files = find_files_in_dir(path, resolve=True, only_file_exts=exts)
-
-    if audio_file := next(iter(sorted(audio_files)), None):
-        return audio_file
-    if not ignore_errors:
-        raise FileNotFoundError(f"No audio files found in {path}")
-    return None
-
-
-def find_next_audio_file(current_file: Path) -> Path | None:
-
-    # if path is a file, get its parent dir or use the parent dir of the current file
-    parent = current_file.parent if current_file.is_file() else current_file
-
-    audio_files = find_files_in_dir(
-        parent,
-        resolve=True,
-        ignore_files=[current_file.name],
-        only_file_exts=AUDIO_EXTS,
-    )
-
-    if not audio_files:
+    if not path.exists():
+        if not ignore_errors:
+            raise FileNotFoundError(f"Directory '{path}' does not exist")
         return None
 
-    return find_first_audio_file(audio_files[0])
+    files = find_files_in_dir(path, resolve=True, only_file_exts=[ext] if ext else AUDIO_EXTS)
+
+    if not files:
+        if not ignore_errors:
+            err = f"No audio files found in '{path}'"
+            if fmt := strip_dot(ext) if ext else None:
+                err += f" with extension '{fmt}'"
+            raise FileNotFoundError(err)
+        return None
+
+    return files[0]
+
+
+def find_next_audio_file(
+    path: Path, *, first: Path | None, ext: AudiobookFmt | None = None, ignore_errors: bool = False
+) -> Path | None:
+    from src.lib.formatters import strip_dot
+
+    if path.is_file():
+        return None
+
+    if not path.exists():
+        if not ignore_errors:
+            raise FileNotFoundError(f"Directory '{path}' does not exist")
+        return None
+
+    err = f"No more audio files found in '{path}'"
+    if fmt := strip_dot(ext) if ext else None:
+        err += f" with extension '{fmt}'"
+    if not (first := first or find_first_audio_file(path, ext=ext, ignore_errors=ignore_errors)):
+        if not ignore_errors:
+            raise FileNotFoundError(err)
+        return None
+    files = find_files_in_dir(path, resolve=True, only_file_exts=[ext] if ext else AUDIO_EXTS)
+    try:
+        next_file = next(iter(files[files.index(first) + 1 :]), None)
+        if not next_file and not ignore_errors:
+            raise FileNotFoundError(err)
+        return next_file
+    except IndexError:
+        if not ignore_errors:
+            raise FileNotFoundError(err)
+        return None
 
 
 def find_cover_art_file(path: Path) -> Path | None:
@@ -949,9 +832,7 @@ def find_cover_art_file(path: Path) -> Path | None:
     all_images_in_dir = [f for f in path.rglob("*") if f.suffix in supported_image_exts]
 
     # if any of the images match *cover* or *folder*, return it
-    img = next(
-        (i for i in all_images_in_dir if i.name.lower() in ["cover", "folder"]), None
-    )
+    img = next((i for i in all_images_in_dir if i.name.lower() in ["cover", "folder"]), None)
 
     # otherwise, find the biggest image
     if not img and all_images_in_dir:
@@ -965,23 +846,31 @@ def find_cover_art_file(path: Path) -> Path | None:
 
 
 def filter_ignored(
-    paths: Iterable[Path | None] | Generator[Path, Any, Any],
+    paths: list[Path | None] | Iterable[Path | None] | Generator[Path, Any, Any],
 ) -> list[Path]:
     from src.lib.config import cfg
 
-    paths = [p for p in paths if p]
+    paths = [p for p in flatlist(paths) if p and isinstance(p, Path)]
 
-    return [
-        p
-        for p in paths
-        if not any(fnmatch.filter([str(p.name)], ignore) for ignore in cfg.IGNORE_FILES)
-    ]
+    return [p for p in paths if not any(fnmatch.filter([str(p.name)], ignore) for ignore in cfg.IGNORE_FILES)]
+
+
+def is_audio_file(file: str | Path) -> bool:
+    from src.lib.formatters import ensure_dot
+
+    return ensure_dot(Path(file).suffix.lower()) in AUDIO_EXTS
+
+
+def is_audio_ext(ext: str) -> bool:
+    from src.lib.formatters import ensure_dot
+
+    return ensure_dot(ext.lower()) in AUDIO_EXTS
 
 
 def only_audio_files(path_or_paths: Path | Iterable[Path] | Iterable[str]):
     # make iterable if not already
     paths = [path_or_paths] if isinstance(path_or_paths, (str, Path)) else path_or_paths
-    return [p for p in map(Path, paths) if p.suffix in AUDIO_EXTS]
+    return [p for p in map(Path, paths) if is_audio_file(p)]
 
 
 def find_recently_modified_files_and_dirs(
@@ -1044,6 +933,7 @@ def inbox_last_updated_at(friendly: Literal[True]) -> str: ...
 
 def inbox_last_updated_at(friendly: bool = False) -> float | str:
     from src.lib.config import cfg
+    from src.lib.formatters import friendly_date
 
     last_update = last_updated_at(cfg.inbox_dir, only_file_exts=cfg.AUDIO_EXTS)
     return friendly_date(last_update) if friendly else last_update
@@ -1070,23 +960,17 @@ def was_recently_modified(
             return False
         return mtime
 
-    recents = find_recently_modified_files_and_dirs(
-        path, within_seconds, since=since, only_file_exts=only_file_exts
-    )
+    recents = find_recently_modified_files_and_dirs(path, within_seconds, since=since, only_file_exts=only_file_exts)
     return bool(mtime or recents)
 
 
 def inbox_was_recently_modified(within_seconds: float = 0) -> bool:
     from src.lib.config import cfg
 
-    return was_recently_modified(
-        cfg.inbox_dir, within_seconds=within_seconds, only_file_exts=cfg.AUDIO_EXTS
-    )
+    return was_recently_modified(cfg.inbox_dir, within_seconds=within_seconds, only_file_exts=cfg.AUDIO_EXTS)
 
 
-def hash_path(
-    path: Path, *, only_file_exts: list[str] = [], debug: bool = False, n: int = 8
-) -> str:
+def hash_path(path: Path, *, only_file_exts: list[str] = [], debug: bool = False, n: int = 8) -> str:
     """Makes a has of the dir's contents of filenames and file sizes in an array, sorted by filename
     then hashes the array"""
     import hashlib
@@ -1109,9 +993,7 @@ def hash_path(
     if path.is_file():
         return hash_raw(make_hashable(path))
 
-    files = isorted(
-        filter(None, [make_hashable(f) for f in filter_ignored(path.rglob("*"))])
-    )
+    files = isorted(list(filter(None, [make_hashable(f) for f in filter_ignored(path.rglob("*"))])))
     if debug:
         return files  # type: ignore
     return hash_raw(*files)
@@ -1143,9 +1025,7 @@ FlatListOfFilesInDir = NamedTuple(
 )
 
 
-def get_flat_list_of_files_in_dir(
-    path: Path, only_file_exts: list[str] = []
-) -> tuple[list[Path], list[Path], bool]:
+def get_flat_list_of_files_in_dir(path: Path, only_file_exts: list[str] = []) -> tuple[list[Path], list[Path], bool]:
     """Takes a path of all nested files and returns a flat list of all files relative to the path. E.g.,
     if the path contains:
     - /path/to/folder/file1
@@ -1204,3 +1084,29 @@ def compare_dirs_by_files(dir1: Path, dir2: Path) -> list[tuple[Path, int, Path,
             mapped_files.append((f1, s1, None, 0))
 
     return mapped_files
+
+
+def find_root_from_path(path: Path):
+    from src.lib.config import cfg
+
+    # loop through cfg.all_roots and see if path is relative to any of them. If it is, return the root
+    for root in cfg.all_roots:
+        if try_relative_to(path, root):
+            return root
+    return None
+
+
+def filter_depth(
+    p: Path,
+    root: Path,
+    *,
+    mindepth: int | None = None,
+    maxdepth: int | None = None,
+    offset: int = 0,
+) -> bool:
+    return (
+        root
+        and p
+        and (mindepth is None or len(p.relative_to(root).parts) + offset >= mindepth)
+        and (maxdepth is None or len(p.relative_to(root).parts) + offset <= maxdepth)
+    )

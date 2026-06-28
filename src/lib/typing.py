@@ -1,7 +1,16 @@
 import functools
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Any, cast, Concatenate, Literal, NamedTuple, ParamSpec, TypeVar
+from typing import (
+    Any,
+    cast,
+    Concatenate,
+    Literal,
+    NamedTuple,
+    Optional,
+    ParamSpec,
+    TypeVar,
+)
 
 import numpy as np
 
@@ -15,9 +24,7 @@ OVERWRITE_MODES = ["skip", "skip-silent", "overwrite", "overwrite-silent"]
 PathType = Literal["dir", "file"]
 SizeFmt = Literal["bytes", "human"]
 DurationFmt = Literal["seconds", "human"]
-DirName = Literal[
-    "inbox", "converted", "archive", "fix", "backup", "build", "merge", "trash"
-]
+DirName = Literal["inbox", "converted", "archive", "fix", "backup", "build", "merge", "trash"]
 FailedBooksDict = dict[str, float]
 BookHashesDict = dict[str, str]
 BookStructure = Literal[
@@ -27,11 +34,30 @@ BookStructure = Literal[
     "multi_part",  # audio files are in multiple subdirectories, appears to be multiple parts of a single book or series
     "multi_book_series",  # audio files are in multiple subdirectories, appears to be multiple books in a series
     "multi_nested",  # audio files are in multiple subdirectories, but can't determine if multi-series or multi-disc
-    "multi_mixed",  # audio files are in the root dir and subdirectories, but can't determine if multi-series or multi-disc
-    "standalone",  # a standalone audio file in the root/top-level directory
+    "mixed",  # audio files are in the root dir and subdirectories, but can't determine if multi-series or multi-disc
+    "standalone_file",  # a standalone audio file in the root/top-level directory
     "single",  # a single audio file in a subdirectory
     "empty",  # no audio files found
 ]
+
+BookStructure2 = Literal[
+    "_root_",  # the root directory
+    "standalone_file",  # a standalone audio file in the root/top-level directory or a container with multiple unrelated (and large) audio files
+    "single",  # a directory with a single audio file (which is probably a standalone_file)
+    "flat",  # a directory with only audio files in it, no subdirectories
+    "flatish",  # like a flat directory, but slightly messy (i.e., some files may be in a subdir, but can be flattened)
+    "multi_disc",  # a directory containing audio files from one disc of a multi-disc book; its parent must be a multi_parent
+    "multi_part",  # nearly identical to multi_disc, but labeled as parts instead of discs
+    "multi_parent",  # a directory with subdirectories, each containing audio files that are part of a single book; its children must be multi_disc or multi_part
+    "series_book",  # a directory with audio files that are part of a series of individual books; its parent must be a series_parent
+    "series_parent",  # a directory with subdirectories, each containing audio files that are part of a series of individual books
+    "mixed",  # a directory with audio files in the root dir and subdirectories, but can't determine if multi-series, multi-disc, or a container
+    "nested",  # a directory with audio files whose parent contains no other files or folders, but is not the root
+    "empty",  # a directory with no audio files in it
+    "container",  # a directory containing multiple unrelated books, but is not itself a book
+    "unknown",  # a directory that doesn't fit any of the above categories
+]
+BookStructureTuple = BookStructure2 | tuple[BookStructure2, ...]
 InboxDirMap = Sequence[tuple[Path]] | Sequence[tuple[Path, Sequence[Path]]]
 ScoredProp = Literal["title", "author", "narrator", "date"]
 TagSource = Literal[
@@ -52,7 +78,11 @@ TagSource = Literal[
     "fs",
     "unknown",
 ]
-AdditionalTags = Literal["cover", "track", "encoded by", "date", "genre", "publisher"]
+AdditionalTags = Literal["cover", "track", "discnumber", "encoded by", "date", "genre", "publisher", "_updated"]
+Id3TagDict = dict[TagSource | AdditionalTags, str | float]
+Id3TagDictWithDnumTnum = dict[
+    TagSource | AdditionalTags | Literal["disc_num", "track_num"], str | float | tuple[int, int]
+]
 NameParserTarget = Literal["fs", "generic", "comment"]
 ENV_DIRS = [
     "INBOX_FOLDER",
@@ -88,9 +118,7 @@ def copy_kwargs(func: Callable[P, R]) -> Callable[..., Callable[P, R]]:
         return cast(Callable[P, R], _func)
 
     if not callable(func):
-        raise RuntimeError(
-            f"You must pass a function to this decorator, got {func} instead."
-        )
+        raise RuntimeError(f"You must pass a function to this decorator, got {func} instead.")
 
     return _cast_func
 
@@ -108,8 +136,31 @@ def copy_kwargs_omit_first_arg(
         return cast(Callable[P, R], _func)
 
     if not callable(func):
-        raise RuntimeError(
-            f"You must pass a function to this decorator, got {func} instead."
-        )
+        raise RuntimeError(f"You must pass a function to this decorator, got {func} instead.")
 
     return _cast_func
+
+
+OnComplete = Literal["archive", "delete", "test_do_nothing"]
+
+NumericIterable = TypeVar("NumericIterable", bound=Iterable[int | float] | list[int | float])
+SimilarityComparisonMethod = Literal["median", "avg", "min", "max"] | None
+SimilarityFuncMethod = Literal["ratio", "token_set_ratio", "token_sort_ratio", "extract", "lcs", "lev"]
+SimilarityComparable = Literal[
+    "id3_albums",
+    "id3_albumartists",
+    "id3_artists",
+    "id3_authors",
+    "id3_disc_nums",
+    "id3_titles",
+    "id3_track_nums",
+    "pathnames",
+]
+
+N = TypeVar("N", bound=Any)
+
+
+def NotNone(x: Optional[N] | None) -> N:
+    """Casts the value to the given type, removing the None type from an optional value"""
+    assert x is not None, "Expected value to be not None"
+    return cast(N, x)
