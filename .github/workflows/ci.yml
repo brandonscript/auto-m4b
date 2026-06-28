@@ -38,7 +38,7 @@ jobs:
           path: |
             .venv
             ~/nltk_data
-          key: venv-v3-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
+          key: venv-v4-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -53,15 +53,7 @@ jobs:
       - name: Download NLTK data
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
-          poetry run python -c "
-          import nltk
-          nltk.download('words')
-          nltk.download('webtext')
-          nltk.download('punkt_tab')
-          nltk.download('punkt')
-          nltk.download('averaged_perceptron_tagger_eng')
-          nltk.download('averaged_perceptron_tagger')
-          "
+          poetry run python -c "import nltk; nltk.download('popular')"
 
       - name: Run unit & integration tests
         run: |
@@ -98,7 +90,7 @@ jobs:
           path: |
             .venv
             ~/nltk_data
-          key: venv-v3-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
+          key: venv-v4-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -113,15 +105,7 @@ jobs:
       - name: Download NLTK data
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
-          poetry run python -c "
-          import nltk
-          nltk.download('words')
-          nltk.download('webtext')
-          nltk.download('punkt_tab')
-          nltk.download('punkt')
-          nltk.download('averaged_perceptron_tagger_eng')
-          nltk.download('averaged_perceptron_tagger')
-          "
+          poetry run python -c "import nltk; nltk.download('popular')"
 
       - name: Run e2e tests
         run: |

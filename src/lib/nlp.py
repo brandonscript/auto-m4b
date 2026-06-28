@@ -57,14 +57,10 @@ def update_nltk_timestamp():
 
 if should_update_nltk():
     with contextlib.redirect_stdout(open(os.devnull, "w")):
-        nltk.download("words")
-        nltk.download("webtext")
-        # punkt_tab is required by webtext.words() in NLTK 3.8+ (replaces punkt)
-        nltk.download("punkt_tab")
-        nltk.download("punkt")
-        # averaged_perceptron_tagger_eng is required by nltk.pos_tag() in NLTK 3.8+
-        nltk.download("averaged_perceptron_tagger_eng")
-        nltk.download("averaged_perceptron_tagger")
+        # Download 'popular' bundle which includes words, webtext, punkt_tab,
+        # averaged_perceptron_tagger_eng, maxent_ne_chunker_tab, and all other
+        # commonly-needed resources. Avoids whack-a-mole with individual names.
+        nltk.download("popular")
         english_words = set(words.words())
         webtext_words = set(webtext.words())
     update_nltk_timestamp()
