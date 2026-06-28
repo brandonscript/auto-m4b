@@ -350,22 +350,6 @@ def load_env(env_file: str | Path, clean_working_dirs: bool = False) -> dict[str
     return env_vars
 
 
-def dockerize_volume(
-    path: str | Path,
-    rel_to: Path | None = None,
-) -> Path:
-    """Takes the incoming path and replaces root_dir in path with /mnt if cfg.use_docker is True"""
-    from src.lib.config import cfg
-
-    if not rel_to:
-        rel_to = cfg.working_dir
-
-    if cfg.USE_DOCKER:
-        return Path("/mnt") / Path(path).relative_to(rel_to)
-    else:
-        return Path(path)
-
-
 def sanitize(v):
     if isinstance(v, (int, float, bool, str, type(None))):
         return v
