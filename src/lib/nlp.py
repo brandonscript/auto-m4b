@@ -87,7 +87,10 @@ def _devnull():
 
 
 def _load_spacy_model() -> spacy.language.Language:
-    for model in (SPACY_MODEL_TRF, SPACY_MODEL_SM):
+    # en_core_web_trf requires spacy-curated-transformers which is only
+    # installed on macOS (Apple Silicon). Skip it on other platforms.
+    models = (SPACY_MODEL_TRF, SPACY_MODEL_SM) if sys.platform == "darwin" else (SPACY_MODEL_SM,)
+    for model in models:
         try:
             with _devnull():
                 return spacy.load(model)
@@ -96,9 +99,13 @@ def _load_spacy_model() -> spacy.language.Language:
             _ensure_pip()
             result = subprocess.run([sys.executable, "-m", "spacy", "download", model], capture_output=True)
             if result.returncode == 0:
-                return spacy.load(model)
-            print_debug(f"Failed to download '{model}': {result.stderr.decode().strip()}")
-    raise RuntimeError(f"Could not load any spaCy model (tried: {SPACY_MODEL_TRF}, {SPACY_MODEL_SM})")
+                try:
+                    return spacy.load(model)
+                except (OSError, ValueError) as e:
+                    print_debug(f"Failed to load '{model}' after download: {e}")
+            else:
+                print_debug(f"Failed to download '{model}': {result.stderr.decode().strip()}")
+    raise RuntimeError(f"Could not load any spaCy model (tried: {', '.join(models)})")
 
 
 nlp = _load_spacy_model()
