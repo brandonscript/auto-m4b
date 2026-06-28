@@ -48,6 +48,9 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
+      - name: Download spaCy model
+        run: poetry run python -m spacy download en_core_web_sm
+
       - name: Run unit & integration tests
         run: |
           poetry run python -m pytest src/tests/ \
@@ -92,6 +95,9 @@ jobs:
 
       - name: Install ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Download spaCy model
+        run: poetry run python -m spacy download en_core_web_sm
 
       - name: Run e2e tests
         run: |
