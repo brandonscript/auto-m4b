@@ -572,17 +572,6 @@ files = [
 ]
 
 [[package]]
-name = "ffmpeg"
-version = "1.4"
-description = "ffmpeg python package url [https://github.com/jiashaokun/ffmpeg]"
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = [
-    {file = "ffmpeg-1.4.tar.gz", hash = "sha256:6931692c890ff21d39938433c2189747815dca0c60ddc7f9bb97f199dba0b5b9"},
-]
-
-[[package]]
 name = "ffmpeg-python"
 version = "0.2.0"
 description = "Python bindings for FFmpeg - with complex filtering support"
@@ -3374,4 +3363,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "3e3abef299fe69fd4c51ec4f87cdda4e12d09c79b087f2aad6afb9f62a356473"
+content-hash = "8ef64c6d7983c338702938acc7fc8176979221264030d5f59b915acc0b7ee254"

@@ -84,6 +84,27 @@ python_files = ["*_test.py", "test_*.py"]
 python_classes = ["test_", "_test", "Test*"]
 python_functions = ["test_", "_test"]
 
+# ─── Native converter coverage gate ──────────────────────────────────────────
+# Unit tests (fast, no audio) cover the pure-logic modules (chapters, encoder,
+# ffmetadata, naturalsort) at ≥90%.  The merge.py orchestrator is exercised by
+# the slow integration tests that invoke real ffmpeg on fixture audio files.
+#
+# To run the full scoped coverage check (requires real ffmpeg + test fixtures):
+#   pytest src/tests/test_converter.py --cov=src/lib/converter --cov-fail-under=90 --slow
+#
+# Fidelity expectation (non-bit-exact): tests validate behavioral correctness —
+# valid .m4b output, correct chapter count/order/titles, total duration within a
+# small tolerance of the summed inputs — NOT byte-identical output vs. PHP
+# m4b-tool, since the encoder/muxer paths differ.
+
+[tool.coverage.run]
+source = ["src/lib/converter"]
+omit = ["*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
 [tool.poetry]
 name = "auto-m4b"
 version = "0.1.0"
@@ -95,7 +116,6 @@ readme = "README.md"
 python = "^3.12"
 inflect = "^7.5.0"
 humanize = "^4.12.3"
-ffmpeg = "^1.4"
 ffmpeg-python = "^0.2.0"
 numpy = { version = "<2", platform = "*" }
 pydantic = "^2.11.5"
@@ -137,7 +157,6 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.scripts]
 app = "src:main"
 forever = "src:main"
-docker = "src:main"
 tests = "pytest:main"
 # fix-ffprobe = "./scripts/fix-ffprobe.sh"
 # install-docker-m4b-tool = "./scripts/install-docker-m4b-tool.sh"

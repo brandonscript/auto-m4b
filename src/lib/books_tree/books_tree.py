@@ -443,9 +443,12 @@ class BooksTree(BaseModel):
         path_rel = (
             try_relative_to(self.path, root.path) if self.is_book_root or self.has_structure("series_parent") else None
         )
-        name_rel = try_relative_to(self.path.name, root.path)
 
-        return str(path_rel) if path_rel and path_rel != Path(".") else str(name_rel) if name_rel else self.name
+        if path_rel is None:
+            return None
+
+        name_rel = try_relative_to(self.path.name, root.path)
+        return str(path_rel) if path_rel != Path(".") else str(name_rel) if name_rel else self.name
 
     @property
     def size(self):

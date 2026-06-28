@@ -458,7 +458,7 @@ class test_tree_structures:
         assert first_dir.has_only_structures("flat", "flatish"), xt.msg.structure_is(first_dir, ("flat", "flatish"))
 
     def test_flatish_without_tags(self, authors_guide_to_murder__flat_mp3: Audiobook):
-        tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder", scan_id3=False)
+        tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder")
         book = tree.get(cast(str, authors_guide_to_murder__flat_mp3.key))
         assert book
         assert book.has_only_structure("flat"), xt.msg.structure_is(book, ("flat"))
@@ -917,8 +917,8 @@ class test_tree_finding:
             (TEST_DIRS.inbox, 0, None, MOCKED.all_books_and_series),
             (TEST_DIRS.inbox, None, 0, MOCKED.standalone_files_d1),
             (TEST_DIRS.inbox, 0, 0, MOCKED.standalone_files_d1),
-            (TEST_DIRS.inbox, 0, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_m4b, MOCKED.single_dir_mp3] + MOCKED.standalone_files_d1)),
-            (TEST_DIRS.inbox, 1, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_mp3, MOCKED.single_dir_m4b])),
+            (TEST_DIRS.inbox, 0, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_m4b, MOCKED.single_dir_mp3] + MOCKED.standalone_files_d1 + MOCKED.container_dir_d1_standalone_files)),
+            (TEST_DIRS.inbox, 1, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_mp3, MOCKED.single_dir_m4b] + MOCKED.container_dir_d1_standalone_files)),
             (TEST_DIRS.inbox, 1, 2, MOCKED.all_books_and_series[:6] + MOCKED.all_books_and_series[10:-3]),
             (TEST_DIRS.inbox, 2, 2, [
                 MOCKED.container_dirs[0], 
@@ -942,7 +942,7 @@ class test_tree_finding:
         tree = BooksTree(path, mindepth=mindepth, maxdepth=maxdepth)
         found_sorted = isorted(list(map(str, tree.books_and_series)))
         expected_sorted = isorted(
-            list(set(map(str, map(functools.partial(BooksTree, allow_file_root=True), expected))))
+            list(set(map(str, map(functools.partial(BooksTree, allow_self_root=True), expected))))
         )
 
         extra_paths_found = [p for p in found_sorted if p not in expected_sorted]
@@ -954,12 +954,24 @@ class test_tree_finding:
     def test_find_standalone_books_in_inbox(self, mock_inbox, setup_teardown):
         tree = BooksTree(TEST_DIRS.inbox)
 
-        expected_sorted = list(sorted([BooksTree(p, allow_self_root=True) for p in MOCKED.standalone_files_d1]))
+        # tree.files = direct file children of the inbox root (depth-1 standalones only)
+        expected_root_files = list(sorted([BooksTree(p, allow_self_root=True) for p in MOCKED.standalone_files_d1]))
+        assert list(sorted(tree.files)) == expected_root_files
 
-        assert list(sorted(tree.files)) == expected_sorted
+        # books_and_series includes ALL standalone_file book roots, including the two
+        # audio files that sit directly inside mock_book_container (they have only
+        # "standalone_file" structure — test_container_dir verifies this explicitly).
+        expected_all_standalone = list(
+            sorted(
+                [
+                    BooksTree(p, allow_self_root=True)
+                    for p in MOCKED.standalone_files_d1 + MOCKED.container_dir_d1_standalone_files
+                ]
+            )
+        )
         assert (
             list(sorted(filter(lambda b: b.has_only_structure("standalone_file"), tree.books_and_series)))
-            == expected_sorted
+            == expected_all_standalone
         )
 
     @pytest.mark.parametrize(

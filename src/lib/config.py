@@ -227,9 +227,13 @@ def use_pid_file():
 
     # read the pid file and look for a line starting with `FATAL` in all caps, if so, the app crashed and we should exit
     if cfg.FATAL_FILE.exists() and cfg.CRASH_PROTECTION:
-        err = f"auto-m4b fatally crashed on last run, once the problem is fixed, please delete the following lock file to continue:\n\n {cfg.FATAL_FILE}\n\n{cfg.FATAL_FILE.open().read()}"
-        print_error(err)
-        raise RuntimeError(err)
+        age = time.time() - cfg.FATAL_FILE.stat().st_mtime
+        if age > 30:
+            cfg.FATAL_FILE.unlink()
+        else:
+            err = f"auto-m4b fatally crashed on last run, once the problem is fixed, please delete the following lock file to continue:\n\n {cfg.FATAL_FILE}\n\n{cfg.FATAL_FILE.open().read()}"
+            print_error(err)
+            raise RuntimeError(err)
 
     already_exists = cfg.PID_FILE.is_file()
 
@@ -400,6 +404,15 @@ class Config:
 
     USE_FILENAMES_AS_CHAPTERS = _USE_FILENAMES_AS_CHAPTERS
 
+    @env_property(typ=bool, default=True)
+    def _USE_NATIVE_CONVERTER(self):
+        """Use the native Python converter instead of m4b-tool (PHP/Docker).
+        Default is True.  Set USE_NATIVE_CONVERTER=N to fall back to the
+        legacy m4b-tool path."""
+        ...
+
+    USE_NATIVE_CONVERTER = _USE_NATIVE_CONVERTER
+
     @env_property(typ=bool, default="pytest" in sys.modules)
     def _TEST(self): ...
 
@@ -436,8 +449,23 @@ class Config:
 
     @cached_property
     def m4b_tool_version(self):
-        """Runs m4b-tool --version"""
-        return subprocess.check_output(f"{self.m4b_tool} m4b-tool --version", shell=True).decode().strip()
+        """Returns the converter version string.
+
+        When USE_NATIVE_CONVERTER is True, returns 'm4b-tool-py <version>'
+        without invoking any subprocess.  Otherwise falls back to running the
+        legacy m4b-tool binary/Docker image.
+        """
+        if self.USE_NATIVE_CONVERTER:
+            try:
+                from src import __version__ as _ver  # type: ignore[attr-defined]
+
+                return f"m4b-tool-py {_ver}"
+            except Exception:
+                return "m4b-tool-py (native)"
+        try:
+            return subprocess.check_output(f"{self.m4b_tool} m4b-tool --version", shell=True, stderr=subprocess.DEVNULL).decode().strip()
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            return "m4b-tool (unavailable)"
 
     @cached_property
     def _m4b_tool(self):
@@ -453,7 +481,9 @@ class Config:
         info = f"{self.CPU_CORES} CPU cores / "
         info += f"{self.sleeptime_friendly} sleep / "
         info += f"Max ch. length: {self.max_chapter_length_friendly} / "
-        if self.USE_DOCKER:
+        if self.USE_NATIVE_CONVERTER:
+            info += self.m4b_tool_version
+        elif self.USE_DOCKER:
             info += f"{self.m4b_tool_version} (Docker)"
         else:
             info += f"{self.m4b_tool_version}"
@@ -479,7 +509,10 @@ class Config:
 
     @cached_property
     def USE_DOCKER(self):
-        self.check_m4b_tool()
+        try:
+            self.check_m4b_tool()
+        except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError):
+            self._USE_DOCKER = False
         return self._USE_DOCKER
 
     @cached_property
@@ -492,6 +525,10 @@ class Config:
     @cached_property
     def docker_path(self):
         env_path = self.load_path_env("DOCKER_PATH", allow_empty=True)
+        # Discard a configured DOCKER_PATH that doesn't exist on this machine
+        # (e.g. a machine-specific .env.local file loaded on the wrong host).
+        if env_path and not env_path.exists():
+            env_path = None
         return env_path or shutil.which("docker")
 
     @cached_property
@@ -625,7 +662,15 @@ class Config:
             )
 
     def check_m4b_tool(self):
-        env_use_docker = bool(os.getenv("USE_DOCKER", self.env.get("USE_DOCKER", False)))
+        if self.USE_NATIVE_CONVERTER:
+            # Native converter needs no PHP/Docker dependency — skip all checks.
+            return
+
+        env_use_docker_raw = os.getenv("USE_DOCKER", self.env.get("USE_DOCKER", ""))
+        # Treat USE_DOCKER=N/No/false/0 as explicitly disabled; empty string
+        # or any truthy string means "enabled or auto-detect".
+        env_use_docker_disabled = str(env_use_docker_raw).strip().lower() in ("n", "no", "false", "0")
+        env_use_docker = bool(env_use_docker_raw) and not env_use_docker_disabled
         has_native_m4b_tool = bool(shutil.which(self.m4b_tool))
         docker_ready = False
         current_version = ""
@@ -634,7 +679,7 @@ class Config:
         if has_native_m4b_tool and not env_use_docker:
             current_version = subprocess.check_output(["m4b-tool", "--version"], timeout=10).decode().strip()
 
-        elif has_docker := bool(self.docker_path):
+        elif not env_use_docker_disabled and (has_docker := bool(self.docker_path)):
             # docker images -q m4b-tool:latest
             install_script = "./scripts/install-docker-m4b-tool.sh"
 
@@ -670,8 +715,10 @@ class Config:
             )
             docker_ready = True
 
-        # Check for v0.5, -prerelease, or docker build tags like latest-195-g0304329
-        if not (
+        # Check for v0.5, -prerelease, or docker build tags like latest-195-g0304329.
+        # Only run when we actually retrieved a version string; an empty string
+        # just means no tool was found/used, which the branches below handle.
+        if current_version and not (
             re.search(r"v0\.5", current_version)
             or re.search(r"-prerelease", current_version, re.IGNORECASE)
             or re.search(r"latest-\d+", current_version)

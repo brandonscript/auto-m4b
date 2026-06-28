@@ -1660,6 +1660,20 @@ def score_series_parent(tree: "BooksTree") -> float:
             tree.tick(f"base_score for {tree.rel_path}: {base_score}")
 
         series_parent_score = base_score + num_score + child_series_books_ratio
+
+        # Boost when the parent's multi-word name appears verbatim in the majority of
+        # children's names.  This catches series like "Shaman's Tales from the Golden Age
+        # of the Solar Clipper" whose three book subdirs each embed the full series title
+        # in their own name, producing high path/album similarity that the tag branch
+        # would otherwise penalise as "same book, different parts".
+        parent_name_lower = tree.name.lower()
+        if len(parent_name_lower.split()) >= 2 and tree.children:
+            children_with_parent_name = sum(
+                1 for c in tree.children if parent_name_lower in c.name.lower()
+            )
+            if children_with_parent_name > len(tree.children) / 2:
+                series_parent_score += 0.5
+
         if bool(re.search(r"(?:\b|_)series(?:\b|_)", tree.name.lower(), re.I)):
             series_parent_score = max(series_parent_score + 0.75, 0.95)
             tree.tick(f"series_parent_score from regex (?:\\b|_)series(?:\\b|_) {tree.rel_path}: {series_parent_score}")

@@ -322,7 +322,17 @@ class testutils:
 
     @classmethod
     def get_stdout(cls, capfd: CaptureFixture[str]) -> str:
-        return cls.strip_ansi_codes(capfd.readouterr().out)
+        out = capfd.readouterr().out
+        if out:
+            return cls.strip_ansi_codes(out)
+        # Tinta (used throughout the app) holds a reference to the original
+        # sys.stdout captured at import time, which bypasses pytest's
+        # capfd/capsys capture.  Fall back to term.PRINT_LOG, which smart_print()
+        # maintains independently.  reset_all() clears it at the start of each
+        # test so we only see the current test's output here.
+        from src.lib import term
+
+        return "".join(text + end for text, end in term.PRINT_LOG)
 
     @classmethod
     def is_divider(cls, line: str | None) -> bool:
@@ -555,6 +565,10 @@ class testutils:
 
         if isinstance(out, CaptureFixture):
             out = cls.get_stdout(out)
+        elif out is None:
+            from src.lib import term
+
+            out = "".join(text + end for text, end in term.PRINT_LOG)
 
         converted_root = BooksTree(TEST_DIRS.converted)
 

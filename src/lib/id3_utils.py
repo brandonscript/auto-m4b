@@ -369,9 +369,9 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         ol_years_match = (
             bool(ol_title) and ol_title.has_match and get_year_from_date(ol_title.date) == get_year_from_date(book.date)
         )
-        if not ol_years_match and NotNone(ol_title).score(fallback=0) > 0.75:
+        if ol_title and not ol_years_match and ol_title.score(fallback=0) > 0.75:
             date_needs_updating = True
-            new_date = NotNone(ol_title).date
+            new_date = ol_title.date
             updates.append(lambda: _print_needs_updating(prop, tag_value, new_date))
             new_tags[id3_tag] = new_date
         elif book.date and not tags_years_match:

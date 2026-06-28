@@ -44,6 +44,17 @@ def setup_teardown():
         cfg.FATAL_FILE.unlink(missing_ok=True)
 
 
+@pytest.fixture(autouse=True, scope="function")
+def clear_scorer_caches():
+    from src.lib.scorers import _scorer_cache, already_checked
+
+    _scorer_cache.clear()
+    already_checked.clear()
+    yield
+    _scorer_cache.clear()
+    already_checked.clear()
+
+
 @pytest.fixture(scope="function", autouse=False)
 def reset_failed():
     InboxState().clear_failed()
@@ -64,6 +75,20 @@ def reset_match_filter():
         InboxState().set_match_filter(orig_env_match_filter)
         return
     InboxState().set_match_filter(orig_cfg_match_filter)
+
+
+@pytest.fixture(scope="function")
+def capfd(capsys):
+    """Override built-in capfd with capsys.
+
+    Tinta (used throughout the app) writes to sys.stdout, which is captured at
+    the Python level by pytest's ``tee-sys`` capture mode. The built-in
+    ``capfd`` fixture captures at the file-descriptor level (fd 1) and therefore
+    misses all Tinta output.  Returning ``capsys`` here means every test that
+    requests ``capfd`` — directly or via indirect parametrize — actually reads
+    from the sys-level buffer, which does contain Tinta's output.
+    """
+    return capsys
 
 
 @pytest.fixture(scope="function", params=["fixture_name"])
@@ -194,7 +219,11 @@ def load_test_fixture(
                 files_to_shrink.append((dst_f, max_file_size))
                 tick("appending to files_to_shrink")
 
+    original_match_filter: str | None = None
     if exclusive or match_filter is not None:
+        from src.lib.config import cfg
+
+        original_match_filter = cfg.MATCH_FILTER
         tick("setting match filter to", match_filter or name)
         testutils.set_match_filter(match_filter or name)
         tick("done setting match filter")
@@ -220,6 +249,11 @@ def load_test_fixture(
 
     if cleanup_inbox:
         rm_from_inbox(name)
+
+    # Restore match filter after yield so the next test gets a clean slate.
+    if exclusive or match_filter is not None:
+        testutils.print(f"Setting MATCH_FILTER to {original_match_filter!r}")
+        testutils.set_match_filter(original_match_filter)
 
 
 def load_test_fixtures(
@@ -779,7 +813,14 @@ def global_test_log():
 @pytest.fixture(scope="function", autouse=False)
 def reset_all(reset_match_filter, reset_failed):
 
+    from src.lib import term
     from src.lib.config import cfg
+
+    # Clear the print log so each test starts with a fresh slate.
+    # smart_print() appends here and it's the reliable capture source since
+    # Tinta bypasses pytest's capfd/capsys (it holds a reference to the
+    # original sys.stdout captured at import time).
+    term.PRINT_LOG.clear()
 
     InboxState().destroy()  # type: ignore
     inbox = InboxState()

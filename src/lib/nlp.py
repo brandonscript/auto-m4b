@@ -5,18 +5,16 @@ import pickle
 import re
 import sqlite3
 import subprocess
+import sys
 import warnings
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import cast, Literal, TypedDict
 
 # Suppress deprecation warning from thinc about torch.cuda.amp.autocast
-# This must be set before importing spacy, as thinc (spacy's dependency) may trigger the warning
-warnings.filterwarnings(
-    "ignore",
-    message=r".*torch\.cuda\.amp\.autocast.*is deprecated.*",
-    category=FutureWarning,
-)
+warnings.filterwarnings("ignore", message=r".*torch\.cuda\.amp\.autocast.*", category=FutureWarning)
+warnings.filterwarnings("ignore", message=r".*torch\.amp\.autocast.*", category=FutureWarning)
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"thinc\..*")
 
 import nltk
 import spacy
@@ -28,8 +26,8 @@ from lib.misc import re_group
 from src.lib.config import cfg
 from src.lib.term import print_debug
 
-# SPACY_MODEL = "en_core_web_sm"
-SPACY_MODEL = "en_core_web_trf"
+SPACY_MODEL_TRF = "en_core_web_trf"
+SPACY_MODEL_SM = "en_core_web_sm"
 TRF_MODEL = "dslim/bert-base-NER"
 
 
@@ -70,15 +68,40 @@ else:
 
 nlp = None  # type: ignore
 
-try:
-    # Load spaCy model silently by redirecting stdout/stderr temporarily
-    with contextlib.redirect_stdout(open(os.devnull, "w")), contextlib.redirect_stderr(open(os.devnull, "w")):
-        nlp = spacy.load(SPACY_MODEL)
-except Exception as e:
-    print_debug(f"Error loading spaCy model: {e}")
-    # run `python -m spacy download en`
-    subprocess.run(["python", "-m", "spacy", "download", SPACY_MODEL])
-    nlp = spacy.load(SPACY_MODEL)
+
+def _ensure_pip():
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "--version"], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        print_debug("pip not found in venv, bootstrapping via ensurepip...")
+        result = subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"], capture_output=True)
+        if result.returncode != 0:
+            print_debug(f"ensurepip failed: {result.stderr.decode().strip()}")
+
+
+@contextlib.contextmanager
+def _devnull():
+    with open(os.devnull, "w") as null:
+        with contextlib.redirect_stdout(null), contextlib.redirect_stderr(null):
+            yield
+
+
+def _load_spacy_model() -> spacy.language.Language:
+    for model in (SPACY_MODEL_TRF, SPACY_MODEL_SM):
+        try:
+            with _devnull():
+                return spacy.load(model)
+        except OSError:
+            print_debug(f"spaCy model '{model}' not found, trying to download...")
+            _ensure_pip()
+            result = subprocess.run([sys.executable, "-m", "spacy", "download", model], capture_output=True)
+            if result.returncode == 0:
+                return spacy.load(model)
+            print_debug(f"Failed to download '{model}': {result.stderr.decode().strip()}")
+    raise RuntimeError(f"Could not load any spaCy model (tried: {SPACY_MODEL_TRF}, {SPACY_MODEL_SM})")
+
+
+nlp = _load_spacy_model()
 
 
 matcher = Matcher(nlp.vocab)
@@ -218,7 +241,9 @@ class NoTRF:
 try:
     from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
 
-    nlp_trf = get_transformer_pipeline(pipeline, model_name=TRF_MODEL)
+    with _devnull(), warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
+        nlp_trf = get_transformer_pipeline(pipeline, model_name=TRF_MODEL)
 except Exception as e:
     print_debug(f"Error loading transformer model: {e}")
     nlp_trf = NoTRF()

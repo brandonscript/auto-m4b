@@ -17,6 +17,7 @@ from src.lib.formatters import (
     pluralize_with_count,
     truncate_middle,
 )
+from src.lib.converter import convert_book_native
 from src.lib.id3_utils import verify_and_update_id3_tags
 from src.lib.inbox_state import InboxItem, InboxState
 from src.lib.logger import log_global_results
@@ -554,10 +555,50 @@ def convert_book(book: Audiobook):
             f"Fatal: No audio files found in merge folder '{book.merge_dir}' – ensure that auto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
         )
 
+    if cfg.USE_NATIVE_CONVERTER:
+        return _convert_book_native_path(book)
+    return _convert_book_legacy_path(book)
+
+
+def _convert_book_native_path(book: Audiobook) -> "int | Literal[False]":
+    """Conversion path using the native Python converter."""
+    # Pre-extract cover art for m4a/m4b inputs (same as legacy path)
+    if book.orig_file_type in ["m4a", "m4b"]:
+        book.extract_cover_art()
+
+    m4btool = M4bTool(book)
+    m4btool.print_msg()
+
+    try:
+        elapsed = convert_book_native(book)
+    except Exception as exc:
+        err_msg = str(exc)
+        book.write_log(err_msg)
+        nl()
+        print_error(f"Native converter error: {err_msg}")
+        smart_print(f"See log file in {tint_light_grey(book.inbox_dir)} for details\n")
+        fail_book(book, reason=err_msg)
+        log_global_results(book, "FAILED", 0)
+        return False
+
+    if not book.build_file.exists():
+        err_msg = f"Native converter failed to produce output .m4b for {book}"
+        book.write_log(err_msg)
+        print_error(f"Error: {err_msg}")
+        fail_book(book, reason=err_msg)
+        log_global_results(book, "FAILED", 0)
+        return False
+
+    verify_and_update_id3_tags(book, in_dir="build")
+    return elapsed
+
+
+def _convert_book_legacy_path(book: Audiobook) -> "int | Literal[False]":
+    """Conversion path using the legacy m4b-tool PHP/Docker subprocess."""
     starttime = time.time()
     m4btool = M4bTool(book)
 
-    err: Literal[False] | str = False
+    err: "Literal[False] | str" = False
 
     # if book is m4a or m4b, need to pre-extract cover art
     if book.orig_file_type in ["m4a", "m4b"]:
@@ -582,20 +623,6 @@ def convert_book(book: Audiobook):
         smart_print(stdout)
 
     if re.search(r"error", stdout, re.I):
-        # ignorable errors:
-        ###################
-        # an error occured, that has not been caught:
-        # Array
-        # (
-        #     [type] => 8192
-        #     [message] => Implicit conversion from float 9082109.64 to int loses precision
-        #     [file] => phar:///usr/local/bin/m4b-tool/src/library/M4bTool/Parser/SilenceParser.php
-        #     [line] => 61
-        # )
-        ###################
-        # regex: an error occured[\s\S]*?Array[\s\S]*?Implicit conversion from float[\s\S]*?\)
-        ###################
-
         err_blocks = [r"an error occured[\s\S]*?Array[\s\S]*?\)"]
 
         ignorable_errors = [
@@ -633,16 +660,9 @@ def convert_book(book: Audiobook):
         log_global_results(book, "FAILED", 0)
         return False
 
-    # TODO: No longer need to write successful logs
-    # else:
-    #     book.write_log(
-    #         f"{endtime_log}  {book}  Converted in {log_format_elapsed_time(elapsedtime)}\n"
-    #     )
-
     verify_and_update_id3_tags(book, in_dir="build")
 
     return int(time.time() - starttime)
-
 
 def move_desc_file(book: Audiobook):
     from src.lib.fs_utils import mv_file_into_dir
