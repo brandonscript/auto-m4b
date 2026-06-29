@@ -50,7 +50,7 @@ def requires_scan(func: Callable[..., R]):
     @wraps(func)
     def wrapper(*args, **kwargs):
         inbox = cast(InboxState, args[0])
-        if not inbox._hashes or not inbox._last_run_start:
+        if not inbox._hashes or inbox._last_scan == 0:
             inbox.scan(skip_failed_sync=True)
         return cast(R, func(*args, **kwargs))
 
@@ -170,21 +170,20 @@ class InboxState(Hasher):
 
         found_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}
 
-        # smart_print(f"scan calls: {SCAN_CALLS}", SCAN_CALLS)
-        # try:
-        #     smart_print(
-        #         self._items["old_mill__multidisc_mp3"].to_dict(refresh_hash=False)
-        #     )
-        # except:
-        #     pass
-
         gone_keys = set(self._items.keys()) - set(found_items.keys())
         for k, v in found_items.items():
             if k not in self._items:
                 self._items[k] = v
-            elif recheck_failed and (item := self._items[k]):
-                if item.status == "failed" and (item.did_change or item.hash_age < cfg.SLEEP_TIME):
-                    item.set_needs_retry()
+            else:
+                existing = self._items[k]
+                # Always update the tree with the freshly scanned version so that
+                # stub trees (created by _sync_failed_from_env without a scan) get
+                # replaced with properly scanned nodes, preventing requires_scan errors.
+                existing.tree = v.tree
+                if recheck_failed and existing.status == "failed" and (
+                    existing.did_change or existing.hash_age < cfg.SLEEP_TIME
+                ):
+                    existing.set_needs_retry()
 
         # remove items that are no longer in the inbox
         for k in gone_keys:

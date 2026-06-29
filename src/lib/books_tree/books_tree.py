@@ -1111,11 +1111,7 @@ class BooksTree(BaseModel):
             if (container_or_mixed := score_container_mixed(self)[0]) == "container":
                 c.set_structures(container_or_mixed)
                 # self.# tick(f"{x} set structures to '{container_or_mixed}' for {c.rel_path}")
-            # TODO: Don't apply mixed anywhere, only use unknown
-            # elif c.is_file() and standalone_siblings_boost > 0.5:
-            #     c.set_structures("standalone_file")
-            # elif c.is_file() and single_siblings_boost > 0.5:
-            #     c.set_structures("single")
+            # mixed is only used internally for scoring; externally unknown is used
             else:
                 c.set_structures("unknown", recursive=True)
                 # self.# tick(f"{x} set structures to 'unknown' recursively for {c.rel_path}")

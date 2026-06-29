@@ -866,6 +866,7 @@ def reset_all(reset_match_filter, reset_failed):
     # Tinta bypasses pytest's capfd/capsys (it holds a reference to the
     # original sys.stdout captured at import time).
     term.PRINT_LOG.clear()
+    testutils._print_log_cursor = 0
 
     InboxState().destroy()  # type: ignore
     inbox = InboxState()

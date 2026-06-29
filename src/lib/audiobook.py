@@ -378,6 +378,7 @@ class Audiobook(BaseModel):
         return (self.active_dir.parent if self.active_dir.is_file() else self.active_dir) / self.log_filename
 
     def write_log(self, *s: str):
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self.log_file.touch(exist_ok=True)
         # for each s, replace \n with a space
         lines = [x.replace("\n", " ") for x in s]

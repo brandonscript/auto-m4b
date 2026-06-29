@@ -732,6 +732,7 @@ def archive_inbox_book(book: Audiobook):
 
     if cfg.ON_COMPLETE == "test_do_nothing":
         print_notice("Test mode: The original folder will not be moved or deleted")
+        InboxState().set_gone(book)
     else:
         if cfg.ON_COMPLETE == "archive":
             smart_print("\nArchiving original from inbox...", end="")
@@ -870,8 +871,8 @@ def process_inbox():
 
     if inbox.loop_counter == 1:
         print_debug("First run, scanning inbox...")
-        print_banner()
         inbox.scan(set_ready=True, force=True)
+        print_banner()
 
     if not audio_files_found():
         print_banner()

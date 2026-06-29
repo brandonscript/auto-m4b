@@ -28,6 +28,8 @@ cfg.PID_FILE.unlink(missing_ok=True)
 
 class testutils:
 
+    _print_log_cursor: int = 0
+
     @staticmethod
     def pring_out_lines(out_run: str):
         print(out_run.splitlines())
@@ -304,13 +306,45 @@ class testutils:
         cls.print("Setting ON_COMPLETE to 'test_do_nothing'")
         cfg.ON_COMPLETE = "test_do_nothing"
 
+    _mock_mp3_source: "Path | None" = None
+
+    @classmethod
+    def _get_mock_mp3_source(cls) -> "Path":
+        if cls._mock_mp3_source and cls._mock_mp3_source.exists():
+            return cls._mock_mp3_source
+        from src.tests.helpers.pytest_dumps import FIXTURES_ROOT
+
+        mp3_files = sorted(FIXTURES_ROOT.rglob("*.mp3"), key=lambda p: p.stat().st_size)
+        if not mp3_files:
+            raise FileNotFoundError("No fixture mp3 files found for mock file source")
+        cls._mock_mp3_source = mp3_files[0]
+        return cls._mock_mp3_source
+
     @classmethod
     def make_mock_file(cls, path: Path, *, size: int = 1024 * 5):
         if not path.is_absolute():
             path = TEST_DIRS.inbox / path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            f.write("a" * size)
+        src = cls._get_mock_mp3_source()
+        shutil.copy2(src, path)
+        # Strip all ID3 tags so mock files don't share metadata from the source fixture,
+        # which would cause the structure scorers to misclassify directories.
+        try:
+            from mutagen.id3 import ID3, ID3NoHeaderError
+
+            ID3(path).delete(path)
+        except (ID3NoHeaderError, Exception):
+            pass
+        # Pad to reach the desired size by repeating MP3 frames — concatenated MP3
+        # frames are valid audio and allow ffprobe to succeed while preserving size
+        # relationships the structure scorers depend on.
+        current_size = path.stat().st_size
+        if size > current_size:
+            with open(path, "rb") as f:
+                frame_data = f.read()
+            with open(path, "ab") as f:
+                while path.stat().st_size < size:
+                    f.write(frame_data)
 
     @classmethod
     def rm(cls, p: Path):
@@ -322,17 +356,26 @@ class testutils:
 
     @classmethod
     def get_stdout(cls, capfd: CaptureFixture[str]) -> str:
-        out = capfd.readouterr().out
-        if out:
-            return cls.strip_ansi_codes(out)
         # Tinta (used throughout the app) holds a reference to the original
         # sys.stdout captured at import time, which bypasses pytest's
         # capfd/capsys capture.  Fall back to term.PRINT_LOG, which smart_print()
         # maintains independently.  reset_all() clears it at the start of each
         # test so we only see the current test's output here.
+        #
+        # Use a cursor so that successive calls within a single test each return
+        # only the output produced since the previous call, not the full log.
+        # The cursor is always advanced regardless of which path we use, keeping
+        # capfd and PRINT_LOG reads in sync.
         from src.lib import term
 
-        return "".join(text + end for text, end in term.PRINT_LOG)
+        out = capfd.readouterr().out
+        next_cursor = len(term.PRINT_LOG)
+        if out:
+            cls._print_log_cursor = next_cursor
+            return cls.strip_ansi_codes(out)
+        cursor = max(0, min(cls._print_log_cursor, next_cursor))
+        cls._print_log_cursor = next_cursor
+        return "".join(text + end for text, end in term.PRINT_LOG[cursor:])
 
     @classmethod
     def is_divider(cls, line: str | None) -> bool:
