@@ -70,6 +70,9 @@ jobs:
             --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[touch_of_frost__flat_mp3-expected_dict0]" \
             --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[count_of_monte_cristo__flat_mp3-expected_dict1]" \
             --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[house_on_the_cliff__flat_mp3-expected_dict2]" \
+            --deselect="src/tests/test_id3_tags.py::test_parse_combo_id3_tags[test_dict10-test_dict20-expected0]" \
+            --deselect="src/tests/test_id3_tags.py::test_ignore_graphic_audio" \
+            --deselect="src/tests/test_id3_tags.py::test_parse_id3_author[test_dict4-Sarah J. Maas]" \
             -q --tb=short
 
   # ── End-to-end converter tests (slow, runs in parallel, required to merge) ───

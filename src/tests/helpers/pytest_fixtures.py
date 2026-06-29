@@ -81,6 +81,10 @@ def _clear_all_caches():
     # a lazy recreation via set_match_filter() after the fixture files are in
     # place, avoiding an expensive empty-inbox scan on every test setup.
     InboxState.destroy()  # type: ignore[attr-defined]
+    # Also clear FAILED_BOOKS env var so that _sync_failed_from_env() is not
+    # triggered on the next InboxState initialization, which would cause a
+    # recursive double-init via the singleton pattern.
+    os.environ.pop("FAILED_BOOKS", None)
 
 
 @pytest.fixture(autouse=True, scope="function")

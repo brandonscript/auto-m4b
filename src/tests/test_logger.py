@@ -22,7 +22,7 @@ FIRST_LINE = (
 )
 
 LAST_LINE_MATCH_TOWER = (
-    r"^.*?-\d{4}\s{2,}"
+    r"^.*?[+-]\d{4}\s{2,}"
     r"SUCCESS\s{2,}"
     r"tower_treasure__flat_mp3\s{2,}"
     r"64 kb/s\s{2,}"
@@ -35,7 +35,7 @@ LAST_LINE_MATCH_TOWER = (
 )
 
 LAST_LINE_MATCH_CONSPIRACY = (
-    r"^.*?-\d{4}\s{2,}"
+    r"^.*?[+-]\d{4}\s{2,}"
     r"SUCCESS\s{2,}"
     r"The Great Courses - Conspiracies & Conspiracy Theories What We Should\s{2,}"
     r"128 kb/s\s{2,}"
@@ -134,7 +134,7 @@ def test_repeat_failed_writes_to_log(tower_treasure__flat_mp3: Audiobook, global
     check(
         global_test_log,
         [
-            r"^.*?-\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-"
+            r"^.*?[+-]\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-"
         ],
     )
 
@@ -145,7 +145,7 @@ def test_repeat_failed_writes_to_log(tower_treasure__flat_mp3: Audiobook, global
     check(
         global_test_log,
         [
-            r"^.*?-\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-\s{2,}-",
+            r"^.*?[+-]\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-\s{2,}-",
             LAST_LINE_MATCH_TOWER,
         ],
     )
@@ -180,7 +180,7 @@ def test_log_supports_vbr_mp3s(bitrate_vbr__mp3: Audiobook, global_test_log: Pat
     check(
         global_test_log,
         [
-            r"^.*?-\d{4}  SUCCESS  bitrate_vbr__mp3 \s* ~46 kb/s       22 kHz   .mp3 \s* \d+ files?  11 MB \s* 0h:33m:07s  02:43",
+            r"^.*?[+-]\d{4}  SUCCESS  bitrate_vbr__mp3 \s* ~46 kb/s       22 kHz   .mp3 \s* \d+ files?  11 MB \s* 0h:33m:07s  02:43",
         ],
     )
 

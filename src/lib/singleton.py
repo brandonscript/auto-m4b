@@ -25,8 +25,15 @@ def singleton(class_: type[C]) -> type[C]:
         def __init__(self, *args, **kwargs):
             if self._sealed:
                 return
-            super(class_w, self).__init__(*args, **kwargs)
+            # Seal before calling super().__init__() so that any recursive
+            # calls to the singleton constructor (e.g. from within __init__)
+            # short-circuit instead of triggering a second initialization.
             self._sealed = True
+            try:
+                super(class_w, self).__init__(*args, **kwargs)
+            except Exception:
+                self._sealed = False
+                raise
 
         @classmethod
         def destroy(cls):

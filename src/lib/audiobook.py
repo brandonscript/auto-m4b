@@ -327,7 +327,12 @@ class Audiobook(BaseModel):
         d = for_dir + "_dir"
         this_dir = getattr(self, d)
         if for_dir == "inbox" and self.active_dir_name == "inbox" and self.tree:
-            return self.tree.count_files()
+            # Tree may have been built with a match_filter that scopes to a
+            # parent-level pattern (e.g. "^(Nathan Lowell)") and therefore
+            # returns 0 for files inside the book's own subdirectories.
+            # Fall through to the direct filesystem count in that case.
+            if n := self.tree.count_files():
+                return n
         return count_audio_files_in_dir(this_dir, only_file_exts=cfg.AUDIO_EXTS)
 
     @property
