@@ -273,13 +273,6 @@ class Config:
                     if env_msg:
                         print_dark_grey(env_msg)
 
-                    # beta_features = [
-                    # (
-                    #     en.FEATURE_FLATTEN_MULTI_DISC_BOOKS,
-                    #     self.FLATTEN_MULTI_DISC_BOOKS,
-                    # ),
-                    # ]
-
                     if test_debug_msg := (
                         "TEST + DEBUG modes on"
                         if self.TEST and self.DEBUG
