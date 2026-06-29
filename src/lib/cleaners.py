@@ -63,17 +63,17 @@ def fix_smart_quotes(s: str) -> str:
     # This handles various Unicode smart quote characters
     smart_quote_map = {
         # Single quotes/apostrophes
-        "'": "'",  # U+2018 LEFT SINGLE QUOTATION MARK
-        "'": "'",  # U+2019 RIGHT SINGLE QUOTATION MARK
-        "‚": "'",  # U+201A SINGLE LOW-9 QUOTATION MARK
-        "‛": "'",  # U+201B SINGLE HIGH-REVERSED-9 QUOTATION MARK
-        "′": "'",  # U+2032 PRIME
-        "″": "'",  # U+2033 DOUBLE PRIME (sometimes used as quote)
+        "\u2018": "'",  # U+2018 LEFT SINGLE QUOTATION MARK
+        "\u2019": "'",  # U+2019 RIGHT SINGLE QUOTATION MARK
+        "\u201a": "'",  # U+201A SINGLE LOW-9 QUOTATION MARK
+        "\u201b": "'",  # U+201B SINGLE HIGH-REVERSED-9 QUOTATION MARK
+        "\u2032": "'",  # U+2032 PRIME
         # Double quotes
-        '"': '"',  # U+201C LEFT DOUBLE QUOTATION MARK
-        '"': '"',  # U+201D RIGHT DOUBLE QUOTATION MARK
-        "„": '"',  # U+201E DOUBLE LOW-9 QUOTATION MARK
-        "‟": '"',  # U+201F DOUBLE HIGH-REVERSED-9 QUOTATION MARK
+        "\u201c": '"',  # U+201C LEFT DOUBLE QUOTATION MARK
+        "\u201d": '"',  # U+201D RIGHT DOUBLE QUOTATION MARK
+        "\u201e": '"',  # U+201E DOUBLE LOW-9 QUOTATION MARK
+        "\u201f": '"',  # U+201F DOUBLE HIGH-REVERSED-9 QUOTATION MARK
+        "\u2033": '"',  # U+2033 DOUBLE PRIME (sometimes used as double quote)
     }
     trnsl = str.maketrans(smart_quote_map)
     return s.translate(trnsl)

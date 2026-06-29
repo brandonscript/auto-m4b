@@ -108,8 +108,9 @@ skip_covered = false
 [tool.poetry]
 name = "auto-m4b"
 version = "0.1.0"
-description = ""
-authors = ["Your Name <your.email@example.com>"]
+description = "Python-native audiobook converter — watches a folder and converts multi-file mp3/m4a books to chapterized m4b"
+authors = ["Brandon Shelley <brandon@brandonscript.com>"]
+license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
@@ -129,8 +130,11 @@ rapidfuzz = "^3.13.0"
 bidict = "^0.23.1"
 regex = "^2024.11.6"
 mutagen = "^1.47.0"
-spacy = { version = "<4", extras = ["apple"], platform = "darwin" }
-spacy-curated-transformers = "^0.3.0"
+spacy = [
+    { version = "<4", extras = ["apple"], markers = "sys_platform == 'darwin'" },
+    { version = "<4", markers = "sys_platform != 'darwin'" },
+]
+spacy-curated-transformers = { version = "^0.3.0", markers = "sys_platform == 'darwin'" }
 nltk = "^3.9.1"
 lazy = "^1.6"
 requests = "^2.32.3"

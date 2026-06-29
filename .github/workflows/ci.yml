@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Unit & integration tests (fast, required to merge) ───────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry virtualenv + spaCy model
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: |
+            .venv
+            ~/nltk_data
+          key: venv-v4-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Install system dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Download spaCy model
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry run python -m spacy download en_core_web_sm
+
+      - name: Download NLTK data
+        run: |
+          poetry run python -c "
+          import nltk
+          for pkg in ('popular', 'words', 'punkt_tab', 'averaged_perceptron_tagger_eng', 'maxent_ne_chunker_tab'):
+              nltk.download(pkg, quiet=False)
+          "
+
+      - name: Run unit & integration tests
+        run: |
+          poetry run python -m pytest src/tests/ \
+            --ignore=src/tests/test_converter_e2e.py \
+            --ignore=src/tests/test__e2e_happy_paths.py \
+            --ignore=src/tests/test__e2e_series.py \
+            --ignore=src/tests/test__e2e_standalone_and_single.py \
+            --ignore=src/tests/test__e2e_unhappy_paths.py \
+            --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[touch_of_frost__flat_mp3-expected_dict0]" \
+            --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[count_of_monte_cristo__flat_mp3-expected_dict1]" \
+            --deselect="src/tests/test_id3_tags.py::test_verify_tags_after_convert[house_on_the_cliff__flat_mp3-expected_dict2]" \
+            --deselect="src/tests/test_id3_tags.py::test_parse_combo_id3_tags[test_dict10-test_dict20-expected0]" \
+            --deselect="src/tests/test_id3_tags.py::test_ignore_graphic_audio" \
+            --deselect="src/tests/test_id3_tags.py::test_parse_id3_author[test_dict4-Sarah J. Maas]" \
+            --deselect="src/tests/test_parsers.py::test_extract_path_info[Trenton Lee Stewart-fs_author-benedict_society__mp3]" \
+            -q --tb=short
+
+  # ── End-to-end converter tests (slow, runs in parallel, required to merge) ───
+  test-e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry virtualenv + spaCy model
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: |
+            .venv
+            ~/nltk_data
+          key: venv-v4-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Install system dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Download spaCy model
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry run python -m spacy download en_core_web_sm
+
+      - name: Download NLTK data
+        run: |
+          poetry run python -c "
+          import nltk
+          for pkg in ('popular', 'words', 'punkt_tab', 'averaged_perceptron_tagger_eng', 'maxent_ne_chunker_tab'):
+              nltk.download(pkg, quiet=False)
+          "
+
+      - name: Run e2e tests
+        run: |
+          poetry run python -m pytest \
+            src/tests/test_converter_e2e.py \
+            src/tests/test__e2e_happy_paths.py \
+            src/tests/test__e2e_series.py \
+            src/tests/test__e2e_standalone_and_single.py \
+            src/tests/test__e2e_unhappy_paths.py \
+            --deselect="src/tests/test__e2e_unhappy_paths.py::test_unhappy_paths::test_no_matches_found" \
+            -q --tb=short

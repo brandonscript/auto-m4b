@@ -1495,8 +1495,12 @@ def score_series_parent(tree: "BooksTree") -> float:
         if tree.is_root or tree.is_file() or (len(tree.dirs) == 1 and not tree.files):
             return 0.0
 
-        # If one or fewer children, it's not a series parent
+        # If one or fewer children, it's not a series parent — unless the
+        # directory appears to be a series parent on disk (e.g. children were
+        # filtered out because the tree was built with a maxdepth limit).
         if len(tree.children) <= 1:
+            if not tree.children and is_maybe_series_parent(tree.path):
+                return 0.5
             return 0.0
 
         tree.tick(f"init score_series_parent for {tree.rel_path}")

@@ -1,138 +1,128 @@
-# Auto-M4B
+# auto-m4b
 
-[![Join the chat at https://gitter.im/Audiobook-Server/auto-m4b](https://badges.gitter.im/Audiobook-Server/auto-m4b.svg)](https://gitter.im/Audiobook-Server/auto-m4b?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+A Python-native audiobook converter that watches a folder for new audiobooks and automatically converts multi-file mp3/m4a collections into a single, chapterized `.m4b` — no Docker, no PHP, no external dependencies beyond `ffmpeg`.
 
-This container is mostly based on the powerful [m4b-tool](https://github.com/sandreas/m4b-tool) made by sandreas  
-This repo is my fork of the fantastic [docker-m4b-tool](https://github.com/9Mad-Max5/docker-m4b-tool) created by 9Mad-Max5. 
+## Features
 
-This is a docker container that will watch a folder for new books, auto convert mp3 books to chapterized m4b, and move all m4b books to a specific output folder, this output folder is where the [beets.io audible plugin](https://github.com/seanap/beets-audible) will look for audiobooks and use the audible api to perfectly tag and organize your books.
+- **Pure Python** — no Docker or PHP runtime required; uses `ffmpeg` via subprocess for encoding
+- **Watches a folder** continuously and converts new books as they arrive
+- **Smart book detection** — classifies flat directories, series, containers, and standalone files
+- **Chapter generation** — one chapter per source file, with intelligent title normalization
+- **Cover art** — extracts and embeds cover art from source files
+- **ID3/AAC tag preservation** — carries over title, artist, album, genre, and sort fields
+- **Series support** — handles nested series structures (e.g. `Author / Series / Book 01`)
+- **Crash protection** — skips known-bad books on subsequent runs to avoid infinite retry loops
+- **Backup** — optionally backs up source files before conversion
 
-## Intended Use
-This is meant to be an automated step between aquisition and tagging.
-* Install via docker-compose 
-* Save new audiobooks to a /recentlyadded folder.
-* All multifile m4b/mp3/m4a/ogg books will be converted to a chapterized m4b and saved to an /untagged folder  
-* This script will watch `/temp/recentlyadded` and automatically move mp3 books to `/temp/merge`, then automatically put all m4b's in the output folder `/temp/untagged`.  It also makes a backup incase something goes wrong (can be disabled if desired).
+## Requirements
 
-Use the [beets.io audible plugin](https://github.com/seanap/beets-audible) to finish the tagging and sorting.
+- Python 3.12+
+- [`ffmpeg`](https://ffmpeg.org/) and `ffprobe` in your `PATH`
+- [Poetry](https://python-poetry.org/) (for development/running from source)
 
-## Known Limitations
+## Installation
 
-* The chapters are based on the mp3 tracks. A single mp3 file will become a single m4b with 1 chapter, also if the mp3 filenames are garbarge then your m4b chapternames will be terrible as well.  See section on Chapters below for how to manually adjust.  
-* Right now book folders with nested subfolders will be moved to a /fix folder for manual filename/folder fixing.  It should be possible to modify the auto-m4b-tool.sh script to automatically prefix the subfoldername and move the files up a level, let me know if you know how to do this.  
-* The conversion process actually strips some tags and covers from the files, which is why you need to use a tagger (mp3tag or beets.io) before adding to Plex.
-
-## Need ARM Support?
-Change the image to `spencermksmith/auto-m4b`
-
-## Using torrents and need to preserve seeding?
-In the settings of your client add this line to `Run external program on torrent completion`, it will copy all finished torrent files to your "recentlyadded" folder:
-* `cp -r "%F" "path/to/temp/recentlyadded"`
-
-## How to use
-This docker assumes the following folder structure:
-
-```sh
-temp
-│
-└───recentlyadded # Input folder Add new books here
-│     │     book1.m4b
-│     |     book2.mp3
-|     └─────book3
-│           │   01-book3.mp3
-│           │   ... 
-└───merge # folder the script uses to combine mp3's
-│     └─────book2
-│           │   01-book2.mp3
-│           │   ...
-└───untagged # Output folder where all m4b's wait to be tagged
-│     └─────book4
-│           │   book4.m4b
-└───delete # needed by the script
-|
-└───fix # Manually fix books with nested folders
-|
-└───backup # Backups incase anything goes wrong
-      └─────book2
-            │   01-book2.mp3
-            │   ... 
-```
-
-### Installation
-
-1. Create a `temp` folder and keep the location in mind for Step 6 
-2. Install docker https://docs.docker.com/engine/install/ubuntu/
-3. Manage docker as non-root https://docs.docker.com/engine/install/linux-postinstall/
-4. Install docker-compose https://docs.docker.com/compose/install/
-5. Create the compose file:  
-    `nano docker-compose.yml`
-6. Paste the yaml code below into the compose file, and change the volume mount locations
-7. Put a test mp3 in the /temp/recentlyadded directory.
-8. Start the docker (It should convert the mp3 and leave it in your /temp/untagged directory. It runs automatically every 5 min)  
-    `docker-compose up -d`
-### Example docker-compose.yml
-*  Replace the `/path/to/...` with your actual folder locations, but leave the `:` and everything after:  
-*  Replace the PUID and PGID with your user ( [?](https://www.carnaghan.com/knowledge-base/how-to-find-your-uiduserid-and-gidgroupid-in-linux-via-the-command-line/) )
-#### docker-compose.yml
-```yaml
-version: '3.7'
-services:
-  auto-m4b:
-    image: seanap/auto-m4b
-    container_name: auto-m4b
-    volumes:
-      - /path/to/config:/config
-      - /path/to/temp:/temp
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - CPU_CORES=2
-      - SLEEPTIME=1m
-      - MAKE_BACKUP=Y
-```
-
-## To Manually Set Chapters:
-1. Put a folder with mp3's in the `/temp/recentlyadded` and let the script process the book like normal
-2. In the output folder ( `/temp/untagged` ) there will be a book folder that includes the recently converted *.m4b and a *.chapters.txt file.
-3. Open the chapters file and edit/add/rename, then save
-4. Move the book folder (which contains the m4b and chapters.txt files) to `/temp/merge`
-5. When the script runs it will re-chapterize the m4b and move it back to `/temp/untagged`
-
-## Running Locally (Development / Test Mode)
-
-Instead of Docker, you can run the app directly with Poetry. Use `--test` to load `.env.test`, which redirects all folders to `src/tests/tmp/` so nothing touches your real library.
+### From source
 
 ```bash
-# Run one pass over src/tests/tmp/inbox/ and exit
-poetry run app --test --max_loops 1
-
-# Watch the inbox continuously (Ctrl+C to stop)
-poetry run app --test
-
-# Process only a specific book (supports regex)
-poetry run app --test --max_loops 1 --match "Chanur"
+git clone https://github.com/brandonscript/auto-m4b.git
+cd auto-m4b
+poetry install
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--test` | Loads `.env.test`; uses `src/tests/tmp/` for all folders |
-| `--max_loops N` | Stop after N passes (omit or use `-1` to loop forever) |
-| `--match PATTERN` | Only process books whose folder name matches this string/regex |
-| `--debug` | Enable verbose debug output |
+### Configuration
 
-## Advanced Options
+Create a `.env` file in the project root (or copy `.env.test` as a starting point):
 
-#### Edit the script that is run
-You shouldn't need to change any options, but if you want to you will need to exec into the docker container. By default only vim text editor is installed, you will need to do a `apt-get update && apt-get install nano` if you want to use nano to edit the scipt.  
-* `docker exec -it auto-m4b sh -c 'vi auto-m4b-tool.sh'`  
+```env
+# Required — absolute or relative paths
+INBOX_FOLDER=/path/to/inbox
+CONVERTED_FOLDER=/path/to/converted
+ARCHIVE_FOLDER=/path/to/archive
+BACKUP_FOLDER=/path/to/backup
 
-#### CPU Cores
-The script will automatically use all CPU cores available, to change the amount of cpu cores for the converting change the `--jobs` flag in the m4b-tool command, but do not set it higher than the amount of cores available.  
+# Optional
+WORKING_FOLDER=/tmp/auto-m4b   # default: system temp dir
+```
 
-#### Backup Folder
-For those copying files from another source into the `recentlyadded` folder, it might not make sense to waste time copying to the `backup` folder (because they were already copied from somewhere else).  Backing up is enabled by default.  To disable this copy operation, change this line in your compose file: `- MAKE_BACKUP=N`.
+## Usage
 
-#### More Reading
-More m4b-tool options https://github.com/sandreas/m4b-tool#reference
+```bash
+poetry run python -m src
+```
 
+The app will start watching `INBOX_FOLDER` and converting books it finds. Press `Ctrl+C` to stop.
 
+### Run once
+
+```bash
+poetry run python -m src --max-loops 1
+```
+
+### Filter to a specific book or pattern
+
+```bash
+poetry run python -m src --match-filter "Hardy Boys"
+```
+
+## Folder structure
+
+```
+inbox/
+│
+├── flat_mp3_book/               # flat directory of .mp3 files → one .m4b
+│   ├── 01 - Chapter One.mp3
+│   └── 02 - Chapter Two.mp3
+│
+├── Author Name/                 # series — each subfolder becomes its own .m4b
+│   ├── 01 - Book One/
+│   │   └── *.mp3
+│   └── 02 - Book Two/
+│       └── *.mp3
+│
+└── standalone_book.m4b          # single-file .m4b — passed through as-is
+```
+
+Converted books land in `CONVERTED_FOLDER`. If `BACKUP=Y` (default), source files are copied to `BACKUP_FOLDER` before conversion.
+
+## Configuration reference
+
+All options are set via environment variables (`.env` file or shell environment).
+
+| Variable | Default | Description |
+|---|---|---|
+| `INBOX_FOLDER` | *(required)* | Folder to watch for new audiobooks |
+| `CONVERTED_FOLDER` | *(required)* | Output folder for finished `.m4b` files |
+| `ARCHIVE_FOLDER` | *(required)* | Folder where processed source books are moved |
+| `BACKUP_FOLDER` | *(required)* | Folder for pre-conversion backups |
+| `WORKING_FOLDER` | system temp | Scratch space for merge/build steps |
+| `SLEEP_TIME` | `10` | Seconds between inbox scans |
+| `WAIT_TIME` | `5` | Seconds to wait after a folder is modified before processing |
+| `CPU_CORES` | all cores | Number of parallel ffmpeg jobs |
+| `MAX_CHAPTER_LENGTH` | `15,30` | Min/max chapter length in minutes |
+| `AUDIO_EXTS` | mp3,m4a,m4b,… | Comma-separated list of audio extensions to process |
+| `MATCH_FILTER` | *(none)* | Regex — only process books whose name matches |
+| `ON_COMPLETE` | `archive` | What to do with source files after conversion: `archive`, `delete`, or `nothing` |
+| `OVERWRITE_EXISTING` | `N` | Set to `Y` to re-convert books that already exist in `CONVERTED_FOLDER` |
+| `BACKUP` | `Y` | Set to `N` to skip backing up source files |
+| `CRASH_PROTECTION` | `Y` | Set to `N` to disable skipping books that previously failed |
+| `USE_FILENAMES_AS_CHAPTERS` | `N` | Set to `Y` to derive chapter titles from filenames instead of ID3 tags |
+| `NO_CATS` | `N` | Set to `Y` to suppress the ASCII cat art between loops |
+| `OPEN_LIBRARY_USER_AGENT` | *(none)* | User-agent string for Open Library API lookups (format: `AppName/1.0 (email)`) |
+
+## Development
+
+```bash
+# Install dependencies
+poetry install
+
+# Run tests
+poetry run python -m pytest src/tests/
+
+# Run linting
+poetry run mypy src/
+```
+
+## License
+
+[MIT](LICENSE) © 2026 Brandon Shelley

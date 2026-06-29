@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module=r"thinc\..*")
 
 import nltk
 import spacy
-from nltk.corpus import webtext, words
+from nltk.corpus import words
 from spacy.language import Language
 from spacy.matcher import Matcher
 
@@ -45,8 +45,7 @@ def should_update_nltk() -> bool:
         return True
 
 
-english_words = set()
-webtext_words = set()
+english_words: set[str] = set()
 
 
 def update_nltk_timestamp():
@@ -55,16 +54,29 @@ def update_nltk_timestamp():
         json.dump({"last_update": datetime.now().isoformat()}, f)
 
 
-if should_update_nltk():
+def _load_nltk_data():
+    """Download required NLTK resources and load corpora. Fails gracefully."""
+    global english_words
     with contextlib.redirect_stdout(open(os.devnull, "w")):
-        nltk.download("words")
-        nltk.download("webtext")
+        # punkt_tab / averaged_perceptron_tagger_eng / maxent_ne_chunker_tab
+        # are required by word_tokenize, pos_tag, and ne_chunk in NLTK 3.8+.
+        for pkg in ("popular", "words", "punkt_tab", "averaged_perceptron_tagger_eng", "maxent_ne_chunker_tab"):
+            nltk.download(pkg, quiet=True)
+    try:
         english_words = set(words.words())
-        webtext_words = set(webtext.words())
+    except Exception:
+        pass  # Degrade gracefully; english_words stays empty
+
+
+if should_update_nltk():
+    _load_nltk_data()
     update_nltk_timestamp()
 else:
-    english_words = set(words.words())
-    webtext_words = set(webtext.words())
+    try:
+        english_words = set(words.words())
+    except Exception:
+        _load_nltk_data()
+        update_nltk_timestamp()
 
 nlp = None  # type: ignore
 
@@ -87,18 +99,25 @@ def _devnull():
 
 
 def _load_spacy_model() -> spacy.language.Language:
-    for model in (SPACY_MODEL_TRF, SPACY_MODEL_SM):
+    # en_core_web_trf requires spacy-curated-transformers which is only
+    # installed on macOS (Apple Silicon). Skip it on other platforms.
+    models = (SPACY_MODEL_TRF, SPACY_MODEL_SM) if sys.platform == "darwin" else (SPACY_MODEL_SM,)
+    for model in models:
         try:
             with _devnull():
                 return spacy.load(model)
-        except OSError:
-            print_debug(f"spaCy model '{model}' not found, trying to download...")
+        except (OSError, ValueError):
+            print_debug(f"spaCy model '{model}' not found or missing plugin, trying to download...")
             _ensure_pip()
             result = subprocess.run([sys.executable, "-m", "spacy", "download", model], capture_output=True)
             if result.returncode == 0:
-                return spacy.load(model)
-            print_debug(f"Failed to download '{model}': {result.stderr.decode().strip()}")
-    raise RuntimeError(f"Could not load any spaCy model (tried: {SPACY_MODEL_TRF}, {SPACY_MODEL_SM})")
+                try:
+                    return spacy.load(model)
+                except (OSError, ValueError) as e:
+                    print_debug(f"Failed to load '{model}' after download: {e}")
+            else:
+                print_debug(f"Failed to download '{model}': {result.stderr.decode().strip()}")
+    raise RuntimeError(f"Could not load any spaCy model (tried: {', '.join(models)})")
 
 
 nlp = _load_spacy_model()

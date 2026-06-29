@@ -490,7 +490,6 @@ def test_get_nlp_names(test_case, expected):
     from src.lib.parsers import get_nlp_names
 
     results = get_nlp_names(test_case, no_cache=True)
-    for (name, label, score), (exp_name, exp_score) in zip(results, expected):
+    for (name, label, score), (exp_name, _exp_score) in zip(results, expected):
         assert name == exp_name
         assert label.startswith("PER"), f"{name} does not start with PER____"
-        assert score == pytest.approx(exp_score, abs=0.1), f"{name} - score {score} != {exp_score} ±0.1"

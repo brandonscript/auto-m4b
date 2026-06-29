@@ -940,20 +940,20 @@ def parse_names(
     # and join the authors with a comma, then the narrators with a comma.
     if names_split_pattern.search(s) or names_split_pattern.search(fallback):
 
-        split_names = names_split_pattern.split(s)
-        split_fallback = names_split_pattern.split(fallback)
+        def _filter_split(parts: list[str]) -> list[str]:
+            return [
+                n
+                for n in [names_split_pattern.sub("", n).strip() for n in parts]
+                if n and not re.match(r"and|as", n, re.I)
+            ]
 
-        # For each name in split_names, remove any junk chars, "and", or all word after and including "as"
-        split_names = [
-            n
-            for n in [names_split_pattern.sub("", n).strip() for n in split_names]
-            if n and not re.match(r"and|as", n, re.I)
-        ]
+        split_names = _filter_split(names_split_pattern.split(s))
+        split_fallback = _filter_split(names_split_pattern.split(fallback))
 
         authors, narrators = zip(
             *[
                 parse_names((n or "").strip(), target, fallback=(f or "").strip(), _long_match=_long_match)
-                for n, f in zip_longest(names_split_pattern.split(s), names_split_pattern.split(fallback))
+                for n, f in zip_longest(split_names, split_fallback)
             ]
         )
         return AuthorNarrator(
@@ -1030,8 +1030,8 @@ def parse_names(
     nltk_author = None if not author else next((n for (n, _, sc) in get_nlp_names(author) if sc > 0.7), None)
     nltk_narrator = None if not narrator else next((n for (n, _, sc) in get_nlp_names(narrator) if sc > 0.7), None)  # type: ignore
 
-    if nltk_s and (not fallback or len(nltk_s[0]) > len(fallback)):
-        fallback = nltk_s[0]
+    if nltk_s and (not fallback or len(nltk_s) > len(fallback)):
+        fallback = nltk_s
 
     author = nltk_author if nltk_author else (get_name_from_str(author) or fallback)
     narrator = nltk_narrator if nltk_narrator else (get_name_from_str(narrator) or fallback)

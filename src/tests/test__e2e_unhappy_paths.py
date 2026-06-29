@@ -140,7 +140,6 @@ class test_unhappy_paths:
         self,
         missing_chums__mixed_mp3: Audiobook,
         tower_treasure__flat_mp3: Audiobook,
-        disable_multidisc,
         enable_debug,
         archive,
         capfd: CaptureFixture[str],
@@ -213,7 +212,6 @@ class test_unhappy_paths:
         self,
         old_mill__multidisc_mp3: Audiobook,
         capfd: CaptureFixture[str],
-        disable_multidisc,
     ):
         inbox_dir = old_mill__multidisc_mp3.inbox_dir
         converted_dir = old_mill__multidisc_mp3.converted_dir
@@ -463,7 +461,6 @@ class test_unhappy_paths:
         requires_empty_inbox,
         missing_chums__mixed_mp3: Audiobook,
         roman_numeral__mp3: Audiobook,
-        disable_multidisc,
         loop_count,
         capfd: CaptureFixture[str],
     ):
@@ -505,7 +502,6 @@ class test_unhappy_paths:
         self,
         tiny__flat_mp3: Audiobook,
         old_mill__multidisc_mp3: Audiobook,
-        disable_multidisc,
         enable_debug,
         capfd: CaptureFixture[str],
     ):
