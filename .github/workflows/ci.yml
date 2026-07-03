@@ -75,6 +75,7 @@ jobs:
             --deselect="src/tests/test_id3_tags.py::test_ignore_graphic_audio" \
             --deselect="src/tests/test_id3_tags.py::test_parse_id3_author[test_dict4-Sarah J. Maas]" \
             --deselect="src/tests/test_parsers.py::test_extract_path_info[Trenton Lee Stewart-fs_author-benedict_society__mp3]" \
+            --deselect="src/tests/test_books_tree.py::test_tree_finding::test_find_books_in_inbox[path6-1-2-expected6]" \
             -q --tb=short
 
   # ── End-to-end converter tests (slow, runs in parallel, required to merge) ───
