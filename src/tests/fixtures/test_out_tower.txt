@@ -1,0 +1,64 @@
+
+Starting auto-m4b...
+TEST + DEBUG modes on
+10 CPU cores / 0.1s sleep / Max ch. length: 15-30m / m4b-tool v0.5-prerelease-25-g81b9542 (Docker)
+
+------------------------  ⌐◒-◒  auto-m4b • 2024-04-02 21:35:02  -------------------------
+Watching for books in /auto-m4b/src/tests/tmp/inbox ꨄ︎
+
+Found 1 book in the inbox matching tower_treasure__flat_mp3 (ignoring 1)
+
+╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮
+││ tower_treasure__flat_mp3 ││
+╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
+
+File/folder info:
+- Source: /auto-m4b/src/tests/tmp/inbox/
+          tower_treasure__flat_mp3
+- Output: /auto-m4b/src/tests/tmp/converted/
+          tower_treasure__flat_mp3
+- File type: mp3
+- Audio files: 2
+- Total size: 8 MB
+
+Not backing up (backups are disabled)
+
+Copying files to working folder... ✓
+
+Sampling towertreasure4_01_dixon_64kb.mp3 for book metadata and quality info:
+- Title: The Tower Treasure (Version 4)
+- Album: The Tower Treasure (Version 4)
+- Author: Franklin W. Dixon
+- Quality: 64 kb/s @ 22 kHz
+- Duration: 0h:17m:29s
+- No cover art
+
+Starting mp3 → m4b conversion at 09:35:04 PM,\xa0Tue, 02 Apr 2024...
+/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /auto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/tower_treasure__flat_mp3 -n --audio-codec=libfdk_aac --audio-bitrate=64000 --audio-samplerate=22050 --jobs=10 --output-file=/mnt/build/tower_treasure__flat_mp3/tower_treasure__flat_mp3.m4b --logfile=/mnt/build/tower_treasure__flat_mp3/auto-m4b.tower_treasure__flat_mp3.log --no-chapter-reindexing --name="The Tower Treasure (Version 4)" --sortname="The Tower Treasure (Version 4)" --album="The Tower Treasure (Version 4)" --sortalbum="The Tower Treasure (Version 4)" --artist="Franklin W. Dixon" --sortartist="Franklin W. Dixon" --writer="Franklin W. Dixon" --albumartist="Franklin W. Dixon" --encoded-by=BOOKSY --genre=Audiobook
+
+Verifying id3 tags... ✓
+
+Moving to converted books folder → /auto-m4b/src/tests/tmp/converted/tower_treasure__flat_mp3/
+                                   tower_treasure__flat_mp3.m4b
+
+ *** Test mode: The original folder will not be moved or deleted
+
+Converted tower_treasure__flat_mp3 in 3 seconds 🐾✨🥞
+
+------------------------------------------------------------------------------------------
+
+Finished converting all available books, waiting for more to be added to the inbox
+
+        .--.                    .---.
+ ___.---|░░|            .-.     |░░░|
+⎧===|‾‾‾|░░|_           |_|   __|---|‾‾|
+| A | B |‾‾| \\      .----! |  |__|   |--|
+| U | O |PY|𐋲𛲟\\     |====| |‾‾|==| M |‾‾|
+| D | O |__|\\  \\   |CATS| |▒▒|  | 4 |┌┐|
+| I | K |░░| \\  \\  | ꞈ ꞈ| |==|  | B |└┘|
+| O | S |░░|  \\𐋲𛲟\\ |⚞°⸞°|_|__|==|   |__|
+|===|___|░░|   \\𐋲𛲟\\|𛰱˛ ˛|=|--|¯¯|░░░|--|
+'---^---'--^    `---'`----^-^--^--^---'--'
+
+------------------------------------------------------------------------------------------
+

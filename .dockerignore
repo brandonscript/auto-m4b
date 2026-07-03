@@ -1,0 +1,16 @@
+**/.git
+**/.venv*
+**/__pycache__
+**/tests
+**/.env*
+*.md
+.coverage
+.gitignore
+.pre-commit-config.yaml
+.vscode/
+.github/
+scripts/
+sandbox/
+docker-compose*.yml
+auto-m4b.code-workspace
+.pytest_cache/
