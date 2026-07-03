@@ -1,0 +1,21 @@
+services:
+  auto-m4b:
+    image: brandonscript/auto-m4b
+    # build: .  # uncomment to build locally instead of pulling from Docker Hub
+    container_name: auto-m4b
+    restart: unless-stopped
+    volumes:
+      - /path/to/inbox:/data/inbox
+      - /path/to/converted:/data/converted
+      - /path/to/archive:/data/archive
+      - /path/to/backup:/data/backup
+    environment:
+      - INBOX_FOLDER=/data/inbox
+      - CONVERTED_FOLDER=/data/converted
+      - ARCHIVE_FOLDER=/data/archive
+      - BACKUP_FOLDER=/data/backup
+      - TZ=America/Vancouver  # your timezone
+      # - SLEEP_TIME=10
+      # - BACKUP=Y
+      # - OVERWRITE_EXISTING=N
+      # - ON_COMPLETE=archive

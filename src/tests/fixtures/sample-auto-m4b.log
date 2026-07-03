@@ -1,0 +1,182 @@
+Date                       Result    Original Folder                                                            Bitrate   Sample Rate   Type       Files   Size      Duration   Time
+2023-10-21 22:37:37-0700   SUCCESS   Stephen Hawking - A Brief History of Time                                  67 kb/s      44.1 kHz   .mp3     4 files    80M             -   0:35
+2023-10-21 23:25:46-0700   SUCCESS   Ruta Sepetys - Salt to the Sea                                             64 kb/s      44.1 kHz   .mp3     7 files   242M             -   4:16
+2023-10-22 10:11:57-0700   SUCCESS   Neil Gaiman - The Graveyard Book                                           64 kb/s      22.1 kHz   .m4b    10 files   337M             -   5:08
+2023-10-22 14:28:07-0700   SUCCESS   Golding, William - Lord of the Flies (1954) Narrated by Martin Jarvis     128 kb/s      44.1 kHz   .mp3    76 files   388M             -   02:03
+2023-10-22 14:38:39-0700   SUCCESS   A Love by Design - Elizabeth Everett 2021 mp3                              64 kb/s      44.1 kHz   .mp3    12 files   322M             -   03:10
+2023-10-22 16:58:31-0700   SUCCESS   Alexandre Dumas - The Count of Monte Cristo (Unabridged) -test             63 kb/s      22.1 kHz   .m4b     5 files    57M             -   00:03
+2023-10-22 18:37:58-0700   FAILED    The Law of Attraction by Esther and Jerry Hicks                           129 kb/s      44.1 kHz   .wma    85 files   336M             -   
+2023-10-22 18:43:47-0700   SUCCESS   Georgia Toffolo - Meet Me 01 - Meet Me In London                           64 kb/s      44.1 kHz   .mp3    20 files   277M             -   02:09
+2023-10-22 19:06:32-0700   SUCCESS   Avery Flynn - Witcha Gonna Do                                              76 kb/s      44.1 kHz   .mp3    38 files   175M             -   01:34
+2023-10-22 19:07:28-0700   SUCCESS   Dominion of Blades Book 1                                                  32 kb/s      22.1 kHz   .m4b    45 files   174M             -   00:51
+2023-10-22 19:09:22-0700   SUCCESS   Georgia Toffolo - Meet Me 02 - Meet Me in Hawaii                           64 kb/s      24.0 kHz   .mp3    21 files   263M             -   01:45
+2023-10-22 19:12:45-0700   SUCCESS   Not the Witch You Wed - April Asher  2022 mp3                              64 kb/s      44.1 kHz   .mp3    11 files   337M             -   03:13
+2023-10-22 20:14:00-0700   SUCCESS   A Court Of Thorns And Roses [03.1] A Court Of Frost And Starlight         256 kb/s      44.1 kHz   .mp3     5 files   612M             -   02:06
+2023-10-22 21:11:39-0700   SUCCESS   The Gentlemen's Hour                                                       64 kb/s      44.1 kHz   .mp3   171 files   282M             -   02:31
+2023-10-22 21:20:03-0700   SUCCESS   Tower and Hive - 01 - The Rowan                                            48 kb/s      44.1 kHz   .mp3     8 files   196M             -   01:47
+2023-10-22 21:25:31-0700   SUCCESS   01 - Pest Control                                                         256 kb/s      44.1 kHz   .mp3     2 files   269M             -   01:20
+2023-10-22 21:36:32-0700   SUCCESS   05 - The Day of the Troll                                                 320 kb/s      44.1 kHz   .mp3     2 files   316M             -   1:21
+2023-10-22 21:38:04-0700   SUCCESS   06 - The Last Voyage                                                      320 kb/s      44.1 kHz   .mp3     2 files   307M             -   1:23
+2023-10-22 21:40:09-0700   SUCCESS   The Feast of the Drowned                                                  320 kb/s      44.1 kHz   .mp3     3 files   341M             -   1:26
+2023-10-22 21:58:45-0700   SUCCESS   12 Thunder in the Sky                                                      32 kb/s      11.0 kHz   .mp3    37 files    87M             -   00:31
+2023-10-22 22:00:37-0700   SUCCESS   18 Tomb of the Golden Bird                                                 61 kb/s      44.1 kHz   .mp3     5 files   160M             -   01:48
+2023-10-22 22:03:15-0700   SUCCESS   If You're Reading This, It's Too Late - Pseudonymous Bosch [mp3 audiob     64 kb/s      44.1 kHz   .mp3     6 files   193M             -   02:02
+2023-10-22 22:06:36-0700   SUCCESS   # not better quality Throne of Glass 6 - Tower of Dawn                     64 kb/s      22.1 kHz   .mp3    69 files   629M             -   02:31
+2023-10-22 22:13:57-0700   SUCCESS   03 Lev Grossman - The Magician's Land                                     320 kb/s      44.1 kHz   .mp3   214 files   2.3G             -   05:19
+2023-10-22 22:15:16-0700   SUCCESS   #not better quality Throne of Glass 2 - Crown of Midnight                  64 kb/s      22.1 kHz   .mp3    56 files   334M             -   01:00
+2023-10-22 23:36:59-0700   SUCCESS   Robin Hobb - 02 - Dragon Haven (2010) (do not delete!) (existing is be    128 kb/s      44.1 kHz   .mp3    31 files   1.1G             -   05:37
+2023-10-22 23:47:43-0700   SUCCESS   SoT 01 - Wizards First Rule                                               128 kb/s      44.1 kHz   .mp3     3 files   1.7G             -   09:16
+2023-10-22 23:59:38-0700   SUCCESS   SoT 02 - Stone of Tears                                                   128 kb/s      44.1 kHz   .mp3     3 files   2.0G             -   10:12
+2023-10-23 00:08:37-0700   SUCCESS   SoT 03 - Blood of the Fold                                                128 kb/s      44.1 kHz   .mp3     2 files   1.3G             -   08:00
+2023-10-23 00:17:03-0700   SUCCESS   SoT 04 - Temple of the Winds                                              128 kb/s      44.1 kHz   .mp3     3 files   1.5G             -   07:26
+2023-10-23 00:26:28-0700   SUCCESS   SoT 05 - Soul of the Fire                                                 128 kb/s      44.1 kHz   .mp3     2 files   1.4G             -   08:22
+2023-10-23 00:36:14-0700   SUCCESS   SoT 06 - Faith of the Fallen                                              128 kb/s      44.1 kHz   .mp3     3 files   1.6G             -   08:43
+2023-10-23 00:46:05-0700   SUCCESS   SoT 07 - The Pillars of Creation                                          128 kb/s      44.1 kHz   .mp3     2 files   1.2G             -   07:43
+2023-10-23 00:56:03-0700   SUCCESS   SoT 08 - Naked Empire                                                     128 kb/s      44.1 kHz   .mp3     2 files   1.4G             -   08:47
+2023-10-23 01:06:09-0700   SUCCESS   SoT 09 - Chainfire                                                        128 kb/s      44.1 kHz   .mp3     3 files   1.5G             -   08:57
+2023-10-23 01:15:55-0700   SUCCESS   SoT 10 - PhantoM                                                          128 kb/s      44.1 kHz   .mp3     3 files   1.5G             -   08:47
+2023-10-23 01:25:19-0700   SUCCESS   SoT 11 - Confessor                                                        128 kb/s      44.1 kHz   .mp3     2 files   1.4G             -   08:31
+2023-10-23 07:24:18-0700   SUCCESS   14. 32 BBY - Cloak of Deception                                            48 kb/s      44.1 kHz   .mp3     5 files   127M             -   01:30
+2023-10-23 07:26:44-0700   SUCCESS   18. 27 BBY - Jedi Quest 01 - The Way of the Apprentice                     97 kb/s      44.1 kHz   .mp3    13 files   191M             -   02:20
+2023-10-23 07:32:50-0700   SUCCESS   23. 22 BBY - The Approaching StorM                                       1199 kb/s      44.1 kHz   .mp3     5 files   292M             -   05:26
+2023-10-23 07:34:43-0700   SUCCESS   35. 22 BBY - Yoda Dark Rendezvous                                          96 kb/s      44.1 kHz   .mp3     4 files   210M             -   01:46
+2023-10-23 07:36:22-0700   SUCCESS   36. 19 BBY - Labyrinth Of Evil                                            128 kb/s      44.1 kHz   .mp3     4 files   278M             -   01:31
+2023-10-23 07:39:05-0700   SUCCESS   39. 19 BBY - Dark Lord The Rise of Darth Vader                            140 kb/s      44.1 kHz   .mp3     5 files   367M             -   02:32
+2023-10-23 07:40:05-0700   SUCCESS   40. 10 BBY - The Han Solo Trilogy 01 - Paradise Snare                     192 kb/s      44.1 kHz   .mp3     4 files   176M             -   00:55
+2023-10-23 07:40:28-0700   SUCCESS   41. 5 BBY - The Han Solo Trilogy 02 - The Hutt Gambit                      33 kb/s      22.1 kHz   .mp3     4 files    41M             -   00:21
+2023-10-23 07:41:27-0700   SUCCESS   43. 2 BBY - The Han Solo Trilogy 03 - Rebel Dawn                          128 kb/s      44.1 kHz   .mp3     4 files   141M             -   00:54
+2023-10-23 07:45:25-0700   SUCCESS   44. 1 BBY - The Force Unleashed II                                         61 kb/s      44.1 kHz   .mp3     2 files   277M             -   03:50
+2023-10-23 07:46:36-0700   SUCCESS   45. 1 BBY - Dark Forces 01 - Soldier for the Empire                       192 kb/s      44.1 kHz   .mp3     2 files   156M             -   01:06
+2023-10-23 08:11:14-0700   SUCCESS   A Lady's Formula for Love                                                  64 kb/s      44.1 kHz   .mp3     9 files   291M             -   02:57
+2023-10-23 21:21:07-0700   SUCCESS   Fight Club Audiobook                                                       40 kb/s      16.0 kHz   .mp3    43 files    96M             -   00:24
+2023-10-23 21:21:31-0700   SUCCESS   Overcome Stress and Anxiety with EMDR                                     160 kb/s      44.1 kHz   .mp3     2 files    62M             -   00:22
+2023-10-23 21:23:08-0700   SUCCESS   Ryk Brown - Rings Haven 64K by chapter                                     64 kb/s      44.1 kHz   .mp3    10 files   159M             -   01:32
+2023-10-23 21:25:09-0700   SUCCESS   Theresa Regan - Understanding Autism in Adults and Aging Adults 2nd       128 kb/s      44.1 kHz   .mp3    16 files   407M             -   01:49
+2023-10-26 14:02:28-0700   SUCCESS   02 -  Moon Over Soho (2011)                                                64 kb/s      22.1 kHz   .mp3     2 files   276M             -   02:54
+2023-10-26 14:51:25-0700   SUCCESS   02 -  Moon Over Soho (2011)                                                64 kb/s      22.1 kHz   .mp3     2 files   276M             -   00:00
+2023-10-26 15:57:19-0700   SUCCESS   02 -  Moon Over Soho (2011)                                                64 kb/s      22.1 kHz   .mp3     2 files   276M   10h:01m:26s   02:47
+2023-10-26 16:33:15-0700   SUCCESS   The Goblin Emperor                                                        100 kb/s      44.1 kHz   .mp3     2 files   708M   16h:25m:51s   06:43
+2023-10-26 16:39:48-0700   SUCCESS   Horde - Razorland 03 - Ann Aguirre                                         64 kb/s      48.0 kHz   .mp3     2 files   387M   14h:04m:08s   05:52
+2023-10-26 16:43:19-0700   SUCCESS   Outpost (fixed)                                                            64 kb/s      44.1 kHz   .mp3     2 files   284M   10h:18m:34s   03:21
+2023-10-26 23:35:41-0700   SUCCESS   03 - Lady Emily (2008)                                                     64 kb/s      22.1 kHz   .mp3     2 files   263M    9h:33m:20s   02:49
+2023-10-26 23:37:32-0700   SUCCESS   07 - Death in the Floating City (2012)                                     32 kb/s      22.1 kHz   .mp3     2 files   137M    9h:55m:39s   01:46
+2023-10-26 23:41:12-0700   SUCCESS   01 - Knight                                                                32 kb/s      22.1 kHz   .mp3     1 files   155M   11h:13m:43s   03:06
+2023-10-26 23:50:34-0700   SUCCESS   02 - Creed                                                                 95 kb/s      44.1 kHz   .mp3     2 files   599M   14h:31m:20s   09:05
+2023-10-27 00:01:48-0700   SUCCESS   03 - Raid                                                                 128 kb/s      44.1 kHz   .mp3     2 files   526M    9h:33m:55s   10:57
+2023-10-27 00:15:01-0700   SUCCESS   04 - Deacon                                                                95 kb/s      44.1 kHz   .mp3     2 files   470M   11h:23m:36s   12:58
+2023-10-27 00:25:46-0700   SUCCESS   05 - SebrinG                                                              121 kb/s      44.1 kHz   .mp3     2 files   636M   12h:07m:59s   10:25
+2023-10-27 22:42:07-0700   SUCCESS   Alias Grace (1996)                                                         96 kb/s      44.1 kHz   .mp3     2 files   656M   15h:55m:17s   15:27
+2023-10-28 11:31:55-0700   SUCCESS   Cave Of The Dark Wind (Disc 2)                                              0 kb/s       0.0 kHz   .mp3    90 files   142M       54m:58s   00:10
+2023-10-28 11:38:13-0700   SUCCESS   02 - Cave of the Dark Wind (2007)                                         283 kb/s      44.1 kHz   .mp3   267 files   420M    2h:43m:11s   00:41
+2023-10-28 16:55:11-0700   SUCCESS   S J Bennett - A Three Dog Problem (Unabridged)                            128 kb/s      44.1 kHz   .mp3    57 files   623M   11h:16m:19s   02:33
+2023-10-28 16:57:35-0700   SUCCESS   P.J. Brackston - BGM 02 - Once Upon a Crime                                64 kb/s      44.1 kHz   .mp3    13 files   232M    8h:25m:35s   01:46
+2023-10-28 17:00:08-0700   SUCCESS   To Wed a Wild Scot - Anna Bradley                                          64 kb/s      44.1 kHz   .mp3    29 files   312M   11h:16m:14s   02:22
+2023-10-28 19:54:13-0700   SUCCESS   01 - Kushiel's Dart (2001)                                                  0 kb/s       0.0 kHz   .m4b     4 files   1.2G   31h:06m:16s   04:31
+2023-10-28 20:04:34-0700   SUCCESS   04 - The Visitor                                                          192 kb/s      48.0 kHz   .mp3    12 files   1.2G   14h:11m:38s   05:05
+2023-10-28 20:06:39-0700   SUCCESS   05 - Echo BurninG                                                          64 kb/s      22.1 kHz   .mp3    12 files   387M   14h:04m:29s   01:50
+2023-10-28 20:13:01-0700   SUCCESS   06 - Without Fail                                                         192 kb/s      48.0 kHz   .mp3    14 files   1.2G   14h:09m:55s   05:43
+2023-10-28 20:18:36-0700   SUCCESS   07 - Persuader                                                            192 kb/s      48.0 kHz   .mp3    12 files   1.2G   13h:50m:53s   05:00
+2023-10-28 20:25:02-0700   SUCCESS   08 - The Enemy                                                            192 kb/s      48.0 kHz   .mp3    14 files   1.2G   14h:29m:01s   05:50
+2023-10-28 20:29:41-0700   SUCCESS   10 - The Hard Way                                                         192 kb/s      48.0 kHz   .mp3    12 files   979M   11h:52m:35s   04:08
+2023-10-28 20:34:48-0700   SUCCESS   11 - Bad Luck and Trouble                                                 192 kb/s      48.0 kHz   .mp3    11 files   1.1G   12h:42m:27s   04:34
+2023-10-28 20:38:18-0700   SUCCESS   25-Line of Sight                                                           65 kb/s      44.1 kHz   .mp3    76 files   335M   12h:05m:06s   03:12
+2023-10-28 20:39:40-0700   SUCCESS   Annabel Chase - A Drop in the Potion                                       64 kb/s      44.1 kHz   .mp3    20 files   165M    5h:58m:18s   01:15
+2023-10-28 20:49:01-0700   SUCCESS   Imriel Trilogy - 01 - Kushiel's Scion (2006)                              128 kb/s      44.1 kHz   .mp3    72 files   1.5G   27h:38m:57s   08:02
+2023-10-28 20:53:12-0700   SUCCESS   Imriel Trilogy - 02 - Kushiel's Justice (2007)                             85 kb/s      44.1 kHz   .m4b     3 files   943M   25h:29m:13s   03:40
+2023-10-28 21:00:52-0700   SUCCESS   Imriel Trilogy - 03 - Kushiel's Mercy (2008)                              128 kb/s      44.1 kHz   .mp3    89 files   1.3G   24h:11m:44s   06:53
+2023-10-28 21:05:31-0700   SUCCESS   Naamah Trilogy - 01 - Naamah's Kiss (2009)                                105 kb/s      44.1 kHz   .m4b     3 files   1.2G   26h:52m:52s   04:02
+2023-10-28 21:09:13-0700   SUCCESS   Naamah Trilogy - 02 - Naamah's Curse (2010)                               105 kb/s      44.1 kHz   .m4b     3 files   963M   21h:13m:10s   03:11
+2023-10-28 21:12:31-0700   SUCCESS   Naamah Trilogy - 03 - Naamah's Blessing (2011)                             75 kb/s      44.1 kHz   .m4b     3 files   668M   20h:38m:31s   02:57
+2023-10-30 09:37:54-0700   SUCCESS   Dr. Sherrie Campbell - But It’s Your Family... Cutting Ties with Toxic     64 kb/s      22.1 kHz   .mp3    18 files   233M    8h:25m:46s   01:32
+2023-10-30 09:46:28-0700   SUCCESS   Phèdre's Trilogy - 02 - Kushiel's Chosen (2002)                           128 kb/s      44.1 kHz   .mp3    83 files   1.5G   27h:53m:26s   07:49
+2023-11-02 23:01:42-0700   SUCCESS   04 - The Opal Deception                                                   128 kb/s      44.1 kHz   .mp3    15 files   613M    7h:27m:55s   01:26
+2023-11-02 23:05:42-0700   SUCCESS   03 - The Eternity Code                                                    192 kb/s      44.1 kHz   .mp3    18 files   569M    6h:53m:26s   01:06
+2023-11-02 23:06:54-0700   SUCCESS   01 - Artemis Fowl                                                          56 kb/s      22.1 kHz   .mp3    13 files   245M    5h:55m:54s   00:46
+2023-11-02 23:07:53-0700   SUCCESS   02 - Arctic Incident                                                       56 kb/s      22.1 kHz   .mp3    18 files   251M    6h:11m:00s   00:46
+2023-11-02 23:09:45-0700   SUCCESS   05 - The Lost Colony                                                      128 kb/s      44.1 kHz   .mp3    18 files   693M    8h:23m:42s   01:28
+2023-11-02 23:12:19-0700   SUCCESS   06 - The Time Paradox                                                     192 kb/s      44.1 kHz   .mp3    20 files   735M    8h:52m:05s   02:00
+2023-11-02 23:18:27-0700   SUCCESS   01 - Persimmon Tree (2007)                                                 96 kb/s      44.1 kHz   .mp3    72 files   1.2G   27h:06m:51s   03:25
+2023-11-02 23:22:00-0700   SUCCESS   A Love by Design - Elizabeth Everett 2021 mp3                              64 kb/s      44.1 kHz   .mp3    12 files   322M   11h:42m:39s   03:08
+2023-11-02 23:25:21-0700   SUCCESS   Ballistic_ A Gray Man Novel                                                80 kb/s      44.1 kHz   .mp3    11 files   472M   13h:43m:30s   03:02
+2023-11-03 07:56:18-0700   SUCCESS   Talking to Crazy                                                           64 kb/s      22.1 kHz   .mp3    34 files   202M    7h:08m:30s   00:35
+2023-11-05 22:56:56-0700   SUCCESS   C N Crawford - Court of the Sea Fae 02 - Fallen King (Unabr - 6 64k [E     64 kb/s      44.1 kHz   .mp3     6 files   197M    7h:03m:16s   01:54
+2023-11-05 23:04:27-0700   SUCCESS   Daughters of Sparta (2021)                                                 64 kb/s      44.1 kHz   .mp3     9 files   293M   10h:39m:09s   01:47
+2023-11-05 23:06:56-0700   SUCCESS   In a Cottage In a Wood (2017)                                              64 kb/s      44.1 kHz   .mp3     8 files   244M    8h:50m:34s   02:18
+2023-11-05 23:09:04-0700   SUCCESS   Kerry Greenwood - Forbidden Fruit                                          64 kb/s      44.1 kHz   .mp3     8 files   240M    8h:42m:40s   01:57
+2023-11-05 23:12:14-0700   SUCCESS   The Royal Nanny (2020)                                                     64 kb/s      44.1 kHz   .mp3    11 files   323M   11h:34m:07s   02:56
+2023-11-05 23:14:14-0700   SUCCESS   The Woman Next Door (2016)                                                 64 kb/s      44.1 kHz   .mp3     9 files   278M   10h:06m:32s   01:47
+2023-11-06 15:12:11-0800   SUCCESS   Duke, Actually - Jenny Holiday 2021 mp3                                    64 kb/s      44.1 kHz   .mp3    10 files   289M   10h:29m:25s   02:40
+2023-11-06 15:14:21-0800   SUCCESS   Last Tang Standing by Lauren Ho                                            64 kb/s      44.1 kHz   .mp3    11 files   348M   12h:38m:34s   01:55
+2023-11-06 15:19:49-0800   SUCCESS   01 - The Gold Falcon (2006)                                                96 kb/s      44.1 kHz   .mp3    15 files   731M   17h:42m:35s   03:59
+2023-11-06 15:24:27-0800   SUCCESS   02 - The Spirit Stone (2007)                                               96 kb/s      44.1 kHz   .mp3    15 files   718M   26h:35m:27s   04:01
+2023-11-06 15:29:36-0800   SUCCESS   03 - The Blood Knight (2006)                                               64 kb/s      44.1 kHz   .mp3     3 files   535M   19h:27m:12s   04:42
+2023-11-06 15:33:20-0800   SUCCESS   03 - The Shadow Isle (2008)                                                96 kb/s      44.1 kHz   .mp3    12 files   589M   14h:15m:40s   03:12
+2023-11-06 15:38:38-0800   SUCCESS   04 - The Born Queen (2008)                                                 64 kb/s      44.1 kHz   .mp3     2 files   474M   17h:13m:43s   04:54
+2023-11-06 15:43:10-0800   SUCCESS   04 - The Silver Mage (2009)                                                96 kb/s      44.1 kHz   .mp3    14 files   686M   16h:37m:58s   03:52
+2023-11-06 15:44:51-0800   SUCCESS   Darynda Jones - Death and the Girl Next Door                               64 kb/s      22.1 kHz   .mp3    12 files   215M    7h:48m:33s   01:19
+2023-11-06 15:47:27-0800   SUCCESS   Feast of Sorrow (2017)                                                     64 kb/s      44.1 kHz   .mp3    12 files   371M   13h:29m:25s   01:47
+2023-11-06 15:50:07-0800   SUCCESS   Greta Kelly - Warrior Witch 02 - The Seventh Queen                         64 kb/s      44.1 kHz   .mp3    13 files   374M   13h:33m:15s   02:06
+2023-11-06 15:53:53-0800   SUCCESS   01 - Arrows of the Queen (1987)                                            64 kb/s      44.1 kHz   .mp3    54 files   268M    9h:02m:06s   01:58
+2023-11-06 15:58:16-0800   SUCCESS   01 - A Time of Exile (1991)                                                96 kb/s      44.1 kHz   .mp3    12 files   589M   14h:16m:20s   03:44
+2023-11-06 16:03:32-0800   SUCCESS   02 - Arrow's Flight (1987)                                                 64 kb/s      22.1 kHz   .mp3     1 files   272M    9h:52m:37s   04:57
+2023-11-06 16:07:12-0800   SUCCESS   02 - A Time of Omens (1992)                                                96 kb/s      44.1 kHz   .mp3    13 files   604M   14h:37m:52s   03:17
+2023-11-06 16:12:10-0800   SUCCESS   02 - To Light a Candle (2004)                                              32 kb/s      22.1 kHz   .mp3     5 files   473M   34h:23m:32s   04:36
+2023-11-06 16:16:21-0800   SUCCESS   03 - Days of Blood and Fire (1993)                                         96 kb/s      44.1 kHz   .mp3    13 files   640M   15h:28m:41s   03:45
+2023-11-06 16:33:08-0800   SUCCESS   01 - Owlflight (1997)                                                     128 kb/s      44.1 kHz   .mp3     8 files   591M   10h:45m:11s   03:22
+2023-11-06 16:35:48-0800   SUCCESS   02 - Closer to the Heart (2015)                                            96 kb/s      44.1 kHz   .mp3    18 files   437M   10h:33m:17s   02:20
+2023-11-06 16:40:50-0800   SUCCESS   02 - Owlsight (1998)                                                      128 kb/s      44.1 kHz   .mp3    10 files   729M   13h:15m:38s   04:35
+2023-11-06 16:45:00-0800   SUCCESS   03 - Owlknight (1999)                                                     128 kb/s      44.1 kHz   .mp3     9 files   657M   11h:56m:55s   03:43
+2023-11-06 16:48:36-0800   SUCCESS   03 - When Darkness Falls (2006)                                            96 kb/s      22.1 kHz   .mp3     3 files   1.1G   25h:27m:37s   02:57
+2023-11-06 16:52:32-0800   SUCCESS   04 - Days of Air and Darkness (1994)                                       96 kb/s      44.1 kHz   .mp3    13 files   616M   14h:54m:20s   03:23
+2023-11-06 16:57:20-0800   SUCCESS   04 - The Phoenix Unchained (2007)                                         256 kb/s      44.1 kHz   .mp3    16 files   1.5G   13h:34m:14s   03:54
+2023-11-06 17:06:16-0800   SUCCESS   05 - The Phoenix Endangered (2008)                                        256 kb/s      44.1 kHz   .mp3    21 files   2.2G   24h:18m:41s   07:34
+2023-11-06 17:15:48-0800   SUCCESS   06 - The Phoenix Transformed (2008)                                       256 kb/s      44.1 kHz   .mp3    20 files   2.8G   25h:55m:42s   07:38
+2023-11-06 17:21:24-0800   SUCCESS   07 - Crown of Vengeance (2012)                                             96 kb/s      22.1 kHz   .mp3     2 files   953M   23h:07m:36s   04:39
+2023-11-06 17:25:30-0800   SUCCESS   By the Sword                                                               64 kb/s      44.1 kHz   .mp3    13 files   478M   17h:23m:40s   03:39
+2023-11-06 19:48:06-0800   SUCCESS   Since We Fell (2017)                                                       64 kb/s      44.1 kHz   .mp3    11 files   332M   12h:01m:59s   03:10
+2023-11-06 19:50:07-0800   SUCCESS   The Runaway Duchess                                                        64 kb/s      44.1 kHz   .mp3    10 files   308M   11h:10m:14s   01:47
+2023-11-06 19:54:59-0800   SUCCESS   Tarkin                                                                    224 kb/s      44.1 kHz   .mp3     8 files   891M    9h:27m:17s   03:22
+2023-11-06 19:57:46-0800   SUCCESS   A Matter of Life and Death                                                 64 kb/s      44.1 kHz   .mp3     6 files   183M    6h:38m:58s   02:00
+2023-11-06 20:01:10-0800   SUCCESS   Beautiful (2019)                                                          160 kb/s      44.1 kHz   .mp3     5 files   555M    7h:18m:29s   03:06
+2023-11-06 20:02:32-0800   SUCCESS   Everything Is Fcked A Book About Hope                                     128 kb/s      22.1 kHz   .mp3    10 files   388M    7h:02m:23s   01:04
+2023-11-06 20:04:41-0800   SUCCESS   The Associate                                                              96 kb/s      44.1 kHz   .mp3    12 files   363M    8h:47m:39s   01:53
+2023-11-06 20:06:08-0800   SUCCESS   The Subtle Art of Not Giving a Fck                                         96 kb/s      44.1 kHz   .mp3     9 files   226M    5h:27m:25s   01:15
+2023-11-06 20:09:41-0800   SUCCESS   03 - The Well of Shades (2007)                                             96 kb/s      22.1 kHz   .mp3    28 files   896M   21h:42m:30s   02:34
+2023-11-06 20:11:54-0800   SUCCESS   The Darkest Place                                                          64 kb/s      44.1 kHz   .mp3     5 files   166M    6h:01m:17s   01:57
+2023-11-06 20:22:54-0800   SUCCESS   Elemental [01] Recurve                                                    256 kb/s      44.1 kHz   .mp3     5 files   589M    5h:19m:33s   02:38
+2023-11-06 20:26:48-0800   SUCCESS   Elemental [04] Windburn                                                   256 kb/s      44.1 kHz   .mp3     5 files   685M    6h:12m:13s   02:57
+2023-11-06 20:32:12-0800   SUCCESS   Elemental [07] Destroyer                                                  256 kb/s      44.1 kHz   .mp3     5 files   757M    6h:52m:52s   03:24
+2023-11-06 20:36:31-0800   SUCCESS   Rylee Adamson [01] Priceless                                              256 kb/s      44.1 kHz   .mp3     5 files   577M    5h:11m:09s   02:22
+2023-11-06 20:39:27-0800   SUCCESS   Rylee Adamson [03] Raising Innocence                                      256 kb/s      44.1 kHz   .mp3     1 files   142M    1h:16m:45s   01:14
+2023-11-06 20:41:09-0800   SUCCESS   Shannon Mayer - Rylee Adamson [0.5] Elementally Priceless                 256 kb/s      44.1 kHz   .mp3     2 files   276M    2h:29m:43s   01:31
+2023-11-06 20:43:45-0800   SUCCESS   Rylee Adamson [01] Priceless                                              256 kb/s      44.1 kHz   .mp3     5 files   577M    5h:11m:09s   01:44
+2023-11-06 20:46:36-0800   SUCCESS   Rylee Adamson [02] Immune                                                 256 kb/s      44.1 kHz   .mp3     5 files   556M    5h:01m:28s   02:28
+2023-11-06 20:49:02-0800   SUCCESS   Rylee Adamson [03] Raising Innocence                                      256 kb/s      44.1 kHz   .mp3     5 files   607M    5h:29m:32s   02:00
+2023-11-06 20:52:19-0800   SUCCESS   Rylee Adamson [04] Shadowed Threads                                       256 kb/s      44.1 kHz   .mp3     5 files   645M    5h:50m:06s   02:50
+2023-11-06 20:55:39-0800   SUCCESS   Rylee Adamson [05] Blind Salvage                                          256 kb/s      44.1 kHz   .mp3     5 files   564M    5h:05m:39s   02:26
+2023-11-06 21:01:41-0800   SUCCESS   01 - To Ride Pegasus (1973)                                                64 kb/s      44.1 kHz   .mp3     6 files   211M    7h:39m:31s   02:19
+2023-11-06 21:01:56-0800   SUCCESS   02 - Pegasus In Flight (1990)                                               0 kb/s      11.0 kHz   .mp3     4 files    19M    2h:39m:19s   00:10
+2023-11-06 21:04:44-0800   SUCCESS   01 - The Unwanteds (2011)                                                  64 kb/s      44.1 kHz   .mp3     2 files   202M    7h:18m:55s   02:10
+2023-11-06 21:06:19-0800   SUCCESS   03 - Island of Fire (2013)                                                 64 kb/s      44.1 kHz   .mp3     7 files   242M    8h:48m:03s   01:24
+2023-11-06 21:07:58-0800   SUCCESS   04 - Island of Legends (2014)                                              64 kb/s      22.1 kHz   .mp3     9 files   284M   10h:18m:52s   01:28
+2023-11-06 21:10:46-0800   SUCCESS   05 - The Island of Shipwrecks (2015)                                       64 kb/s      44.1 kHz   .mp3     8 files   271M    9h:50m:56s   02:36
+2023-11-06 21:14:07-0800   SUCCESS   06 - The Island of Graves - (2015)                                         64 kb/s      44.1 kHz   .mp3    10 files   308M   11h:11m:56s   03:08
+2023-11-06 21:16:22-0800   SUCCESS   03 - Dragon Ghosts (2019)                                                  64 kb/s      44.1 kHz   .mp3     9 files   274M    9h:57m:29s   01:32
+2023-11-07 21:23:59-0800   SUCCESS   Jessie Mihalik - Rogue Queen 02 - The Queen's Advantage (Unabr - 5 64k     64 kb/s      44.1 kHz   .mp3     5 files   159M    5h:41m:12s   01:53
+2023-11-07 21:25:39-0800   SUCCESS   02 - Emlyn's Moon (1987)                                                   96 kb/s      44.1 kHz   .mp3     6 files   180M    4h:21m:09s   01:02
+2023-11-07 21:34:25-0800   SUCCESS   01 - Origins                                                              192 kb/s      44.1 kHz   .mp3    38 files   525M    6h:20m:53s   01:54
+2023-11-07 21:35:56-0800   SUCCESS   01 - The Forest of Hands and Teeth (2009)                                  48 kb/s      24.0 kHz   .mp3    37 files   198M    9h:31m:25s   01:18
+2023-11-07 21:37:07-0800   SUCCESS   02 - Bloodlust                                                             80 kb/s      22.1 kHz   .mp3    38 files   198M    5h:42m:56s   01:01
+2023-11-07 21:39:10-0800   SUCCESS   03 - The CravinG                                                          192 kb/s      44.1 kHz   .mp3    32 files   522M    6h:18m:13s   01:45
+2023-11-07 21:40:41-0800   SUCCESS   03 - The Fury (1991)                                                       64 kb/s      44.1 kHz   .mp3    16 files   167M    6h:04m:14s   01:18
+2023-11-07 21:42:20-0800   SUCCESS   04 - Dark Reunion (1992)                                                   64 kb/s      44.1 kHz   .mp3    16 files   193M    6h:59m:29s   01:29
+2023-11-07 21:44:34-0800   SUCCESS   04 - The Ripper                                                           192 kb/s      44.1 kHz   .mp3    23 files   528M    6h:22m:21s   01:55
+2023-11-07 21:45:27-0800   SUCCESS   05 - The AsyluM                                                            48 kb/s      16.0 kHz   .mp3    22 files   119M    5h:42m:19s   00:42
+2023-11-07 21:47:39-0800   SUCCESS   06 - The Compelled                                                        192 kb/s      44.1 kHz   .mp3    21 files   493M    5h:57m:51s   01:55
+2023-11-07 21:49:03-0800   SUCCESS   Lee Strauss - Murder at Bray Manor                                         64 kb/s      44.1 kHz   .mp3    35 files   155M    5h:29m:41s   01:11
+2023-11-07 21:50:26-0800   SUCCESS   Lee Strauss - Murder at Hartigan House                                     64 kb/s      44.1 kHz   .mp3    36 files   158M    5h:38m:05s   01:14
+2023-11-07 21:51:44-0800   SUCCESS   Lee Strauss - Murder at the Mortuary                                       64 kb/s      44.1 kHz   .mp3    35 files   149M    5h:19m:24s   01:09
+2023-11-07 21:53:13-0800   SUCCESS   L. J. Smith - Night World 01 - Secret Vampire - 16p 96k                    96 kb/s      44.1 kHz   .mp3    16 files   239M    5h:46m:45s   01:19
+2023-11-07 21:55:09-0800   SUCCESS   L. J. Smith - Night World 02 - Daughters of Darkness - 17p 96k             96 kb/s      44.1 kHz   .mp3    17 files   236M    5h:42m:57s   01:15
+2023-11-07 21:56:40-0800   SUCCESS   L. J. Smith - Night World 03 - Spellbinder - 17p 96k                       96 kb/s      44.1 kHz   .mp3    17 files   249M    6h:02m:01s   01:19
+2023-11-09 22:49:46-0800   SUCCESS   Say What You Mean A Mindful Approach to Nonviolent Communication by Or     64 kb/s      44.1 kHz   .mp3    12 files   303M   11h:00m:11s   01:40
