@@ -7,7 +7,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, cast, TypeVar
 
-from lib.singleton import singleton
+from src.lib.singleton import singleton
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.formatters import friendly_short_date

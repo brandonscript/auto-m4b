@@ -9,8 +9,8 @@ import requests
 import requests_cache
 from rapidfuzz import fuzz
 
-from lib.misc import max_if, re_group
-from lib.term import print_debug
+from src.lib.misc import max_if, re_group
+from src.lib.term import print_debug
 from src.lib.config import cfg
 
 requests_cache.install_cache(

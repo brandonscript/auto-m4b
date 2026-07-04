@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from lib.term import print_debug
+from src.lib.term import print_debug
 
 if TYPE_CHECKING:
     from src.lib.books_tree import BooksTree

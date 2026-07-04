@@ -10,7 +10,7 @@ import columnar
 from rapidfuzz import fuzz
 from rapidfuzz.distance import LCSseq, Levenshtein
 
-from lib.id3_tags import Id3Tags
+from src.lib.id3_tags import Id3Tags
 from src.lib.cleaners import clean_string, strip_author_narrator, strip_part_number
 from src.lib.misc import any_in, get_numbers_in_string
 from src.lib.parsers import (

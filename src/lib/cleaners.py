@@ -1,7 +1,7 @@
 import re
 from typing import Literal
 
-from lib.misc import re_group
+from src.lib.misc import re_group
 
 disc_no_strip_pattern = re.compile(r"\W*?-?\W*?[\(\[]*(disc|cd)\W*\d+[\)\]]*", flags=re.I)
 part_no_strip_pattern = re.compile(r"(\W*?-?\W*?[\(\[]*(?P<part>[Pp]([Aa][Rr])?[Tt]\W*\d+[\)\]]*|P[Aa][Rr][Tt]$))")
