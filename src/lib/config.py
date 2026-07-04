@@ -13,7 +13,7 @@ from multiprocessing import cpu_count
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TypeVar
 
-from lib.singleton import singleton
+from src.lib.singleton import singleton
 from src.lib.constants import AUDIO_EXTS, DEFAULT_SLEEP_TIME, DEFAULT_WAIT_TIME, IGNORE_FILES, OTHER_EXTS
 from src.lib.misc import (
     get_git_root,

@@ -10,9 +10,9 @@ from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 from rapidfuzz import fuzz, process
 from rapidfuzz.distance import LCSseq, Levenshtein
 
-from lib.misc import ensure_list, isorted
-from lib.term import print_error
-from lib.typing import SimilarityComparable, SimilarityComparisonMethod, SimilarityFuncMethod
+from src.lib.misc import ensure_list, isorted
+from src.lib.term import print_error
+from src.lib.typing import SimilarityComparable, SimilarityComparisonMethod, SimilarityFuncMethod
 
 if TYPE_CHECKING:
     from rapidfuzz.process import _Scorer
