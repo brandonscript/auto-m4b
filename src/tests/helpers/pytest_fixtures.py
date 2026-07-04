@@ -9,8 +9,8 @@ from pathlib import Path
 import dotenv
 import pytest
 
-from lib.ffmpeg_utils import shrink_mp3_to_size
-from lib.typing import Id3TagDictWithDnumTnum
+from src.lib.ffmpeg_utils import shrink_mp3_to_size
+from src.lib.typing import Id3TagDictWithDnumTnum
 from src.lib.fs_utils import clean_dirs, find_adjacent_files_with_same_basename, is_audio_file
 from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState

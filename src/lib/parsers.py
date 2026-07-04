@@ -13,9 +13,9 @@ import cachetools
 import cachetools.func
 from nltk import pos_tag, word_tokenize
 
-from lib import nlp
-from lib.cleaners import clean_name_abbreviations
-from lib.ol_lookup import open_library_lookup_author
+from src.lib import nlp
+from src.lib.cleaners import clean_name_abbreviations
+from src.lib.ol_lookup import open_library_lookup_author
 from src.lib.misc import (
     get_numbers_in_string,
     isorted,

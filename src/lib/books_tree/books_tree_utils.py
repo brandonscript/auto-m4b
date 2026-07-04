@@ -8,7 +8,7 @@ import cachetools
 import cachetools.func
 import regex as rex
 
-from lib.term import print_debug
+from src.lib.term import print_debug
 from src.lib.misc import re_group
 from src.lib.parsers import romans, try_parse_num
 from src.lib.patterns import (
