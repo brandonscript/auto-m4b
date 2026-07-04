@@ -10,7 +10,7 @@ WORKDIR /app
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --only main
+    && poetry install --no-interaction --no-ansi --only main --no-root
 
 # Download NLP models at build time
 RUN python -m spacy download en_core_web_sm
