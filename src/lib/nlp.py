@@ -258,10 +258,12 @@ class NoTRF:
 
 
 try:
-    from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
+    # Suppress "None of PyTorch/TensorFlow/Flax found" noise at import time.
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
     with _devnull(), warnings.catch_warnings():
         warnings.filterwarnings("ignore")
+        from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
         nlp_trf = get_transformer_pipeline(pipeline, model_name=TRF_MODEL)
 except Exception as e:
     print_debug(f"Error loading transformer model: {e}")
