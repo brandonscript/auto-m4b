@@ -260,6 +260,16 @@ class NoTRF:
 try:
     # Suppress "None of PyTorch/TensorFlow/Flax found" noise at import time.
     os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    # Prevent HuggingFace from making network requests for model downloads.
+    # If the model isn't cached locally, skip the transformer pipeline entirely.
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
+    # Skip transformer pipeline if no ML framework (PyTorch/TF/Flax) is present —
+    # from_pretrained() would otherwise stall indefinitely on a network download.
+    import importlib.util
+    if not any(importlib.util.find_spec(pkg) for pkg in ("torch", "tensorflow", "flax")):
+        raise ImportError("No ML framework (torch/tensorflow/flax) available; skipping transformer pipeline")
 
     with _devnull(), warnings.catch_warnings():
         warnings.filterwarnings("ignore")
