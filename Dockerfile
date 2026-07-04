@@ -21,4 +21,5 @@ RUN python -c "import nltk; [nltk.download(p, quiet=True) for p in \
 COPY src/ ./src/
 
 ENV PYTHONPATH=.
+ENV PYTHONUNBUFFERED=1
 CMD ["python", "-m", "src"]
