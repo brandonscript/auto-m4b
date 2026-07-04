@@ -902,12 +902,12 @@ def process_book(b: int, item: InboxItem):
 def process_inbox():
     from src.lib.fs_utils import clean_dirs, inbox_last_updated_at
     from src.lib.run import audio_files_found, print_banner
-    from src.lib.term import print_debug
+    from src.lib.term import print_debug, print_grey
 
     inbox = InboxState()
 
     if inbox.loop_counter == 1:
-        print_debug("First run, scanning inbox...")
+        print_grey(f"\nStarting auto-m4b, scanning inbox...")
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
