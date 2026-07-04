@@ -22,7 +22,7 @@ from nltk.corpus import words
 from spacy.language import Language
 from spacy.matcher import Matcher
 
-from lib.misc import re_group
+from src.lib.misc import re_group
 from src.lib.config import cfg
 from src.lib.term import print_debug
 

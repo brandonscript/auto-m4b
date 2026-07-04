@@ -4,7 +4,7 @@ from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 
 from lazy.lazy import lazy
 
-from lib.compare import (
+from src.lib.compare import (
     cached_similarity,
     get_list_similarity,
     get_similarity,
@@ -13,8 +13,8 @@ from lib.compare import (
     list_items_match_value,
     unique_items,
 )
-from lib.misc import truthiness
-from lib.typing import SimilarityComparable, SimilarityComparisonMethod
+from src.lib.misc import truthiness
+from src.lib.typing import SimilarityComparable, SimilarityComparisonMethod
 from src.lib.books_tree.books_tree_utils import (
     are_nums_contiguous,
     get_all_nums_in_string,

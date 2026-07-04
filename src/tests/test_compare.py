@@ -1,6 +1,6 @@
 import pytest
 
-from lib.compare import get_size_similarity
+from src.lib.compare import get_size_similarity
 
 kb = 1000
 kb_10 = 10 * kb
