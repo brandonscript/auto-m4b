@@ -813,6 +813,7 @@ def process_book(b: int, item: InboxItem):
 
     if not item.path.exists():
         print_notice(f"This book was removed from the inbox or cannot be accessed, skipping")
+        inbox.set_gone(item.path)
         return b
 
     # check if the current dir was modified in the last 1m and skip if so
@@ -872,6 +873,7 @@ def process_book(b: int, item: InboxItem):
     except (FileNotFoundError, OSError) as e:
         if not book.inbox_dir.exists():
             print_notice(en.BOOK_INBOX_MOVED_BEFORE_PROCESSING)
+            inbox.set_gone(book)
             return b
         raise
 
