@@ -108,22 +108,11 @@ class BooksTree(BaseModel):
             self._path_index: dict[str, "BooksTree"] = {}
 
         if r := self.root:
-            # O(1) dedup: reuse an already-structured node for this path instead of
-            # creating a duplicate.  Falls back to the slower children_recursive scan
-            # only when the root has not yet built its index (e.g. deserialization).
             _pi = getattr(r, "_path_index", None)
-            existing = _pi.get(str(self.path)) if _pi is not None else r.get_path(self.path)
-            if self.path != r.path and existing and existing.structure:
-                self = existing
-                assert id(self) == id(
-                    existing
-                ), f"Instance for '{self.path}' should be the same as the existing one because it already exists in self.root"
-                return
 
             # O(1) parent lookup: use the path index if the parent was already added,
             # otherwise fall back to get_like() which does a regex scan.
             if not self.parent and (rel_to_root := try_relative_to(self.path, r.path)) and len(rel_to_root.parts) > 1:
-                _pi = getattr(r, "_path_index", None)
                 self.parent = (_pi.get(str(self.path.parent)) if _pi is not None else None) or r.get_like(rel_to_root.parent)
             else:
                 self.parent = r

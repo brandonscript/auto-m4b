@@ -980,12 +980,13 @@ class test_tree_finding:
             (TEST_DIRS.inbox, 1, 2, MOCKED.all_books_and_series[:6] + MOCKED.all_books_and_series[10:-3]),
             (TEST_DIRS.inbox, 2, 2, [
                 MOCKED.container_dirs[0], 
-                # MOCKED.all_books_and_series[5], 
-                # MOCKED.all_books_and_series[10], 
                 MOCKED.single_dir_mp3,
+                MOCKED.single_nested_dir_mp3,
             ] + [
                 MOCKED.mixed_dir,
                 MOCKED.multi_disc_dir,
+                MOCKED.multi_disc_dir_cd_n,
+                MOCKED.multi_disc_dir_cdn,
                 MOCKED.multi_disc_dir_with_extras,
                 MOCKED.multi_nested_dir,
                 MOCKED.multi_part_dir,
