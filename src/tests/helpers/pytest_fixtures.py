@@ -860,10 +860,9 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     testutils.make_mock_file(MOCKED.mixed_dir / "02 - mixed drinks.mp3")
     testutils.make_mock_file(MOCKED.mixed_dir / "03 - mixed drinks.mp3")
 
-    # make standalone files
+    # make standalone files (fixed size keeps container/mixed scoring deterministic)
     for f in STANDALONE_FILES:
-        rand_between_51_and_100 = random.randint(51 * 1024, 100 * 1024)
-        testutils.make_mock_file(f, size=rand_between_51_and_100)
+        testutils.make_mock_file(f, size=75 * 1024)
 
     # make a single files
     testutils.make_mock_file(MOCKED.single_dir_m4b / "mock_book_single_m4b.m4b")

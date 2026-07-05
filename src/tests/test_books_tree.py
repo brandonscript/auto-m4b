@@ -979,8 +979,6 @@ class test_tree_finding:
             (TEST_DIRS.inbox, 1, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_mp3, MOCKED.single_dir_m4b] + MOCKED.container_dir_d1_standalone_files)),
             (TEST_DIRS.inbox, 1, 2, MOCKED.all_books_and_series[:6] + MOCKED.all_books_and_series[10:-3]),
             (TEST_DIRS.inbox, 2, 2, [
-                MOCKED.container_dirs[0], 
-                MOCKED.single_dir_mp3,
                 MOCKED.single_nested_dir_mp3,
             ] + [
                 MOCKED.mixed_dir,

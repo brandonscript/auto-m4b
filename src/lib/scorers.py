@@ -1104,6 +1104,14 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
             container_score -= 0.5
             mixed_score += 0.5
 
+        # Strong structural signal: standalone-scored files sharing a dir with book-type
+        # children dirs is a clear indicator of a container regardless of file size.
+        # (Size-based signals are calibrated for real 100 MB+ audio — they fail on test
+        # fixtures. This structural signal is size-independent.)
+        if bool(tree.files) and bool(tree.dirs) and standalones > 0:
+            container_score += 2.0
+            mixed_score -= 2.0
+
         container_score = round(container_score, 3)
         mixed_score = round(mixed_score, 3)
 
