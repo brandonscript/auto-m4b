@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from src.lib import run
 from src.lib.config import AutoM4bArgs, cfg
 from src.lib.inbox_state import InboxState
-from src.lib.term import nl, print_error, print_red, was_prev_line_empty
+from src.lib.term import nl, print_error, print_grey, print_red, was_prev_line_empty
 from src.lib.typing import copy_kwargs_omit_first_arg
 
 
@@ -46,6 +46,7 @@ def app(**kwargs):
     with use_error_handler():
         args = AutoM4bArgs(**kwargs)
         infinite_loop = args.max_loops == -1
+        print_grey("\nStarting auto-m4b, scanning inbox...")
         inbox = InboxState()
         cfg.startup(args)
         while infinite_loop or inbox.loop_counter < args.max_loops:
