@@ -768,6 +768,11 @@ def archive_inbox_book(book: Audiobook):
         print_notice("Test mode: The original folder will not be moved or deleted")
         InboxState().set_processed(book)
     else:
+        if not book.inbox_dir.exists():
+            print_notice(en.BOOK_INBOX_MOVED_AFTER_CONVERSION)
+            InboxState().set_gone(book)
+            return
+
         if cfg.ON_COMPLETE == "archive":
             smart_print("\nArchiving original from inbox...", end="")
             mv_dir_contents(
@@ -862,7 +867,13 @@ def process_book(b: int, item: InboxItem):
 
     inbox.set_ok(book)
 
-    copy_to_working_dir(book)
+    try:
+        copy_to_working_dir(book)
+    except (FileNotFoundError, OSError) as e:
+        if not book.inbox_dir.exists():
+            print_notice(en.BOOK_INBOX_MOVED_BEFORE_PROCESSING)
+            return b
+        raise
 
     book.extract_path_info(console=True)
     book.extract_metadata(console=True)

@@ -283,7 +283,8 @@ class InboxState(Hasher):
             os.environ["MATCH_FILTER"] = match_filter
             cfg.MATCH_FILTER = match_filter
 
-        self.tree._match_filter = match_filter
+        if self.tree is not None:
+            self.tree._match_filter = match_filter
         # self.tree.scan()
 
     def reset_inbox(self, new_match_filter: str | None = None):
