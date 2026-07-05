@@ -1134,6 +1134,19 @@ def score_flat(tree: "BooksTree") -> float:
             # Can't be flat if it has no files
             return 0.0
 
+        # A directory whose name matches the disc pattern (e.g. "cd 1", "CD14", "Disc 3")
+        # and that has multiple disc-named siblings cannot be a flat book — it's a disc
+        # within a multi-disc set.  This prevents consistent intra-disc ID3 tags from
+        # making the flat scorer win over the multi-disc scorer.
+        from src.lib.parsers import get_disc_num
+
+        if (
+            get_disc_num(tree.name) >= 0
+            and len(tree.i.this_and_siblings._trees) > 1
+            and tree.i.this_and_siblings.have_disc_nums
+        ):
+            return 0.0
+
         _is_multi, multi_disc_score, multi_part_score = score_multi_part_or_disc(tree)
         files_have_tags = bool(tree.i.files_recursive.id3_tags)
 
@@ -1811,6 +1824,16 @@ def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "
             else:
                 # Slight boost from the average of the album and author similarity
                 tags_offset = round((album_sim + author_sim) / 2, 3) / 4
+
+        # When folder names give a complete, contiguous disc/part sequence the structural
+        # signal is unambiguous. Ripped audiobooks commonly have inconsistent album tags
+        # per disc, so dampen tag-noise penalties in that case to avoid misclassifying
+        # a clearly-named multi-disc book as flat/unknown.
+        disc_complete_and_contiguous = disc_nums_cmpl == 1.0 and bool(disc_nums_cntg)
+        part_complete_and_contiguous = part_nums_cmpl == 1.0 and bool(part_nums_cntg)
+        if tags_offset < 0:
+            if disc_complete_and_contiguous or part_complete_and_contiguous:
+                tags_offset *= 0.25  # dampen negative penalty to 25% when structure is clear
 
         disc_nums_score += tags_offset
         part_nums_score += tags_offset

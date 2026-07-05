@@ -74,6 +74,8 @@ class MOCKED:
     series_parent_dir = _series_parent_dir
     multi_disc_dir = TEST_DIRS.inbox / "mock_book_multi_disc"
     multi_disc_dir_with_extras = TEST_DIRS.inbox / "mock_book_multi_disc_dir_with_extras"
+    multi_disc_dir_cd_n = TEST_DIRS.inbox / "mock_book_multi_disc_cd_n"
+    multi_disc_dir_cdn = TEST_DIRS.inbox / "mock_book_multi_disc_cdn"
     multi_part_dir = TEST_DIRS.inbox / "mock_book_multi_part"
     multi_nested_dir = _multi_nested_dir
 
@@ -86,6 +88,8 @@ class MOCKED:
         series_parent_dir,
         multi_disc_dir,
         multi_disc_dir_with_extras,
+        multi_disc_dir_cd_n,
+        multi_disc_dir_cdn,
         multi_nested_dir,
         multi_part_dir,
     ]

@@ -804,6 +804,20 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
         for i in range(1, 3):
             testutils.make_mock_file(disc / f"mock_book_multi_disc{d} - ch_{d+(d-i+1)}.mp3")
 
+    # make a multi-disc book with "cd N" naming (lowercase, space-separated)
+    for d in range(1, 10):
+        disc = MOCKED.multi_disc_dir_cd_n / f"cd {d}"
+        disc.mkdir(parents=True, exist_ok=True)
+        for i in range(1, 3):
+            testutils.make_mock_file(disc / f"Track {i:02}.mp3")
+
+    # make a multi-disc book with "CDN" naming (uppercase, no space, multi-digit)
+    for d in range(1, 15):
+        disc = MOCKED.multi_disc_dir_cdn / f"CD{d}"
+        disc.mkdir(parents=True, exist_ok=True)
+        for i in range(1, 3):
+            testutils.make_mock_file(disc / f"Track {i:02}.mp3")
+
     # make a mutli-part book
     romans = ["I", "II", "III", "IV"]
     for i in range(1, 5):
