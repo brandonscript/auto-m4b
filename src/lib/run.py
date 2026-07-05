@@ -653,7 +653,7 @@ def print_moving_to_converted(book):
 
 
 def move_converted_book_and_extras(book: Audiobook):
-    from src.lib.fs_utils import mv_dir_contents, mv_file_into_dir, rm_all_empty_dirs
+    from src.lib.fs_utils import mv_dir_contents, mv_file_into_dir, rm_all_empty_dirs, rm_dirs
 
     print_moving_to_converted(book)
 
@@ -677,6 +677,9 @@ def move_converted_book_and_extras(book: Audiobook):
                 overwrite_mode="overwrite-silent",
             )
 
+    # Remove intermediate temp files before moving — prevents ~tmpfiles from being
+    # carried into the converted output directory by mv_dir_contents' recursive descent.
+    rm_dirs([book.build_tmp_dir], ignore_errors=True, even_if_not_empty=True)
     rm_all_empty_dirs(book.build_dir)
 
     # Move all built audio files to output folder
