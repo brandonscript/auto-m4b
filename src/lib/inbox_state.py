@@ -169,8 +169,9 @@ class InboxState(Hasher):
         super().scan()
 
         if not self.tree:
-            # Only scan id3 info once, when initializing the tree
-            self.tree = BooksTree(cfg.inbox_dir)
+            # Create without auto-scan so the explicit scan() call below
+            # controls whether ID3 tags are read (avoids a redundant full scan).
+            self.tree = BooksTree(cfg.inbox_dir, scan=False)
         self.tree.scan(scan_id3=False if scan_id3 is False else True)
         # self._tree.scan()
 
