@@ -923,7 +923,7 @@ def process_inbox():
     inbox = InboxState()
 
     if inbox.loop_counter == 1:
-        print_grey(f"\nStarting auto-m4b, scanning inbox...")
+        print_grey(f"\nScanning inbox for the first time...")
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
