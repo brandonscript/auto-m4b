@@ -80,6 +80,8 @@ class InboxState(Hasher):
         self._last_banner_lc: int = -1
         self._last_scan = 0
         self.tree: BooksTree = None  # type: ignore
+        # Skip ID3 tag reads on initial construction — they're slow over SMB with
+        # large collections and the processing loop forces a full rescan anyway.
         self.scan(scan_id3=False)
 
     def set(
