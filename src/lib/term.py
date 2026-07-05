@@ -4,10 +4,23 @@ from pathlib import Path
 from typing import Any
 
 from tinta import Tinta
+from tinta.constants import PREFER_PLAINTEXT as _TINTA_PREFER_PLAINTEXT
 
 from src.lib.misc import re_group
 
 Tinta.load_colors("src/colors.ini")
+
+# When TINTA_PLAINTEXT=1 is set, Tinta.print() strips ANSI but Tinta.to_str()
+# does not (it requires an explicit plaintext=True argument). Patch to_str so
+# that all callers — tint_path(), box(), smart_print(tinta.to_str()), etc. —
+# automatically produce plain text without needing per-call changes.
+if _TINTA_PREFER_PLAINTEXT:
+    _orig_to_str = Tinta.to_str
+
+    def _plaintext_to_str(self, *args, plaintext: bool = False, **kwargs):
+        return _orig_to_str(self, *args, plaintext=True, **kwargs)
+
+    Tinta.to_str = _plaintext_to_str  # type: ignore[method-assign]
 
 THIS_LINE_IS_EMPTY = False
 THIS_LINE_IS_ALERT = False
