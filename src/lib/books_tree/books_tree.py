@@ -101,17 +101,36 @@ class BooksTree(BaseModel):
         self._files: list["BooksTree"] = []
         self._dirs: dict[str, "BooksTree"] = {}
 
+        if self.root is None:
+            # Root nodes own the path index that maps absolute path strings to their
+            # BooksTree nodes.  O(1) lookup replaces the previous O(n) linear scan
+            # through children_recursive every time a child is constructed.
+            self._path_index: dict[str, "BooksTree"] = {}
+
         if r := self.root:
-            if self.path != r.path and (existing := r.get_path(self.path)) and existing.structure:
+            # O(1) dedup: reuse an already-structured node for this path instead of
+            # creating a duplicate.  Falls back to the slower children_recursive scan
+            # only when the root has not yet built its index (e.g. deserialization).
+            _pi = getattr(r, "_path_index", None)
+            existing = _pi.get(str(self.path)) if _pi is not None else r.get_path(self.path)
+            if self.path != r.path and existing and existing.structure:
                 self = existing
                 assert id(self) == id(
                     existing
                 ), f"Instance for '{self.path}' should be the same as the existing one because it already exists in self.root"
                 return
+
+            # O(1) parent lookup: use the path index if the parent was already added,
+            # otherwise fall back to get_like() which does a regex scan.
             if not self.parent and (rel_to_root := try_relative_to(self.path, r.path)) and len(rel_to_root.parts) > 1:
-                self.parent = r.get_like(rel_to_root.parent)
+                _pi = getattr(r, "_path_index", None)
+                self.parent = (_pi.get(str(self.path.parent)) if _pi is not None else None) or r.get_like(rel_to_root.parent)
             else:
                 self.parent = r
+
+            # Register this node so future lookups for the same path are O(1).
+            if _pi is not None:
+                _pi[str(self.path)] = self
 
         self._match_filter = match_filter or cfg.MATCH_FILTER
         if scan or (scan is None and not root):
@@ -176,6 +195,12 @@ class BooksTree(BaseModel):
         if not self.is_root and not allow_non_root:
             raise RuntimeError("scan() should only be called on the root of the tree")
 
+        # Invalidate @lazy-cached recursive list properties on the entire tree so a
+        # rescan always sees the freshly built structure rather than stale cache.
+        for _node in [root, *root.__dict__.get("children_recursive", [])]:
+            for _attr in ("dirs_recursive", "files_recursive", "children_recursive"):
+                _node.__dict__.pop(_attr, None)
+
         # Clear the scorer cache and already_checked set so re-scans after
         # filesystem changes don't use stale structure scores, and so files
         # processed in a previous scan pass can be re-scored in the new pass.
@@ -223,9 +248,25 @@ class BooksTree(BaseModel):
             # else:
             # tick("subtree has no files, skipping")
 
+        # Separate dirs and files in a single pass to avoid calling is_dir() on every entry,
+        # which is expensive over network mounts (each call requires a separate stat syscall).
+        # Also precompute the filtered audio file list once so the directory loop below is
+        # O(n + d) instead of the previous O(n×d) where n=files and d=directories.
+        _rglob_dirs: list[Path] = []
+        _rglob_files: list[Path] = []
+        for _p in rglob:
+            try:
+                if _p.is_dir():
+                    _rglob_dirs.append(_p)
+                else:
+                    _rglob_files.append(_p)
+            except OSError:
+                pass
+        _all_audio_files = only_audio_files(filter_ignored(_rglob_files))
+
         # tick("building tree of audio files and dirs")
         # Build a tree of the audio files and dirs
-        for d in [x for x in rglob if x.is_dir()]:
+        for d in _rglob_dirs:
             # If d is not within the mindepth and maxdepth, skip it
             if not filter_depth(d, root.path, mindepth=mindepth, maxdepth=maxdepth):
                 # tick("d not in mindepth and maxdepth, skipping")
@@ -235,7 +276,7 @@ class BooksTree(BaseModel):
             # tick("d is a dir, getting audio files in dir")
             audio_files_in_dir = [
                 f
-                for f in only_audio_files(filter_ignored(rglob))
+                for f in _all_audio_files
                 if f.parent == d and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
             # tick(f"done getting audio {len(audio_files_in_dir)} files in dir {d.relative_to(root.path)}")
@@ -250,7 +291,7 @@ class BooksTree(BaseModel):
         self._files = isorted(
             [
                 BooksTree.cast(f, root=root, match_filter=self.match_filter)
-                for f in match_filter_paths(only_audio_files(filter_ignored(rglob)), self.match_filter, root=root)
+                for f in match_filter_paths(_all_audio_files, self.match_filter, root=root)
                 if f.parent == self.path and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
         )
@@ -370,6 +411,8 @@ class BooksTree(BaseModel):
     def get_path(self, q: Path):
         """
         Gets a file or directory from the tree by its path.
+        Uses the root's O(1) path index when available; falls back to a linear
+        children_recursive scan for trees built without the index (e.g. deserialization).
         """
         from src.lib.fs_utils import try_relative_to
 
@@ -378,6 +421,12 @@ class BooksTree(BaseModel):
 
         root = self.root or self
 
+        # Fast path: O(1) index lookup
+        _pi = getattr(root, "_path_index", None)
+        if _pi is not None:
+            return _pi.get(str(q))
+
+        # Slow path: O(n) linear scan (legacy / deserialized trees)
         if (rel_to_root := try_relative_to(q, root.path)) and not rel_to_root == Path("."):
             if found := next(
                 (c for c in root.children_recursive if c.rel_path == rel_to_root),
@@ -620,9 +669,10 @@ class BooksTree(BaseModel):
     def dirs_recursive_f(self) -> list["BooksTree"]:
         return self.dirs_recursive
 
-    @property
+    @lazy
     def dirs_recursive(self) -> list["BooksTree"]:
-        # Recursively walks the tree to return a flat list of all directories, excluding the root
+        # Recursively walks the tree to return a flat list of all directories, excluding the root.
+        # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
         return isorted(
             d
             for d in (
@@ -646,9 +696,10 @@ class BooksTree(BaseModel):
     def files_recursive_f(self):
         return self.files_recursive
 
-    @property
+    @lazy
     def files_recursive(self) -> list["BooksTree"]:
-        # Recursively walks the tree to return a flat list of all files
+        # Recursively walks the tree to return a flat list of all files.
+        # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
         return isorted((*self._files, *sum([d.files_recursive for d in self._dirs.values()], [])))
 
     @filter_matches
@@ -674,9 +725,10 @@ class BooksTree(BaseModel):
     def children_recursive_f(self) -> list["BooksTree"]:
         return self.children_recursive
 
-    @property
+    @lazy
     def children_recursive(self) -> list["BooksTree"]:
-        # Recursively walks the tree to return a flat list of all paths
+        # Recursively walks the tree to return a flat list of all paths.
+        # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
         return isorted(
             flatlist(
                 [*self._files, *self._dirs.values(), *sum([d.children_recursive for d in self._dirs.values()], [])]

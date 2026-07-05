@@ -80,9 +80,11 @@ class InboxState(Hasher):
         self._last_banner_lc: int = -1
         self._last_scan = 0
         self.tree: BooksTree = None  # type: ignore
-        # Skip ID3 tag reads on initial construction — they're slow over SMB with
-        # large collections and the processing loop forces a full rescan anyway.
-        self.scan(scan_id3=False)
+        # Do not scan on construction — BooksTree._scan() has O(n²) path-dedup checks
+        # that make it very slow (many minutes) on large inboxes over network mounts.
+        # The first process_inbox() loop forces a full scan via scan(set_ready=True, force=True),
+        # so this initial scan is redundant: it would just populate _items with stale data
+        # that gets immediately overwritten.
 
     def set(
         self,
@@ -153,6 +155,7 @@ class InboxState(Hasher):
         *,
         scan_id3: bool | None = None,
         force: bool = False,
+        determine_structure: bool = True,
     ):
         from src.lib.config import cfg
 
@@ -172,7 +175,7 @@ class InboxState(Hasher):
             # Create without auto-scan so the explicit scan() call below
             # controls whether ID3 tags are read (avoids a redundant full scan).
             self.tree = BooksTree(cfg.inbox_dir, scan=False)
-        self.tree.scan(scan_id3=False if scan_id3 is False else True)
+        self.tree.scan(scan_id3=False if scan_id3 is False else True, determine_structure=determine_structure)
         # self._tree.scan()
 
         found_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}
