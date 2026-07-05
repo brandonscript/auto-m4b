@@ -982,8 +982,17 @@ class test_tree_finding:
                 MOCKED.container_dirs[0], 
                 # MOCKED.all_books_and_series[5], 
                 # MOCKED.all_books_and_series[10], 
-                MOCKED.all_books_and_series[-4]
-            ] + MOCKED.all_books_and_series[13:-6]),
+                MOCKED.single_dir_mp3,
+            ] + [
+                MOCKED.mixed_dir,
+                MOCKED.multi_disc_dir,
+                MOCKED.multi_disc_dir_with_extras,
+                MOCKED.multi_nested_dir,
+                MOCKED.multi_part_dir,
+                MOCKED.nested_dir,
+                MOCKED.series_parent_dir,
+                *MOCKED.series_books,
+            ]),
             # fmt: on
         ],
     )

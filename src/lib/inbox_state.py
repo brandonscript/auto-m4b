@@ -80,11 +80,7 @@ class InboxState(Hasher):
         self._last_banner_lc: int = -1
         self._last_scan = 0
         self.tree: BooksTree = None  # type: ignore
-        # Do not scan on construction — BooksTree._scan() has O(n²) path-dedup checks
-        # that make it very slow (many minutes) on large inboxes over network mounts.
-        # The first process_inbox() loop forces a full scan via scan(set_ready=True, force=True),
-        # so this initial scan is redundant: it would just populate _items with stale data
-        # that gets immediately overwritten.
+        self.scan(scan_id3=False)
 
     def set(
         self,

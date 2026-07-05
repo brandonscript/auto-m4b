@@ -1131,8 +1131,12 @@ class BooksTree(BaseModel):
                 case "multi_disc" | "multi_part":
                     assert multi, f"Expected multi_disc or multi_part, got {multi}"
                     if not d.structure:
-                        d.set_structures(multi, "multi_parent")
-                        # self.# tick(f"(d) set structures to {multi} and 'multi_parent' for {d.rel_path}")
+                        # Only assign multi structure (not multi_parent) here — the
+                        # parent dir is handled separately in case "multi_parent" below.
+                        # Assigning multi_parent here would cause disc-child dirs (e.g.
+                        # "Disc 1", "cd 1") to be mis-flagged as book roots.
+                        d.set_structures(multi)
+                        # self.# tick(f"(d) set structures to {multi} for {d.rel_path}")
                     d.add_structures(multi, recursive=True)
                     # self.# tick(f"(d) added {multi} to {d.rel_path} recursively")
                     check_nested(d)
