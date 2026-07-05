@@ -79,6 +79,7 @@ class InboxState(Hasher):
         # outer iteration so that the next loop prints a fresh header.
         self._last_banner_lc: int = -1
         self._last_scan = 0
+        self.has_scanned = False
         self.tree: BooksTree = None  # type: ignore
         # Do not scan on construction — BooksTree._scan() has O(n²) path-dedup checks
         # that make it very slow (many minutes) on large inboxes over network mounts.
@@ -217,6 +218,7 @@ class InboxState(Hasher):
             self.ready = True
 
         self._last_scan = time.time()
+        self.has_scanned = True
         self.stale = False
 
     def flush(self):
@@ -292,6 +294,7 @@ class InboxState(Hasher):
         self.set_match_filter(new_match_filter)
         self.flush()
         self.ready = False
+        self.has_scanned = False
         _sync_failed_from_env()
         self.reset_loop_counter()
         return self
