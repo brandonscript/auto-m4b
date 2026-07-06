@@ -47,8 +47,8 @@ def app(**kwargs):
         import threading
 
         args = AutoM4bArgs(**kwargs)
-        inbox = InboxState()
         cfg.startup(args)
+        inbox = InboxState()
 
         # ── Test / finite-loop path ────────────────────────────────────────────
         # Keep the original while/sleep loop so all existing tests continue to
