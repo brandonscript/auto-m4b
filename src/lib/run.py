@@ -723,14 +723,21 @@ def cleanup_series_dir(parent: InboxItem | None):
 
     parent_book = parent.to_audiobook()
     verb = "copy" if cfg.ON_COMPLETE == "test_do_nothing" else "move"
-    # Move (or copy) series collateral to converted folder
-    _mv_or_cp_dir_contents(
-        verb,
-        parent_book.inbox_dir,
-        parent_book.converted_dir,
-        only_file_exts=cfg.OTHER_EXTS,
-        overwrite_mode="overwrite-silent",
-    )
+    # Move (or copy) series collateral to converted folder.
+    # Guard: the inbox dir may already be gone if individual series books were
+    # archived/moved by the OS or another process before we reach cleanup.
+    if parent_book.inbox_dir.exists():
+        _mv_or_cp_dir_contents(
+            verb,
+            parent_book.inbox_dir,
+            parent_book.converted_dir,
+            only_file_exts=cfg.OTHER_EXTS,
+            overwrite_mode="overwrite-silent",
+        )
+    else:
+        print_debug(
+            f"cleanup_series_dir: inbox dir '{parent_book.inbox_dir}' no longer exists, skipping collateral move"
+        )
 
     parent_book.set_active_dir("converted")
 
@@ -976,11 +983,19 @@ def process_inbox():
         # would violate assert_not_ends_with_banner in tests and looks wrong in
         # production when the app is just polling for new books.
         return
+    # Only print the banner when something actually changed in the inbox (new
+    # books added/removed) or on the very first processing loop. Re-processing
+    # the same set of pending books (e.g. retrying after a transient failure)
+    # should not flood the log with headers every SLEEP_TIME seconds.
+    _should_banner = inbox.loop_counter <= 1 or inbox.inbox_hash_changed
     if info := books_to_process():
         _expected, msg = info
-        # print_debug(f"Processing {expected} book(s)")
-        print_banner(after=lambda: [x() for x in (nl, msg)])
-    else:
+        if _should_banner:
+            print_banner(after=lambda: [x() for x in (nl, msg)])
+        else:
+            nl()
+            msg()
+    elif _should_banner:
         print_banner()
 
     # process_standalone_files()

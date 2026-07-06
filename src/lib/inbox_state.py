@@ -83,6 +83,11 @@ class InboxState(Hasher):
         # when InboxState is created or force_inbox_hash_change signals a new
         # outer iteration so that the next loop prints a fresh header.
         self._last_banner_lc: int = -1
+        # Set by inbox_needs_processing() to indicate whether the inbox hash
+        # changed during the last check. process_inbox() uses this to decide
+        # whether to print a banner — we only want banners on actual changes,
+        # not on every poll cycle when there are still-pending books.
+        self.inbox_hash_changed: bool = False
         self._last_scan = 0
         self.tree: BooksTree = None  # type: ignore
         # In tests, prime the tree immediately so tests that access inbox.tree right
@@ -522,6 +527,7 @@ class InboxState(Hasher):
 
         needs_scan = self.changed_since_last_run_ended or self.changed_since_last_run_started
         hash_changed = False
+        self.inbox_hash_changed = False
 
         print_debug(
             f"[inbox_needs_processing] needs_scan={needs_scan}, waited={waited_count}, "
@@ -550,6 +556,7 @@ class InboxState(Hasher):
             # inserts a fake hash that also matches _last_run_end — both sides would
             # be the fake value and hash_changed would always be False.
             hash_changed = self.curr_hash != before_modified_hash
+            self.inbox_hash_changed = hash_changed
 
             if hash_changed:
                 h = f"({before_modified_hash} → {self.curr_hash})"
