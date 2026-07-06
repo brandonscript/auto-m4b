@@ -95,6 +95,21 @@ Before committing anything to `dev`, all tests must pass locally:
 poetry run python -m pytest src/tests/ -p no:randomly -q
 ```
 
+## Docker build workflow
+
+The Dockerfile is split into two layers to keep dev rebuilds fast:
+
+- **`Dockerfile.base`** — all heavy dependencies: ffmpeg, Poetry packages, spaCy model, NLTK corpora. Produces `auto-m4b-base:latest`. Only needs rebuilding when `pyproject.toml`, `poetry.lock`, or system deps change.
+- **`Dockerfile`** — just `COPY src/` on top of `auto-m4b-base:latest`. Rebuilds in seconds.
+
+```bash
+# Build (or rebuild) the base — only needed when deps change:
+dr build auto-m4b-base   # or: docker compose -f docker-compose.auto-m4b.yml --profile base build auto-m4b-base
+
+# Normal dev rebuild (fast — only re-copies src/):
+dr build auto-m4b        # or: docker compose -f docker-compose.auto-m4b.yml build auto-m4b
+```
+
 ## Conventions
 
 - Match existing style: Black (120 cols), Ruff, isort profile black.
