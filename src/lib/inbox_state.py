@@ -80,7 +80,12 @@ class InboxState(Hasher):
         self._last_banner_lc: int = -1
         self._last_scan = 0
         self.tree: BooksTree = None  # type: ignore
+        # Prime the inbox hash with scan_id3=False (fast) so that subsequent scans
+        # in process_inbox() correctly detect changes rather than always treating the
+        # first scan as "new activity". has_scanned is reset to False afterwards so
+        # process_inbox() still performs its full startup scan + prints the banner.
         self.scan(scan_id3=False)
+        self.has_scanned = False
 
     def set(
         self,
@@ -213,6 +218,7 @@ class InboxState(Hasher):
             self.ready = True
 
         self._last_scan = time.time()
+        self.has_scanned = True
         self.stale = False
 
     def flush(self):
@@ -288,6 +294,7 @@ class InboxState(Hasher):
         self.set_match_filter(new_match_filter)
         self.flush()
         self.ready = False
+        self.has_scanned = False
         _sync_failed_from_env()
         self.reset_loop_counter()
         return self
