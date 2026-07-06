@@ -918,12 +918,11 @@ def process_book(b: int, item: InboxItem):
 def process_inbox():
     from src.lib.fs_utils import clean_dirs, inbox_last_updated_at
     from src.lib.run import audio_files_found, print_banner
-    from src.lib.term import print_debug, print_grey
+    from src.lib.term import print_debug
 
     inbox = InboxState()
 
     if inbox.loop_counter == 1:
-        print_grey(f"\nScanning inbox for the first time...")
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
