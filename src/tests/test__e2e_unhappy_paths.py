@@ -593,3 +593,56 @@ class test_unhappy_paths:
         finally:
             cfg.CRASH_PROTECTION = orig_crash
             cfg.FATAL_FILE.unlink(missing_ok=True)
+
+    ORDER += 1
+
+    @pytest.mark.order(ORDER)
+    def test_book_moved_from_inbox_after_conversion_is_handled_gracefully(
+        self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str]
+    ):
+        """If the inbox folder is removed/moved after conversion but before archiving,
+        the app should log a notice and continue rather than crashing fatally."""
+        from src.lib import run as run_module
+        from src.lib.config import cfg
+
+        original_archive = run_module.archive_inbox_book
+
+        def archive_with_inbox_dir_removed(book):
+            shutil.rmtree(book.inbox_dir, ignore_errors=True)
+            return original_archive(book)
+
+        orig_on_complete = cfg.ON_COMPLETE
+        cfg.ON_COMPLETE = "archive"
+        try:
+            with patch("src.lib.run.archive_inbox_book", archive_with_inbox_dir_removed):
+                app(max_loops=1)
+        finally:
+            cfg.ON_COMPLETE = orig_on_complete
+
+        out = testutils.get_stdout(capfd)
+        assert not cfg.FATAL_FILE.exists(), "App should not have crashed fatally"
+        assert en.BOOK_INBOX_MOVED_AFTER_CONVERSION in out
+
+    ORDER += 1
+
+    @pytest.mark.order(ORDER)
+    def test_book_moved_from_inbox_before_copy_to_working_dir_is_skipped(
+        self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str]
+    ):
+        """If the inbox folder disappears between the initial exists() check and the
+        copy_to_working_dir step (race condition), the app should skip it gracefully."""
+        from src.lib import run as run_module
+        from src.lib.config import cfg
+
+        original_copy = run_module.copy_to_working_dir
+
+        def copy_after_removing_inbox(book):
+            shutil.rmtree(book.inbox_dir, ignore_errors=True)
+            return original_copy(book)
+
+        with patch("src.lib.run.copy_to_working_dir", copy_after_removing_inbox):
+            app(max_loops=1)
+
+        out = testutils.get_stdout(capfd)
+        assert not cfg.FATAL_FILE.exists(), "App should not have crashed fatally"
+        assert en.BOOK_INBOX_MOVED_BEFORE_PROCESSING in out

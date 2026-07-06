@@ -804,6 +804,20 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
         for i in range(1, 3):
             testutils.make_mock_file(disc / f"mock_book_multi_disc{d} - ch_{d+(d-i+1)}.mp3")
 
+    # make a multi-disc book with "cd N" naming (lowercase, space-separated)
+    for d in range(1, 10):
+        disc = MOCKED.multi_disc_dir_cd_n / f"cd {d}"
+        disc.mkdir(parents=True, exist_ok=True)
+        for i in range(1, 3):
+            testutils.make_mock_file(disc / f"Track {i:02}.mp3")
+
+    # make a multi-disc book with "CDN" naming (uppercase, no space, multi-digit)
+    for d in range(1, 15):
+        disc = MOCKED.multi_disc_dir_cdn / f"CD{d}"
+        disc.mkdir(parents=True, exist_ok=True)
+        for i in range(1, 3):
+            testutils.make_mock_file(disc / f"Track {i:02}.mp3")
+
     # make a mutli-part book
     romans = ["I", "II", "III", "IV"]
     for i in range(1, 5):
@@ -846,10 +860,9 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     testutils.make_mock_file(MOCKED.mixed_dir / "02 - mixed drinks.mp3")
     testutils.make_mock_file(MOCKED.mixed_dir / "03 - mixed drinks.mp3")
 
-    # make standalone files
+    # make standalone files (fixed size keeps container/mixed scoring deterministic)
     for f in STANDALONE_FILES:
-        rand_between_51_and_100 = random.randint(51 * 1024, 100 * 1024)
-        testutils.make_mock_file(f, size=rand_between_51_and_100)
+        testutils.make_mock_file(f, size=75 * 1024)
 
     # make a single files
     testutils.make_mock_file(MOCKED.single_dir_m4b / "mock_book_single_m4b.m4b")

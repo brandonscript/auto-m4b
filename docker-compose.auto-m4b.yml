@@ -1,0 +1,26 @@
+name: phantom
+
+include:
+  - ../docker-compose.networks.yml
+  - ../docker-compose.volumes.yml
+
+services:
+  auto-m4b:
+    build:
+      context: /etc/docker/auto-m4b
+    container_name: auto-m4b
+    restart: unless-stopped
+    volumes:
+      - ragnarok-media:/media:rw
+    networks:
+      - bridge
+    environment:
+      - INBOX_FOLDER=/media/Books/Audiobooks/#auto-m4b/inbox
+      - CONVERTED_FOLDER=/media/Books/Audiobooks/#auto-m4b/converted
+      - ARCHIVE_FOLDER=/media/Books/Audiobooks/#auto-m4b/archive
+      - BACKUP_FOLDER=/media/Books/Audiobooks/#auto-m4b/backup
+      - WORKING_FOLDER=/tmp/auto-m4b
+      - OVERWRITE_EXISTING=N
+      - BACKUP=N
+      - ON_COMPLETE=archive
+      - TZ=America/Vancouver

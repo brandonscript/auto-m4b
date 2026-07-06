@@ -120,7 +120,7 @@ humanize = "^4.12.3"
 ffmpeg-python = "^0.2.0"
 numpy = { version = "<2", platform = "*" }
 pydantic = "^2.11.5"
-tinta = "0.1.7"
+tinta = "1.0.0"
 python-dotenv = "^1.1.0"
 columnar = "^1.4.1"
 # python-ffmpeg = "^1.0.17" # No!

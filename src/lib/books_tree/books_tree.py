@@ -101,17 +101,25 @@ class BooksTree(BaseModel):
         self._files: list["BooksTree"] = []
         self._dirs: dict[str, "BooksTree"] = {}
 
+        if self.root is None:
+            # Root nodes own the path index that maps absolute path strings to their
+            # BooksTree nodes.  O(1) lookup replaces the previous O(n) linear scan
+            # through children_recursive every time a child is constructed.
+            self._path_index: dict[str, "BooksTree"] = {}
+
         if r := self.root:
-            if self.path != r.path and (existing := r.get_path(self.path)) and existing.structure:
-                self = existing
-                assert id(self) == id(
-                    existing
-                ), f"Instance for '{self.path}' should be the same as the existing one because it already exists in self.root"
-                return
+            _pi = getattr(r, "_path_index", None)
+
+            # O(1) parent lookup: use the path index if the parent was already added,
+            # otherwise fall back to get_like() which does a regex scan.
             if not self.parent and (rel_to_root := try_relative_to(self.path, r.path)) and len(rel_to_root.parts) > 1:
-                self.parent = r.get_like(rel_to_root.parent)
+                self.parent = (_pi.get(str(self.path.parent)) if _pi is not None else None) or r.get_like(rel_to_root.parent)
             else:
                 self.parent = r
+
+            # Register this node so future lookups for the same path are O(1).
+            if _pi is not None:
+                _pi[str(self.path)] = self
 
         self._match_filter = match_filter or cfg.MATCH_FILTER
         if scan or (scan is None and not root):
@@ -176,6 +184,12 @@ class BooksTree(BaseModel):
         if not self.is_root and not allow_non_root:
             raise RuntimeError("scan() should only be called on the root of the tree")
 
+        # Invalidate @lazy-cached recursive list properties on the entire tree so a
+        # rescan always sees the freshly built structure rather than stale cache.
+        for _node in [root, *root.__dict__.get("children_recursive", [])]:
+            for _attr in ("dirs_recursive", "files_recursive", "children_recursive"):
+                _node.__dict__.pop(_attr, None)
+
         # Clear the scorer cache and already_checked set so re-scans after
         # filesystem changes don't use stale structure scores, and so files
         # processed in a previous scan pass can be re-scored in the new pass.
@@ -223,9 +237,25 @@ class BooksTree(BaseModel):
             # else:
             # tick("subtree has no files, skipping")
 
+        # Separate dirs and files in a single pass to avoid calling is_dir() on every entry,
+        # which is expensive over network mounts (each call requires a separate stat syscall).
+        # Also precompute the filtered audio file list once so the directory loop below is
+        # O(n + d) instead of the previous O(n×d) where n=files and d=directories.
+        _rglob_dirs: list[Path] = []
+        _rglob_files: list[Path] = []
+        for _p in rglob:
+            try:
+                if _p.is_dir():
+                    _rglob_dirs.append(_p)
+                else:
+                    _rglob_files.append(_p)
+            except OSError:
+                pass
+        _all_audio_files = only_audio_files(filter_ignored(_rglob_files))
+
         # tick("building tree of audio files and dirs")
         # Build a tree of the audio files and dirs
-        for d in [x for x in rglob if x.is_dir()]:
+        for d in _rglob_dirs:
             # If d is not within the mindepth and maxdepth, skip it
             if not filter_depth(d, root.path, mindepth=mindepth, maxdepth=maxdepth):
                 # tick("d not in mindepth and maxdepth, skipping")
@@ -235,7 +265,7 @@ class BooksTree(BaseModel):
             # tick("d is a dir, getting audio files in dir")
             audio_files_in_dir = [
                 f
-                for f in only_audio_files(filter_ignored(rglob))
+                for f in _all_audio_files
                 if f.parent == d and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
             # tick(f"done getting audio {len(audio_files_in_dir)} files in dir {d.relative_to(root.path)}")
@@ -250,7 +280,7 @@ class BooksTree(BaseModel):
         self._files = isorted(
             [
                 BooksTree.cast(f, root=root, match_filter=self.match_filter)
-                for f in match_filter_paths(only_audio_files(filter_ignored(rglob)), self.match_filter, root=root)
+                for f in match_filter_paths(_all_audio_files, self.match_filter, root=root)
                 if f.parent == self.path and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
         )
@@ -370,6 +400,8 @@ class BooksTree(BaseModel):
     def get_path(self, q: Path):
         """
         Gets a file or directory from the tree by its path.
+        Uses the root's O(1) path index when available; falls back to a linear
+        children_recursive scan for trees built without the index (e.g. deserialization).
         """
         from src.lib.fs_utils import try_relative_to
 
@@ -378,6 +410,12 @@ class BooksTree(BaseModel):
 
         root = self.root or self
 
+        # Fast path: O(1) index lookup
+        _pi = getattr(root, "_path_index", None)
+        if _pi is not None:
+            return _pi.get(str(q))
+
+        # Slow path: O(n) linear scan (legacy / deserialized trees)
         if (rel_to_root := try_relative_to(q, root.path)) and not rel_to_root == Path("."):
             if found := next(
                 (c for c in root.children_recursive if c.rel_path == rel_to_root),
@@ -506,6 +544,24 @@ class BooksTree(BaseModel):
         return len(self.path.relative_to(self.root.path).parts)
 
     @cached_property
+    def inbox_depth(self) -> int:
+        """Depth of this path relative to cfg.inbox_dir, regardless of the current scan root.
+
+        This is the stable reference point for book-root classification rules such as
+        "depth-1 dirs are top-level books".  Using scan-root depth instead caused flaky
+        results when a tree is built with a sub-path as the root (allow_self_root=True).
+
+        Falls back to self.depth when cfg.inbox_dir is not set or this path is not
+        under the inbox.
+        """
+        from src.lib.config import cfg
+        from src.lib.fs_utils import try_relative_to
+
+        if (inbox := getattr(cfg, "inbox_dir", None)) and (rel := try_relative_to(self.path, inbox)):
+            return len(rel.parts)
+        return self.depth
+
+    @cached_property
     def container_root(self):
         """The root dir that contains the path, i.e. depth 1 parent."""
 
@@ -620,9 +676,10 @@ class BooksTree(BaseModel):
     def dirs_recursive_f(self) -> list["BooksTree"]:
         return self.dirs_recursive
 
-    @property
+    @lazy
     def dirs_recursive(self) -> list["BooksTree"]:
-        # Recursively walks the tree to return a flat list of all directories, excluding the root
+        # Recursively walks the tree to return a flat list of all directories, excluding the root.
+        # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
         return isorted(
             d
             for d in (
@@ -646,9 +703,10 @@ class BooksTree(BaseModel):
     def files_recursive_f(self):
         return self.files_recursive
 
-    @property
+    @lazy
     def files_recursive(self) -> list["BooksTree"]:
-        # Recursively walks the tree to return a flat list of all files
+        # Recursively walks the tree to return a flat list of all files.
+        # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
         return isorted((*self._files, *sum([d.files_recursive for d in self._dirs.values()], [])))
 
     @filter_matches
@@ -674,9 +732,10 @@ class BooksTree(BaseModel):
     def children_recursive_f(self) -> list["BooksTree"]:
         return self.children_recursive
 
-    @property
+    @lazy
     def children_recursive(self) -> list["BooksTree"]:
-        # Recursively walks the tree to return a flat list of all paths
+        # Recursively walks the tree to return a flat list of all paths.
+        # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
         return isorted(
             flatlist(
                 [*self._files, *self._dirs.values(), *sum([d.children_recursive for d in self._dirs.values()], [])]
@@ -728,7 +787,20 @@ class BooksTree(BaseModel):
 
     @property
     def books_and_series(self) -> list["BooksTree"]:
-        return list(filter(lambda x: x.is_book_root or x.has_structure("series_parent"), self.children_recursive))
+        def _include(x: "BooksTree") -> bool:
+            if x.is_book_root:
+                return True
+            if x.has_structure("series_parent"):
+                # Only include series parents that are top-level (immediate child of
+                # the inbox root) or nested directly inside a container.  A series_parent
+                # scored inside a flat/mixed/nested book (e.g. a subdir of a flat book
+                # that happens to contain two similarly-named tracks) should not surface
+                # as a separate entry — the enclosing book root already covers it.
+                p = x.parent
+                return (not p or p.is_root) or p.has_any_structure("container")
+            return False
+
+        return list(filter(_include, self.children_recursive))
 
     @property
     @filter_matches
@@ -793,9 +865,30 @@ class BooksTree(BaseModel):
             self._is_book_root = False
             return self._is_book_root
 
-        # Highest-level unknown is a book root, even if unknowns aren't necessarily books.
+        # Highest-level unknown is a book root, unless children expose diverse structures
+        # that indicate this is a container mis-scored as unknown (e.g. under depth-limited
+        # scans where grandchildren are hidden and score_container_mixed can't fire correctly).
+        # A genuine "unknown" book has uniformly-unknown children; a mis-classified container
+        # has children with at least two distinct meaningful structures (flat + standalone_file,
+        # single + flat, etc.).
         if self.has_only_structure("unknown") and (not (p := self.parent) or not p.has_structure("unknown")):
-            self._is_book_root = True
+            # Use DIRECT children only: recursive descendants can expose diverse structures
+            # in genuinely mixed books (e.g. dissimilar files inside flat subdirs) and
+            # would incorrectly flag them as container-like.
+            meaningful_direct_structures = {s for c in self.children for s in c.structure} - {
+                "unknown",
+                "_root_",
+            }
+            is_container_like = len(meaningful_direct_structures) >= 2
+            if is_container_like:
+                self._likely_container = True
+            self._is_book_root = not is_container_like
+            return self._is_book_root
+
+        # Flatish nodes are subsidiary parts of a flat book — never book roots,
+        # even if they also scored as standalone_file.
+        if self.has_structure("flatish"):
+            self._is_book_root = False
             return self._is_book_root
 
         # Standalone files and multi-parent dirs are book roots
@@ -803,19 +896,19 @@ class BooksTree(BaseModel):
             self._is_book_root = True
             return self._is_book_root
 
-        # Single dirs are book roots if they're not nested in a single dir
+        # Single dirs are book roots if they're not nested in a single dir or a
+        # likely-container (an unknown parent whose diverse child structures betray
+        # that it is a container mis-scored under a depth-limited scan).
         if self.has_structure("single") and (p := self.parent) and p.not_has_structure("single"):
+            if getattr(p, "_likely_container", False):
+                self._is_book_root = False
+                return self._is_book_root
             self._is_book_root = True
             return self._is_book_root
 
-        # Flatish dirs are not book roots
-        if self.has_structure("flatish"):
-            self._is_book_root = False
-            return self._is_book_root
-
-        # Any dir with a containerish parent or a depth of 1 is a book root
+        # Any dir with a containerish parent or at inbox depth 1 is a book root
         if self.has_any_structure("flat", "mixed", "nested") and (
-            self.depth == 1 or (p := self.parent) and p.has_any_structure("container", "series_parent", "multi_parent")
+            self.inbox_depth == 1 or (p := self.parent) and p.has_any_structure("container", "series_parent", "multi_parent")
         ):
             self._is_book_root = True
             return self._is_book_root
@@ -1079,8 +1172,12 @@ class BooksTree(BaseModel):
                 case "multi_disc" | "multi_part":
                     assert multi, f"Expected multi_disc or multi_part, got {multi}"
                     if not d.structure:
-                        d.set_structures(multi, "multi_parent")
-                        # self.# tick(f"(d) set structures to {multi} and 'multi_parent' for {d.rel_path}")
+                        # Only assign multi structure (not multi_parent) here — the
+                        # parent dir is handled separately in case "multi_parent" below.
+                        # Assigning multi_parent here would cause disc-child dirs (e.g.
+                        # "Disc 1", "cd 1") to be mis-flagged as book roots.
+                        d.set_structures(multi)
+                        # self.# tick(f"(d) set structures to {multi} for {d.rel_path}")
                     d.add_structures(multi, recursive=True)
                     # self.# tick(f"(d) added {multi} to {d.rel_path} recursively")
                     check_nested(d)
@@ -1142,13 +1239,35 @@ class BooksTree(BaseModel):
                 # self.# tick(f"{x} set structures to 'single' for {c.rel_path}")
                 continue
 
-            if (container_or_mixed := score_container_mixed(self)[0]) == "container":
+            # First: give any still-orphaned descendants "unknown" so they satisfy the
+            # children_without_structure_r assertion and don't skew the diversity count.
+            for _orphan in c.children_without_structure_r:
+                _orphan.set_structures("unknown", recursive=True)
+
+            if (container_or_mixed := score_container_mixed(c)[0]) == "container":
                 c.set_structures(container_or_mixed)
                 # self.# tick(f"{x} set structures to '{container_or_mixed}' for {c.rel_path}")
-            # mixed is only used internally for scoring; externally unknown is used
             else:
-                c.set_structures("unknown", recursive=True)
-                # self.# tick(f"{x} set structures to 'unknown' recursively for {c.rel_path}")
+                # Count distinct meaningful DIRECT child structures to decide whether to clobber.
+                # A node whose direct children have ≥2 distinct non-unknown structures may be a
+                # container mis-scored as unknown under a depth-limited scan (e.g. mindepth=2
+                # hides grandchildren, so score_container_mixed can't fire); preserve the
+                # children's structures so determine_if_book_root can detect this pattern via
+                # _likely_container rather than recursively overwriting correct info.
+                #
+                # Using direct children (not children_recursive) avoids a false positive where
+                # a genuinely mixed/unknown book (e.g. a dir with two series_parent sub-dirs
+                # each having series_book children) inflates the count via deep descendants
+                # and incorrectly suppresses the recursive clobber.
+                _meaningful = {s for _ch in c.children for s in _ch.structure} - {"unknown", "_root_"}
+                if len(_meaningful) >= 2:
+                    c.add_structures("unknown")
+                    # self.# tick(f"{x} set structures to 'unknown' (container-like) for {c.rel_path}")
+                else:
+                    # Genuinely ambiguous / mixed; propagate unknown to all children so the
+                    # whole sub-tree is treated as a single unresolved unit.
+                    c.set_structures("unknown", recursive=True)
+                    # self.# tick(f"{x} set structures to 'unknown' recursively for {c.rel_path}")
 
         # Dir pass #3: Determine uncaught nested for remaining dirs
         # self.# tick(

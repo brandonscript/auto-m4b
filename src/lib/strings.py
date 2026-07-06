@@ -4,6 +4,8 @@ class en:
     DONE_CONVERTING = "Finished converting all available books, waiting for more to be added to the inbox"
     INBOX_RECENTLY_MODIFIED = "New activity detected in the inbox..."
     BOOK_RECENTLY_MODIFIED = "Skipping this book, it was recently updated and may still be copying"
+    BOOK_INBOX_MOVED_BEFORE_PROCESSING = "Book was moved or deleted from the inbox before processing could start, skipping"
+    BOOK_INBOX_MOVED_AFTER_CONVERSION = "Inbox folder was already moved or deleted, skipping"
     BOOK_SHOULD_RETRY = "This book previously failed, but it has been updated – trying again"
     BOOK_NEEDS_FLATTENING = "Audio files for this book are in a subfolder, moving them to the book's root folder..."
     BOOK_IS_FLAT_BUT_MESSY = (

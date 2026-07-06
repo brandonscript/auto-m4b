@@ -553,7 +553,7 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                             "-",
                         ]
                     )
-    except KeyError:
+    except (KeyError, subprocess.CalledProcessError, OSError):
         if cfg.DEBUG:
             print_debug(f"Could not extract cover art from {file}'s streams")
     return out_file.with_suffix(".jpg") if save_to_file else b""
