@@ -5,6 +5,14 @@ include:
   - ../docker-compose.volumes.yml
 
 services:
+  auto-m4b-base:
+    build:
+      context: /etc/docker/auto-m4b
+      dockerfile: Dockerfile.base
+    image: auto-m4b-base:latest
+    profiles:
+      - base
+
   auto-m4b:
     build:
       context: /etc/docker/auto-m4b
