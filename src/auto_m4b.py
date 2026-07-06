@@ -44,21 +44,56 @@ def use_error_handler():
 @copy_kwargs_omit_first_arg(AutoM4bArgs.__init__)
 def app(**kwargs):
     with use_error_handler():
+        import threading
+
         args = AutoM4bArgs(**kwargs)
-        infinite_loop = args.max_loops == -1
         inbox = InboxState()
         cfg.startup(args)
-        while infinite_loop or inbox.loop_counter < args.max_loops:
-            try:
+
+        # ── Test / finite-loop path ────────────────────────────────────────────
+        # Keep the original while/sleep loop so all existing tests continue to
+        # work without modification.
+        if args.max_loops != -1:
+            while inbox.loop_counter < args.max_loops:
                 inbox.loop_counter += 1
                 run.process_inbox()
-            finally:
-                # inbox.loop_counter += 1
-                if infinite_loop or inbox.loop_counter < args.max_loops:
+                if inbox.loop_counter < args.max_loops:
                     time.sleep(cfg.SLEEP_TIME)
 
-        if not was_prev_line_empty():
-            nl()
+            if not was_prev_line_empty():
+                nl()
+            return
+
+        # ── Production path: event-driven ─────────────────────────────────────
+        # PollingObserver is used (not inotify) because the inbox lives on an
+        # SMB/CIFS mount where kernel inotify events are not delivered.
+        from watchdog.events import FileSystemEventHandler
+        from watchdog.observers.polling import PollingObserver
+
+        dirty = threading.Event()
+
+        class _InboxHandler(FileSystemEventHandler):
+            def on_any_event(self, event):
+                if not event.is_directory:
+                    dirty.set()
+
+        # Initial scan
+        inbox.loop_counter += 1
+        run.process_inbox()
+
+        observer = PollingObserver(timeout=cfg.SLEEP_TIME)
+        observer.schedule(_InboxHandler(), str(cfg.inbox_dir), recursive=True)
+        observer.start()
+        try:
+            while True:
+                dirty.wait()
+                dirty.clear()
+                inbox.loop_counter += 1
+                with use_error_handler():
+                    run.process_inbox()
+        finally:
+            observer.stop()
+            observer.join()
 
 
 if __name__ == "__main__":

@@ -432,7 +432,7 @@ def books_to_process() -> tuple[int, Callable[[], None]]:
 
     # If no books at all (unfiltered), print the "nothing here" message.
     if not total_books:
-        return 0, lambda: smart_print(f"No books to convert, next check in {cfg.sleeptime_friendly}\n")
+        return 0, lambda: smart_print(f"No books to convert, watching for changes...\n")
 
     if inbox.match_filter and not inbox.matched_books:
         return 0, lambda: smart_print(
@@ -929,7 +929,7 @@ def process_inbox():
 
     if not audio_files_found():
         print_debug(
-            f"No audio files found in {cfg.inbox_dir}\n        Last updated at {inbox_last_updated_at(friendly=True)}, next check in {cfg.sleeptime_friendly}",
+            f"No audio files found in {cfg.inbox_dir}\n        Last updated at {inbox_last_updated_at(friendly=True)}, watching for changes...",
             only_once=True,
         )
         return
