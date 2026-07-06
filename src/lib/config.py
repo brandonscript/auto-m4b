@@ -257,17 +257,13 @@ class Config:
         self.load_env(quiet=True)
 
     def startup(self, args: AutoM4bArgs | None = None):
-        from src.lib.inbox_state import InboxState
         from src.lib.term import print_dark_grey, print_grey, print_mint
 
         start_time = time.perf_counter()
 
         with use_pid_file() as pid_exists:
             with self.load_env(args) as env_msg:
-                if self.SLEEP_TIME and not "pytest" in sys.modules:
-                    time.sleep(min(2, self.SLEEP_TIME / 2))
-
-                if not pid_exists and not InboxState().loop_counter:
+                if not pid_exists:
                     print_mint("\nStarting auto-m4b...")
                     print_grey(self.info_str)
                     if env_msg:
@@ -279,6 +275,9 @@ class Config:
                         else ("TEST mode on" if self.TEST else "DEBUG mode on" if self.DEBUG else "")
                     ):
                         print_amber(test_debug_msg)
+
+                if self.SLEEP_TIME and not "pytest" in sys.modules:
+                    time.sleep(min(2, self.SLEEP_TIME / 2))
 
                     # if beta_msg := (
                     #     f"[Beta] features are enabled:\n{listify([f for f, b in beta_features if b])}\n"
