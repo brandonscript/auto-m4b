@@ -81,6 +81,14 @@ CI runs a subset of tests (see `.github/workflows/ci.yml`) and skips some slow/e
 - Pytest is configured with `--slow` in `pyproject.toml` addopts; slow tests are included by default.
 - Some tests require NLTK data and the spaCy `en_core_web_sm` model (CI downloads these).
 
+## Branching strategy
+
+The author uses a `dev` branch for small, ongoing feature work and incremental fixes. Most day-to-day development lands in `dev` first and is merged to `main` from there, avoiding the overhead of long-lived feature branches for minor changes.
+
+Larger, independent features or fixes that need isolation (e.g. the style of PRs #3–5) still get their own branches off `main`. But as a rule: if it's a small improvement that doesn't need a separate review context, it goes in `dev`.
+
+Agents should not create new branches for small changes unless the author asks. When in doubt, ask.
+
 ## Conventions
 
 - Match existing style: Black (120 cols), Ruff, isort profile black.
