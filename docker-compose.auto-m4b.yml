@@ -32,3 +32,4 @@ services:
       - BACKUP=N
       - ON_COMPLETE=archive
       - TZ=America/Vancouver
+      - DEBUG=1

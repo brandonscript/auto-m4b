@@ -75,9 +75,16 @@ class InboxItem:
 
         self._prev_hash = None
         self._last_updated: float | None = None
-        self._curr_hash = hash_path_audio_files(self.tree.path)
+        # Defer the per-book hash until it is first needed — on startup the
+        # inbox contains O(100) books and computing a hash for each requires a
+        # separate rglob+stat over the SMB mount, which adds several seconds of
+        # startup latency.
+        self._curr_hash: str = ""
         self._hash_changed: float = time.time()
-        self.size = get_audio_size(self.tree.path) if self.tree.path.exists() else 0
+        # Reuse the @lazy-cached size from the BooksTree node (already computed
+        # during the tree scan) instead of performing an extra get_audio_size()
+        # traversal per book over the SMB mount.
+        self.size = self.tree.size if self.tree.path.exists() else 0
         self.status: InboxItemStatus = "new"
         self.failed_reason: str = ""
         self.failed_at: float | None = None

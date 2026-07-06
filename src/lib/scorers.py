@@ -1295,21 +1295,29 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         elif not p:
             return (None, 0.0, 0.0)  # No parent, must be root, theoretically impossible
 
+        # Cache parent's file list early so every sibling-level check reuses
+        # the same TreeNodeList (and its cached @lazy properties) rather than
+        # creating per-file copies via tree.i.siblings_recursive.
+        _sibs = p.i.files
+
         p_files_have_tags = False
         p_album_sim = 0.0
         p_author_sim = 0.0
         t = t if (t := tree.id3_tags) and not t.BAD else None
-        # album_to_p_siblings_sim = 0.0
-        # author_to_p_siblings_sim = 0.0
-        if tree.depth > 1 and (p_files_have_tags := bool(tree.i.siblings_recursive.id3_tags)):
+        # Use siblings_recursive (not _sibs which includes tree itself) so that a
+        # solo file with no siblings correctly gives p_files_have_tags=False, allowing
+        # the _only_child_in_parent path to return ("single", ...) as expected.
+        # Guard with _sibs.id3_tags first: when id3 scanning is disabled, _sibs.id3_tags
+        # is always empty and we can skip the expensive tree.i creation entirely.
+        if tree.depth > 1 and _sibs.id3_tags and (p_files_have_tags := bool(tree.i.siblings_recursive.id3_tags)):
             # tree.parent.tick(f" --- p_files_have_tags: {p_files_have_tags}")
             t: Id3Tags | None = tree.id3_tags
-            # pp_album_sim = pp.i.files_recursive.similarity("id3_albums", fallback=0.0)
-            # pp_author_sim = pp.i.files_recursive.similarity("id3_authors", fallback=0.0)
             p_album_sim = 0.0 if not t else get_similarity([t.album, *tree.i.siblings_recursive.id3_albums]) or 0.0
             p_artist_sim = 0.0 if not t else get_similarity([t.artist, *tree.i.siblings_recursive.id3_artists]) or 0.0
             p_albumartist_sim = (
-                0.0 if not t else get_similarity([t.albumartist, *tree.i.siblings_recursive.id3_albumartists]) or 0.0
+                0.0
+                if not t
+                else get_similarity([t.albumartist, *tree.i.siblings_recursive.id3_albumartists]) or 0.0
             )
             p_author_sim = round(max(p_artist_sim, p_albumartist_sim), 3)
 
@@ -1341,31 +1349,37 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         if not (only_file_in_parent := len(p.files) < 2):
             # tree.parent.tick(f" --- not only file in parent: {only_file_in_parent}")
 
-            if tree.i.this_and_siblings.have_albums:
+            if _sibs.have_albums:
                 siblings_rels.append(
                     -1.0
-                    + (tree.i.this_and_siblings_recursive.similarity("id3_albums", distinct=True, fallback=0.0) * 2)
+                    + (_sibs.similarity("id3_albums", distinct=True, fallback=0.0) * 2)
                 )
 
-            if tree.i.this_and_siblings.have_authors:
+            if _sibs.have_authors:
                 siblings_rels.append(
                     -1.0
-                    + (tree.i.this_and_siblings_recursive.similarity("id3_authors", distinct=True, fallback=0.0) * 2)
+                    + (_sibs.similarity("id3_authors", distinct=True, fallback=0.0) * 2)
                 )
 
+            # For depth-3+ files, tree.i.this_and_siblings_recursive goes up to the
+            # grandparent (e.g. the series folder) and includes all files in sibling books.
+            # This gives a low similarity signal across a diverse series, which correctly
+            # boosts standalone_score. Using _sibs (parent's direct files) instead would
+            # give a high similarity among tracks within the same flat book and incorrectly
+            # suppress the standalone signal.
             siblings_rels.append(
                 tree.i.this_and_siblings_recursive.similarity("pathnames", distinct=True, fallback=0.0)
             )
 
             known_numbers_contiguity = float(
-                tree.i.this_and_siblings.track_nums_are_contiguous
-                or tree.i.this_and_siblings.start_nums_are_contiguous
-                or tree.i.this_and_siblings.part_nums_are_contiguous
+                _sibs.track_nums_are_contiguous
+                or _sibs.start_nums_are_contiguous
+                or _sibs.part_nums_are_contiguous
                 or 0
             )
             all_numbers_contiguity = (
-                float(tree.i.this_and_siblings.all_path_nums_are_contiguous or 0)
-                + (tree.i.this_and_siblings.all_path_nums_completion or 0)
+                float(_sibs.all_path_nums_are_contiguous or 0)
+                + (_sibs.all_path_nums_completion or 0)
             ) / 2
 
             siblings_rels.append(max(known_numbers_contiguity, all_numbers_contiguity))

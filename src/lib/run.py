@@ -1,4 +1,5 @@
 import shutil
+import sys
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -533,7 +534,8 @@ def can_process_roman_numeral_book(book: Audiobook):
 
 def has_audio_files(book: Audiobook):
     if book.inbox_dir.is_file():
-        raise FileNotFoundError(f"has_audio_files: '{book.inbox_dir}' is a file, not a folder")
+        print_debug(f"has_audio_files: '{book.inbox_dir}' is a standalone file, not a folder — skipping")
+        return False
     if not book.num_files("inbox"):
         print_notice(f"'{book.inbox_dir}' does not contain any known audio files, skipping")
         fail_book(book, "No audio files found in this folder")
@@ -923,15 +925,47 @@ def process_inbox():
     inbox = InboxState()
 
     if inbox.loop_counter == 1:
+        if "pytest" not in sys.modules:
+            # Production startup: print banner immediately so the user sees the app
+            # is alive, then do the (potentially slow) full scan in the background.
+            # The watchdog loop in auto_m4b.py uses dirty.wait(timeout) so it wakes
+            # up and begins processing once inbox.ready is set.
+            print_banner()
+            import threading
+
+            def _bg_scan():
+                import traceback
+                t0 = time.monotonic()
+                print_debug("[bg-scan] Starting background inbox scan...")
+                try:
+                    inbox.scan(set_ready=True, force=True, scan_id3=False)
+                    # Record the post-scan hash as both the run-start and run-end
+                    # checkpoints so the first inbox_needs_processing() call can skip
+                    # the otherwise redundant re-scan (nothing changed since we just
+                    # finished scanning).
+                    inbox.start()
+                    inbox.done()
+                    elapsed = time.monotonic() - t0
+                    print_debug(
+                        f"[bg-scan] Done in {elapsed:.1f}s — ready={inbox.ready}, "
+                        f"items={len(inbox._items)}, ok={inbox.num_matched_ok}"
+                    )
+                except Exception as e:
+                    print_debug(f"[bg-scan] ERROR: {e}\n{traceback.format_exc()}")
+
+            threading.Thread(target=_bg_scan, daemon=True).start()
+            return
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
+    print_debug(f"[process_inbox] loop={inbox.loop_counter}, checking audio_files_found...")
     if not audio_files_found():
         print_debug(
             f"No audio files found in {cfg.inbox_dir}\n        Last updated at {inbox_last_updated_at(friendly=True)}, watching for changes...",
             only_once=True,
         )
         return
+    print_debug(f"[process_inbox] audio files found, checking inbox_needs_processing...")
     if (
         # not inbox.inbox_needs_processing(on_will_scan=process_standalone_files)
         not inbox.inbox_needs_processing()

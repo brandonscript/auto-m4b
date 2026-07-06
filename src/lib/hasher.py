@@ -9,14 +9,15 @@ from src.lib.fs_utils import hash_path_audio_files, last_updated_audio_files_at
 class Hasher:
     """Stores the current, and previous 5 hashes of a given path as a tuple. When a new hash is added, the oldest one is removed, and the rest are shifted down by one. If a hash is the same as the previous one, it is not added - only the timestamp on the current hash is updated. This is used to determine if a file has changed in the last 5 seconds."""
 
-    def __init__(self, path: Path, max_hashes: int = 10):
+    def __init__(self, path: Path, max_hashes: int = 10, flush_on_init: bool = True):
         self.path = path
         self.max_hashes = max_hashes
         self._hashes = []
         self._last_run_start = None
         self._last_run_end = None
         self.stale = True
-        self.flush()
+        if flush_on_init:
+            self.flush()
 
     def __repr__(self):
         return f"{self.path} -- {self._hashes} -- {human_elapsed_time(time.time() - self.last_updated)}"
@@ -26,7 +27,20 @@ class Hasher:
 
     @property
     def last_updated(self):
-        return last_updated_audio_files_at(self.path)
+        # Quick shallow mtime check: stat the watched dir and its direct children
+        # (one level deep).  Adding a book to the inbox updates the inbox dir
+        # mtime; adding/modifying a file inside a book updates the book dir mtime.
+        # Checking 2 levels of directories is O(N_books) instead of O(N_files) and
+        # avoids a full rglob+stat traversal of every audio file on every poll.
+        from src.lib.fs_utils import try_get_stat_mtime
+
+        try:
+            mtimes = [try_get_stat_mtime(self.path)]
+            for child in self.path.iterdir():
+                mtimes.append(try_get_stat_mtime(child))
+            return max(mtimes)
+        except OSError:
+            return last_updated_audio_files_at(self.path)
 
     def scan(self):
         with threading.Lock():
@@ -70,7 +84,7 @@ class Hasher:
 
     @property
     def curr_hash(self):
-        return self._hashes[0][0]
+        return self._hashes[0][0] if self._hashes else ""
 
     @property
     def prev_hash(self):

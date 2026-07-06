@@ -187,8 +187,11 @@ class BooksTree(BaseModel):
         # Invalidate @lazy-cached recursive list properties on the entire tree so a
         # rescan always sees the freshly built structure rather than stale cache.
         for _node in [root, *root.__dict__.get("children_recursive", [])]:
-            for _attr in ("dirs_recursive", "files_recursive", "children_recursive"):
+            for _attr in ("children", "dirs_recursive", "files_recursive", "children_recursive", "siblings", "size"):
                 _node.__dict__.pop(_attr, None)
+            # Clear the TreeNodeSummary cache so a re-scan always recomputes
+            # summaries with the freshly built tree structure.
+            _node._i = None
 
         # Clear the scorer cache and already_checked set so re-scans after
         # filesystem changes don't use stale structure scores, and so files
@@ -513,7 +516,7 @@ class BooksTree(BaseModel):
         name_rel = try_relative_to(self.path.name, root.path)
         return str(path_rel) if path_rel != Path(".") else str(name_rel) if name_rel else self.name
 
-    @property
+    @lazy
     def size(self):
         try:
             if self.is_file():
@@ -723,8 +726,9 @@ class BooksTree(BaseModel):
     def children_f(self) -> list["BooksTree"]:
         return self.children
 
-    @property
+    @lazy
     def children(self) -> list["BooksTree"]:
+        # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
         return isorted((*self._files, *self._dirs.values()))
 
     @property
@@ -756,11 +760,12 @@ class BooksTree(BaseModel):
     def siblings_f(self):
         return self.siblings
 
-    @property
+    @lazy
     def siblings(self):
         if not self.parent or self.is_root:
             return None
-        return isorted((c for c in self.parent.children if c != self))
+        # Use identity comparison (is not) — BooksTree nodes are uniqued by _path_index
+        return isorted((c for c in self.parent.children if c is not self))
 
     @property
     @filter_matches
