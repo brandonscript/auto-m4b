@@ -598,6 +598,64 @@ class test_tree_structures:
             any((c.is_book_root for c in multi_disc_parent.children_recursive_f))
         ), f"Expected all children to not be book roots"
 
+    def test_multi_disc_cd_n(self):
+        """Disc directories named 'cd 1', 'cd 2', ..., 'cd 9' (lowercase with space)
+        must be detected as a single multi-disc book, not as individual flat books.
+        Regression: ripped CDs commonly have inconsistent per-disc album ID3 tags which
+        was causing the flat scorer to win over the multi-disc scorer."""
+        tree = BooksTree(
+            TEST_DIRS.inbox,
+            match_filter=[MOCKED.multi_disc_dir_cd_n],
+        )
+        parent = tree.dirs[MOCKED.multi_disc_dir_cd_n.name]
+        disc_subdirs = list(parent.dirs.values())
+
+        assert parent.has_only_structures(
+            "multi_parent", "multi_disc"
+        ), f"Expected ('multi_parent', 'multi_disc'), got {parent.structure}"
+
+        assert parent.is_book_root, "Book root should be the parent, not individual discs"
+
+        first_non_multi_disc = next(
+            (d for d in disc_subdirs if not d.has_only_structure("multi_disc")),
+            None,
+        )
+        assert all(
+            d.has_only_structure("multi_disc") for d in disc_subdirs
+        ), f"Expected all cd N subdirs to have only ('multi_disc'), got {first_non_multi_disc}"
+
+        assert not any(
+            c.is_book_root for c in parent.children_recursive_f
+        ), "Individual 'cd N' subdirs must NOT be book roots"
+
+    def test_multi_disc_cdn(self):
+        """Disc directories named 'CD1', 'CD2', ..., 'CD14' (uppercase, no space, multi-digit)
+        must be detected as a single multi-disc book, not as individual flat books."""
+        tree = BooksTree(
+            TEST_DIRS.inbox,
+            match_filter=[MOCKED.multi_disc_dir_cdn],
+        )
+        parent = tree.dirs[MOCKED.multi_disc_dir_cdn.name]
+        disc_subdirs = list(parent.dirs.values())
+
+        assert parent.has_only_structures(
+            "multi_parent", "multi_disc"
+        ), f"Expected ('multi_parent', 'multi_disc'), got {parent.structure}"
+
+        assert parent.is_book_root, "Book root should be the parent, not individual discs"
+
+        first_non_multi_disc = next(
+            (d for d in disc_subdirs if not d.has_only_structure("multi_disc")),
+            None,
+        )
+        assert all(
+            d.has_only_structure("multi_disc") for d in disc_subdirs
+        ), f"Expected all CDN subdirs to have only ('multi_disc'), got {first_non_multi_disc}"
+
+        assert not any(
+            c.is_book_root for c in parent.children_recursive_f
+        ), "Individual 'CDN' subdirs must NOT be book roots"
+
     def test_multi_part(self):
         # structure = determine_structure(
         #     TEST_DIRS.inbox,
@@ -921,11 +979,19 @@ class test_tree_finding:
             (TEST_DIRS.inbox, 1, 1, flatlist(MOCKED.flat_dirs + [MOCKED.container_root_dir, MOCKED.mixed_dir] + [MOCKED.single_dir_mp3, MOCKED.single_dir_m4b] + MOCKED.container_dir_d1_standalone_files)),
             (TEST_DIRS.inbox, 1, 2, MOCKED.all_books_and_series[:6] + MOCKED.all_books_and_series[10:-3]),
             (TEST_DIRS.inbox, 2, 2, [
-                MOCKED.container_dirs[0], 
-                # MOCKED.all_books_and_series[5], 
-                # MOCKED.all_books_and_series[10], 
-                MOCKED.all_books_and_series[-4]
-            ] + MOCKED.all_books_and_series[13:-6]),
+                MOCKED.single_nested_dir_mp3,
+            ] + [
+                MOCKED.mixed_dir,
+                MOCKED.multi_disc_dir,
+                MOCKED.multi_disc_dir_cd_n,
+                MOCKED.multi_disc_dir_cdn,
+                MOCKED.multi_disc_dir_with_extras,
+                MOCKED.multi_nested_dir,
+                MOCKED.multi_part_dir,
+                MOCKED.nested_dir,
+                MOCKED.series_parent_dir,
+                *MOCKED.series_books,
+            ]),
             # fmt: on
         ],
     )

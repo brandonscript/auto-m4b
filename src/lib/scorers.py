@@ -1104,6 +1104,14 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
             container_score -= 0.5
             mixed_score += 0.5
 
+        # Strong structural signal: standalone-scored files sharing a dir with book-type
+        # children dirs is a clear indicator of a container regardless of file size.
+        # (Size-based signals are calibrated for real 100 MB+ audio — they fail on test
+        # fixtures. This structural signal is size-independent.)
+        if bool(tree.files) and bool(tree.dirs) and standalones > 0:
+            container_score += 2.0
+            mixed_score -= 2.0
+
         container_score = round(container_score, 3)
         mixed_score = round(mixed_score, 3)
 
@@ -1132,6 +1140,19 @@ def score_flat(tree: "BooksTree") -> float:
 
         if not tree.files:
             # Can't be flat if it has no files
+            return 0.0
+
+        # A directory whose name matches the disc pattern (e.g. "cd 1", "CD14", "Disc 3")
+        # and that has multiple disc-named siblings cannot be a flat book — it's a disc
+        # within a multi-disc set.  This prevents consistent intra-disc ID3 tags from
+        # making the flat scorer win over the multi-disc scorer.
+        from src.lib.parsers import get_disc_num
+
+        if (
+            get_disc_num(tree.name) >= 0
+            and len(tree.i.this_and_siblings._trees) > 1
+            and tree.i.this_and_siblings.have_disc_nums
+        ):
             return 0.0
 
         _is_multi, multi_disc_score, multi_part_score = score_multi_part_or_disc(tree)
@@ -1515,6 +1536,11 @@ def score_series_parent(tree: "BooksTree") -> float:
             if c.is_file() and score_single_standalone_file(c)[1] > 0.5:
                 # tree.tick(f"is file and likely standalone for {c.rel_path}")
                 return True
+            # A directory with exactly one audio file and no subdirectories is a
+            # strong structural indicator of a series book (e.g. numbered book dirs
+            # each containing a single m4a/mp3 when ID3 tags are not yet scanned).
+            if c.is_dir() and not c._dirs and len(c.files) == 1:
+                return True
             return False
 
         series_parent_score = 0.0
@@ -1811,6 +1837,16 @@ def score_multi_part_or_disc(tree: "BooksTree") -> tuple[Literal["multi_part", "
             else:
                 # Slight boost from the average of the album and author similarity
                 tags_offset = round((album_sim + author_sim) / 2, 3) / 4
+
+        # When folder names give a complete, contiguous disc/part sequence the structural
+        # signal is unambiguous. Ripped audiobooks commonly have inconsistent album tags
+        # per disc, so dampen tag-noise penalties in that case to avoid misclassifying
+        # a clearly-named multi-disc book as flat/unknown.
+        disc_complete_and_contiguous = disc_nums_cmpl == 1.0 and bool(disc_nums_cntg)
+        part_complete_and_contiguous = part_nums_cmpl == 1.0 and bool(part_nums_cntg)
+        if tags_offset < 0:
+            if disc_complete_and_contiguous or part_complete_and_contiguous:
+                tags_offset *= 0.25  # dampen negative penalty to 25% when structure is clear
 
         disc_nums_score += tags_offset
         part_nums_score += tags_offset

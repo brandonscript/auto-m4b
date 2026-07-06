@@ -2858,13 +2858,14 @@ thinc = ">=8.1.0,<9.0.0"
 
 [[package]]
 name = "tinta"
-version = "0.1.7"
+version = "1.0.0"
 description = "Tinta, a magical console output tool."
 optional = false
-python-versions = "*"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "tinta-0.1.7.tar.gz", hash = "sha256:d6d954eef9c073ed2456586b21765cd40a0a7c1d1e5f2b848fc26b2e59bce561"},
+    {file = "tinta-1.0.0-py3-none-any.whl", hash = "sha256:639ea7b802ef7500900a04f7e4e8675cfbbb266e1b4f054de1579185d1418739"},
+    {file = "tinta-1.0.0.tar.gz", hash = "sha256:285f33e21e1252e422677248e22e3bc3a0be373a7e0b7baa8c179e564986fd70"},
 ]
 
 [[package]]
@@ -3348,4 +3349,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "322c4b1e664dc97a359d49da5530a95650a3b65b6dee3576386b93e269062a79"
+content-hash = "b53c3bf4a7514e9fa8ac1ac51d656e342440f38c46d40e2ea9b3ec451b8f9497"

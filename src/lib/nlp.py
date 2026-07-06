@@ -258,10 +258,22 @@ class NoTRF:
 
 
 try:
-    from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
+    # Suppress "None of PyTorch/TensorFlow/Flax found" noise at import time.
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    # Prevent HuggingFace from making network requests for model downloads.
+    # If the model isn't cached locally, skip the transformer pipeline entirely.
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
+    # Skip transformer pipeline if no ML framework (PyTorch/TF/Flax) is present —
+    # from_pretrained() would otherwise stall indefinitely on a network download.
+    import importlib.util
+    if not any(importlib.util.find_spec(pkg) for pkg in ("torch", "tensorflow", "flax")):
+        raise ImportError("No ML framework (torch/tensorflow/flax) available; skipping transformer pipeline")
 
     with _devnull(), warnings.catch_warnings():
         warnings.filterwarnings("ignore")
+        from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
         nlp_trf = get_transformer_pipeline(pipeline, model_name=TRF_MODEL)
 except Exception as e:
     print_debug(f"Error loading transformer model: {e}")

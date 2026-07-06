@@ -80,7 +80,7 @@ class InboxState(Hasher):
         self._last_banner_lc: int = -1
         self._last_scan = 0
         self.tree: BooksTree = None  # type: ignore
-        self.scan()
+        self.scan(scan_id3=False)
 
     def set(
         self,
@@ -151,6 +151,7 @@ class InboxState(Hasher):
         *,
         scan_id3: bool | None = None,
         force: bool = False,
+        determine_structure: bool = True,
     ):
         from src.lib.config import cfg
 
@@ -167,9 +168,10 @@ class InboxState(Hasher):
         super().scan()
 
         if not self.tree:
-            # Only scan id3 info once, when initializing the tree
-            self.tree = BooksTree(cfg.inbox_dir)
-        self.tree.scan(scan_id3=False if scan_id3 is False else True)
+            # Create without auto-scan so the explicit scan() call below
+            # controls whether ID3 tags are read (avoids a redundant full scan).
+            self.tree = BooksTree(cfg.inbox_dir, scan=False)
+        self.tree.scan(scan_id3=False if scan_id3 is False else True, determine_structure=determine_structure)
         # self._tree.scan()
 
         found_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}
@@ -277,7 +279,8 @@ class InboxState(Hasher):
             os.environ["MATCH_FILTER"] = match_filter
             cfg.MATCH_FILTER = match_filter
 
-        self.tree._match_filter = match_filter
+        if self.tree is not None:
+            self.tree._match_filter = match_filter
         # self.tree.scan()
 
     def reset_inbox(self, new_match_filter: str | None = None):
@@ -364,7 +367,7 @@ class InboxState(Hasher):
         return [
             v
             for _k, v in self._items.items()
-            if v.series_key == key or Path(v.key).parts[0] == key and v.is_series_book
+            if v.series_key == key or (v.key and Path(v.key).parts[0] == key and v.is_series_book)
         ]
 
     @property

@@ -653,7 +653,7 @@ def print_moving_to_converted(book):
 
 
 def move_converted_book_and_extras(book: Audiobook):
-    from src.lib.fs_utils import mv_dir_contents, mv_file_into_dir, rm_all_empty_dirs
+    from src.lib.fs_utils import mv_dir_contents, mv_file_into_dir, rm_all_empty_dirs, rm_dirs
 
     print_moving_to_converted(book)
 
@@ -677,6 +677,9 @@ def move_converted_book_and_extras(book: Audiobook):
                 overwrite_mode="overwrite-silent",
             )
 
+    # Remove intermediate temp files before moving — prevents ~tmpfiles from being
+    # carried into the converted output directory by mv_dir_contents' recursive descent.
+    rm_dirs([book.build_tmp_dir], ignore_errors=True, even_if_not_empty=True)
     rm_all_empty_dirs(book.build_dir)
 
     # Move all built audio files to output folder
@@ -768,6 +771,11 @@ def archive_inbox_book(book: Audiobook):
         print_notice("Test mode: The original folder will not be moved or deleted")
         InboxState().set_processed(book)
     else:
+        if not book.inbox_dir.exists():
+            print_notice(en.BOOK_INBOX_MOVED_AFTER_CONVERSION)
+            InboxState().set_gone(book)
+            return
+
         if cfg.ON_COMPLETE == "archive":
             smart_print("\nArchiving original from inbox...", end="")
             mv_dir_contents(
@@ -808,6 +816,7 @@ def process_book(b: int, item: InboxItem):
 
     if not item.path.exists():
         print_notice(f"This book was removed from the inbox or cannot be accessed, skipping")
+        inbox.set_gone(item.path)
         return b
 
     # check if the current dir was modified in the last 1m and skip if so
@@ -862,7 +871,14 @@ def process_book(b: int, item: InboxItem):
 
     inbox.set_ok(book)
 
-    copy_to_working_dir(book)
+    try:
+        copy_to_working_dir(book)
+    except (FileNotFoundError, OSError) as e:
+        if not book.inbox_dir.exists():
+            print_notice(en.BOOK_INBOX_MOVED_BEFORE_PROCESSING)
+            inbox.set_gone(book)
+            return b
+        raise
 
     book.extract_path_info(console=True)
     book.extract_metadata(console=True)
@@ -902,12 +918,12 @@ def process_book(b: int, item: InboxItem):
 def process_inbox():
     from src.lib.fs_utils import clean_dirs, inbox_last_updated_at
     from src.lib.run import audio_files_found, print_banner
-    from src.lib.term import print_debug
+    from src.lib.term import print_debug, print_grey
 
     inbox = InboxState()
 
     if inbox.loop_counter == 1:
-        print_debug("First run, scanning inbox...")
+        print_grey(f"\nScanning inbox for the first time...")
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
