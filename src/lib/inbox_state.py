@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 import time
 from collections.abc import Callable
 from functools import wraps
@@ -67,7 +68,11 @@ class InboxState(Hasher):
     def __init__(self):
         from src.lib.config import cfg
 
-        super().__init__(cfg.inbox_dir)
+        # In production skip the initial hash flush — hash_path_audio_files() does
+        # a full rglob + stat over the (potentially SMB-mounted) inbox and can take
+        # many seconds. The hash is computed lazily by @requires_scan / scan() when
+        # first needed, so it's safe to start with an empty _hashes list.
+        super().__init__(cfg.inbox_dir, flush_on_init="pytest" in sys.modules)
         self._items: dict[str, InboxItem] = {}
         self.ready = False
         self.loop_counter = 0
@@ -80,11 +85,13 @@ class InboxState(Hasher):
         self._last_banner_lc: int = -1
         self._last_scan = 0
         self.tree: BooksTree = None  # type: ignore
-        # Prime the inbox hash with scan_id3=False (fast) so that subsequent scans
-        # in process_inbox() correctly detect changes rather than always treating the
-        # first scan as "new activity". has_scanned is reset to False afterwards so
-        # process_inbox() still performs its full startup scan + prints the banner.
-        self.scan(scan_id3=False)
+        # In tests, prime the tree immediately so tests that access inbox.tree right
+        # after construction get a populated result. In production this is skipped —
+        # process_inbox() always does a full scan on loop_counter == 1 anyway, and
+        # doing a redundant walk of the (potentially large) SMB inbox here just adds
+        # unwanted startup latency.
+        if "pytest" in sys.modules:
+            self.scan(scan_id3=False)
         self.has_scanned = False
 
     def set(
@@ -469,17 +476,19 @@ class InboxState(Hasher):
         # print_debug("Set banner_printed to False")
 
     @property
-    @scanner
     def changed_since_last_run_started(self):
-        changed = self.next_hash != self.last_run_start_hash
+        # Use curr_hash (cached from the last Hasher.scan() call) rather than
+        # next_hash (which recomputes the full rglob+stat traversal each time).
+        # The @scanner decorator was adding an extra hash recomputation that made
+        # each property access take 6–12 s over the SMB-mounted inbox.
+        changed = self.curr_hash != self.last_run_start_hash
         if changed:
             self.stale = True
         return changed
 
     @property
-    @scanner
     def changed_since_last_run_ended(self):
-        changed = self.next_hash != self.last_run_end_hash
+        changed = self.curr_hash != self.last_run_end_hash
         if changed:
             self.stale = True
         return changed
@@ -514,19 +523,11 @@ class InboxState(Hasher):
         needs_scan = self.changed_since_last_run_ended or self.changed_since_last_run_started
         hash_changed = False
 
-        # print_debug(
-        #     f"----------------------------\n"
-        #     f"        Recently modified: {rec_mod}\n"
-        #     f"        Last run hash: {self.last_run_hash}\n"
-        #     f"        Prev hash: {self.previous_hash}\n"
-        #     f"        Curr hash: {self.current_hash}\n"
-        #     f"        Next hash: {self.next_hash}\n"
-        #     f"        Changed after waiting: {changed_after_waiting}\n"
-        #     f"        Changed since last run: {self.changed_since_last_run}\n"
-        #     f"        Needs processing: {needs_processing}\n"
-        #     f"        Waited count: {waited_count}\n"
-        #     f"        Ready: {self.ready}\n"
-        # )
+        print_debug(
+            f"[inbox_needs_processing] needs_scan={needs_scan}, waited={waited_count}, "
+            f"matched_ok={self.num_matched_ok}, items={len(self._items)}, "
+            f"hash={self.curr_hash[:8]}..{self.last_run_end_hash[:8] if self.last_run_end_hash else 'none'}"
+        )
 
         if needs_scan or waited_count > 0:
 

@@ -174,6 +174,19 @@ def isorted(
     if not iterable:
         return []
 
+    # Fast path: single non-nested iterable (the common case for BooksTree nodes).
+    # Avoids the expensive recursive isinstance checks inside flatlist() when the
+    # items are plain objects (not nested sequences).
+    if len(iterable) == 1:
+        arg = iterable[0]
+        if isinstance(arg, (list, tuple)):
+            items = arg
+        elif hasattr(arg, '__iter__'):
+            items = list(arg)
+        else:
+            items = [arg]
+        return cast(list[S], sorted(items, key=lambda x: str(x).lower(), reverse=reverse))  # type: ignore
+
     return cast(list[S], list(sorted(flatlist(*iterable), key=lambda x: str(x).lower(), reverse=reverse)))  # type: ignore
 
 

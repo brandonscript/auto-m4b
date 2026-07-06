@@ -55,7 +55,10 @@ class TreeNodeSummary:
             # otherwise, look at parent's children
             if tree.is_file() and p.parent and tree.depth >= 3:
                 p = p.parent
-            children_r = [c for c in p.children_recursive if c != tree]
+            # Use identity comparison (is not) rather than equality (!=) here.
+            # BooksTree nodes are uniqued by _path_index so identity is equivalent
+            # to path equality but avoids the expensive pathlib.Path.__eq__ call.
+            children_r = [c for c in p.children_recursive if c is not tree]
             self.this_and_siblings_recursive = TreeNodeList(
                 [tree, *children_r],
                 self.this,
