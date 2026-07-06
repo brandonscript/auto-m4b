@@ -33,3 +33,33 @@ services:
       - ON_COMPLETE=archive
       - TZ=America/Vancouver
       - DEBUG=1
+
+  auto-m4b-nvidia:
+    build:
+      context: /etc/docker/auto-m4b
+      dockerfile: Dockerfile.nvidia
+    container_name: auto-m4b-nvidia
+    restart: unless-stopped
+    volumes:
+      - ragnarok-media:/media:rw
+    networks:
+      - bridge
+    environment:
+      - INBOX_FOLDER=/media/Books/Audiobooks/#auto-m4b/inbox
+      - CONVERTED_FOLDER=/media/Books/Audiobooks/#auto-m4b/converted
+      - ARCHIVE_FOLDER=/media/Books/Audiobooks/#auto-m4b/archive
+      - BACKUP_FOLDER=/media/Books/Audiobooks/#auto-m4b/backup
+      - WORKING_FOLDER=/tmp/auto-m4b
+      - OVERWRITE_EXISTING=N
+      - BACKUP=N
+      - ON_COMPLETE=archive
+      - TZ=America/Vancouver
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
