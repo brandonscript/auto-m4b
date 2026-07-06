@@ -89,6 +89,12 @@ Larger, independent features or fixes that need isolation (e.g. the style of PRs
 
 Agents should not create new branches for small changes unless the author asks. When in doubt, ask.
 
+Before committing anything to `dev`, all tests must pass locally:
+
+```bash
+poetry run python -m pytest src/tests/ -p no:randomly -q
+```
+
 ## Conventions
 
 - Match existing style: Black (120 cols), Ruff, isort profile black.
