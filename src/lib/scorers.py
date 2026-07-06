@@ -785,23 +785,23 @@ class MetadataProps:
         self.fs_year = parse_year(self.fs_name)
 
         self.title1 = book.id3_title
-        self.title2 = sample_audio2_tags.get("title", "")
+        self.title2 = sample_audio2_tags.get("title") or ""
         self.title_c = find_greatest_common_string([self.title1, self.title2])
 
         self.album1 = book.id3_album
-        self.album2 = sample_audio2_tags.get("album", "")
+        self.album2 = sample_audio2_tags.get("album") or ""
         self.album_c = find_greatest_common_string([self.album1, self.album2])
 
         self.sortalbum1 = book.id3_sortalbum
-        self.sortalbum2 = sample_audio2_tags.get("sortalbum", "")
+        self.sortalbum2 = sample_audio2_tags.get("sortalbum") or ""
         self.sortalbum_c = find_greatest_common_string([self.sortalbum1, self.sortalbum2])
 
         self.artist1 = book.id3_artist
-        self.artist2 = sample_audio2_tags.get("artist", "")
+        self.artist2 = sample_audio2_tags.get("artist") or ""
         self.artist_c = find_greatest_common_string([self.artist1, self.artist2])
 
         self.albumartist1 = book.id3_albumartist
-        self.albumartist2 = sample_audio2_tags.get("albumartist", "")
+        self.albumartist2 = sample_audio2_tags.get("albumartist") or ""
         self.albumartist_c = find_greatest_common_string([self.albumartist1, self.albumartist2])
 
         self.date = book.id3_date
