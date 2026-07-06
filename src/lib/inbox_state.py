@@ -79,13 +79,13 @@ class InboxState(Hasher):
         # outer iteration so that the next loop prints a fresh header.
         self._last_banner_lc: int = -1
         self._last_scan = 0
-        self.has_scanned = False
         self.tree: BooksTree = None  # type: ignore
-        # Do not scan on construction — BooksTree._scan() has O(n²) path-dedup checks
-        # that make it very slow (many minutes) on large inboxes over network mounts.
-        # The first process_inbox() loop forces a full scan via scan(set_ready=True, force=True),
-        # so this initial scan is redundant: it would just populate _items with stale data
-        # that gets immediately overwritten.
+        # Prime the inbox hash with scan_id3=False (fast) so that subsequent scans
+        # in process_inbox() correctly detect changes rather than always treating the
+        # first scan as "new activity". has_scanned is reset to False afterwards so
+        # process_inbox() still performs its full startup scan + prints the banner.
+        self.scan(scan_id3=False)
+        self.has_scanned = False
 
     def set(
         self,
