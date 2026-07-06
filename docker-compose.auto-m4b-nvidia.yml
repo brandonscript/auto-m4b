@@ -5,17 +5,10 @@ include:
   - ../docker-compose.volumes.yml
 
 services:
-  auto-m4b-base:
-    build:
-      context: /etc/docker/auto-m4b
-      dockerfile: Dockerfile.base
-    image: auto-m4b-base:latest
-    profiles:
-      - base
-
   auto-m4b:
     build:
       context: /etc/docker/auto-m4b
+      dockerfile: Dockerfile.nvidia
     container_name: auto-m4b
     restart: unless-stopped
     volumes:
@@ -32,4 +25,12 @@ services:
       - BACKUP=N
       - ON_COMPLETE=archive
       - TZ=America/Vancouver
-      - DEBUG=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
