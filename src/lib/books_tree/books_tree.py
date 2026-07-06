@@ -787,7 +787,20 @@ class BooksTree(BaseModel):
 
     @property
     def books_and_series(self) -> list["BooksTree"]:
-        return list(filter(lambda x: x.is_book_root or x.has_structure("series_parent"), self.children_recursive))
+        def _include(x: "BooksTree") -> bool:
+            if x.is_book_root:
+                return True
+            if x.has_structure("series_parent"):
+                # Only include series parents that are top-level (immediate child of
+                # the inbox root) or nested directly inside a container.  A series_parent
+                # scored inside a flat/mixed/nested book (e.g. a subdir of a flat book
+                # that happens to contain two similarly-named tracks) should not surface
+                # as a separate entry — the enclosing book root already covers it.
+                p = x.parent
+                return (not p or p.is_root) or p.has_any_structure("container")
+            return False
+
+        return list(filter(_include, self.children_recursive))
 
     @property
     @filter_matches
@@ -872,6 +885,12 @@ class BooksTree(BaseModel):
             self._is_book_root = not is_container_like
             return self._is_book_root
 
+        # Flatish nodes are subsidiary parts of a flat book — never book roots,
+        # even if they also scored as standalone_file.
+        if self.has_structure("flatish"):
+            self._is_book_root = False
+            return self._is_book_root
+
         # Standalone files and multi-parent dirs are book roots
         if self.has_any_structure("standalone_file", "multi_parent"):
             self._is_book_root = True
@@ -885,11 +904,6 @@ class BooksTree(BaseModel):
                 self._is_book_root = False
                 return self._is_book_root
             self._is_book_root = True
-            return self._is_book_root
-
-        # Flatish dirs are not book roots
-        if self.has_structure("flatish"):
-            self._is_book_root = False
             return self._is_book_root
 
         # Any dir with a containerish parent or at inbox depth 1 is a book root
@@ -1234,12 +1248,18 @@ class BooksTree(BaseModel):
                 c.set_structures(container_or_mixed)
                 # self.# tick(f"{x} set structures to '{container_or_mixed}' for {c.rel_path}")
             else:
-                # Count distinct meaningful child structures to decide whether to clobber.
-                # A node whose children have ≥2 distinct non-unknown structures may be a
-                # container mis-scored as unknown under a depth-limited scan; preserve the
-                # children's structures so determine_if_book_root can detect this pattern
-                # via _likely_container rather than recursively overwriting correct info.
-                _meaningful = {s for _ch in c.children_recursive for s in _ch.structure} - {"unknown", "_root_"}
+                # Count distinct meaningful DIRECT child structures to decide whether to clobber.
+                # A node whose direct children have ≥2 distinct non-unknown structures may be a
+                # container mis-scored as unknown under a depth-limited scan (e.g. mindepth=2
+                # hides grandchildren, so score_container_mixed can't fire); preserve the
+                # children's structures so determine_if_book_root can detect this pattern via
+                # _likely_container rather than recursively overwriting correct info.
+                #
+                # Using direct children (not children_recursive) avoids a false positive where
+                # a genuinely mixed/unknown book (e.g. a dir with two series_parent sub-dirs
+                # each having series_book children) inflates the count via deep descendants
+                # and incorrectly suppresses the recursive clobber.
+                _meaningful = {s for _ch in c.children for s in _ch.structure} - {"unknown", "_root_"}
                 if len(_meaningful) >= 2:
                     c.add_structures("unknown")
                     # self.# tick(f"{x} set structures to 'unknown' (container-like) for {c.rel_path}")

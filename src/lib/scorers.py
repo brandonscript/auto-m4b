@@ -1536,6 +1536,11 @@ def score_series_parent(tree: "BooksTree") -> float:
             if c.is_file() and score_single_standalone_file(c)[1] > 0.5:
                 # tree.tick(f"is file and likely standalone for {c.rel_path}")
                 return True
+            # A directory with exactly one audio file and no subdirectories is a
+            # strong structural indicator of a series book (e.g. numbered book dirs
+            # each containing a single m4a/mp3 when ID3 tags are not yet scanned).
+            if c.is_dir() and not c._dirs and len(c.files) == 1:
+                return True
             return False
 
         series_parent_score = 0.0

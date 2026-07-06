@@ -367,7 +367,7 @@ class InboxState(Hasher):
         return [
             v
             for _k, v in self._items.items()
-            if v.series_key == key or Path(v.key).parts[0] == key and v.is_series_book
+            if v.series_key == key or (v.key and Path(v.key).parts[0] == key and v.is_series_book)
         ]
 
     @property
