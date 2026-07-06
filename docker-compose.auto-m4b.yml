@@ -34,7 +34,7 @@ services:
       - TZ=America/Vancouver
       - DEBUG=1
 
-  auto-m4b-nvidia:
+  nvidia:
     build:
       context: /etc/docker/auto-m4b
       dockerfile: Dockerfile.nvidia
