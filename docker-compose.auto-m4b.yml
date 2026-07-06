@@ -38,7 +38,7 @@ services:
     build:
       context: /etc/docker/auto-m4b
       dockerfile: Dockerfile.nvidia
-    container_name: auto-m4b-nvidia
+    container_name: auto-m4b
     restart: unless-stopped
     volumes:
       - ragnarok-media:/media:rw
