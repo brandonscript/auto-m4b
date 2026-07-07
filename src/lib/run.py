@@ -510,7 +510,7 @@ def can_process_multi_dir(book: Audiobook):
             fail_book(book, f"{en.MULTI_ERR} (multi-part book) - {help_msg}")
             return False
         else:
-            print_error(f"{en.MULTI_ERR}, cannot determine book structure")
+            print_error(en.MULTI_ERR)
             smart_print(f"{help_msg}\n")
             fail_book(book, f"{en.MULTI_ERR} (structure unknown) - {help_msg}")
             return False
