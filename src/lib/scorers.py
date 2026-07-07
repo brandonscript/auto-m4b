@@ -1524,18 +1524,38 @@ def score_series_book(tree: "BooksTree") -> float:
 
 @cached_scorer
 def score_series_parent(tree: "BooksTree") -> float:
+    import re
+
     try:
         from src.lib.parsers import is_maybe_series_parent
 
-        if tree.is_root or tree.is_file() or (len(tree.dirs) == 1 and not tree.files):
+        if tree.is_root or tree.is_file():
             return 0.0
+
+        # A directory with exactly one subdirectory and no direct files is usually
+        # a redundant single-subdirectory (nested book) and not a series parent.
+        # Exception: if that subdirectory's name starts with a digit (year or sequence
+        # number like "2008 - The Appeal" or "01 - Pride Of Chanur") it is almost
+        # certainly a series book — so the parent is a series parent that still has
+        # one book remaining after the others were archived.
+        if len(tree.dirs) == 1 and not tree.files:
+            only_child_name = str(next(iter(tree.dirs)))
+            if not re.match(r"^\d", only_child_name):
+                return 0.0
+            # Fall through to normal scoring so the single series book is recognised.
 
         # If one or fewer children, it's not a series parent — unless the
         # directory appears to be a series parent on disk (e.g. children were
-        # filtered out because the tree was built with a maxdepth limit).
+        # filtered out because the tree was built with a maxdepth limit, or all
+        # other books in the series were already archived leaving just one).
         if len(tree.children) <= 1:
+            only_child = tree.children[0] if tree.children else None
             if not tree.children and is_maybe_series_parent(tree.path):
                 return 0.5
+            if only_child and only_child.is_dir() and re.match(r"^\d", only_child.path.name):
+                # Return a score above the 0.75 threshold so this parent is correctly
+                # classified as series_parent despite having only one remaining child.
+                return 0.85
             return 0.0
 
         tree.tick(f"init score_series_parent for {tree.rel_path}")

@@ -1123,6 +1123,17 @@ class BooksTree(BaseModel):
 
         def check_nested(d: BooksTree):
             if (p := d.parent) and not p.is_root and (_is_only_dir_in_p := (len(p.dirs) < 2 and not p.files)):
+                # Don't mark the parent as nested when:
+                # 1. The parent is already a series_parent (set by score_series_parent).
+                # 2. The only child's name starts with a digit — series books are almost
+                #    always year- or sequence-prefixed (e.g. "2008 - The Appeal",
+                #    "01 - Pride Of Chanur"), while genuine redundant subdirectories
+                #    ("Audio", "Files") and mirrored book titles are not.
+                import re
+
+                if p.has_structure("series_parent") or re.match(r"^\d", d.path.name):
+                    # self.# tick(f"(p) skipping nested for {p.rel_path}: parent is series_parent or child '{d.path.name}' starts with a digit")
+                    return
                 p.add_structures("nested", recursive=True)
                 # self.# tick(f"(p) added 'nested' to {p.rel_path} recursively")
             # elif p := d.parent:
@@ -1279,6 +1290,10 @@ class BooksTree(BaseModel):
         #     f"dir pass #3: Determine uncaught nested for remaining dirs ({"this dir" if this_dir else ""} + {len([c for c in self.children_without_structure_r if c.is_dir()])} children_without_structure_r)"
         # )
         for d in this_dir + [c for c in self.children_without_structure_r if c.is_dir()]:
+            if d.has_any_structure("series_parent", "series_book", "multi_book", "unknown"):
+                # Don't overwrite a strong classification set in an earlier pass.
+                # flat/nested/single can coexist with nested and are handled below.
+                continue
             if not (_only_one_dir_in_d := len(d.dirs) == 1) or (_has_files := bool(d.files)):
                 # self.# tick(f"(d) {d.rel_path} has {len(d.dirs)} dirs and {len(d.files)} files, skipping")
                 continue
