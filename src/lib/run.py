@@ -97,13 +97,12 @@ def process_already_m4b(book: Audiobook, item: InboxItem):
     print_moving_to_converted(book)
 
     if book.tree.has_structure("standalone_file"):
-        file_name = item.key
         ext = ensure_dot(book.orig_file_type)
-        folder_name = item.path.stem
-        target_dir = cfg.converted_dir / folder_name
+        target_dir = book.converted_dir  # correctly includes series prefix when applicable
+        folder_name = target_dir.name
 
-        unique_target = target_dir / file_name
-        (target_dir).mkdir(parents=True, exist_ok=True)
+        unique_target = book.converted_file
+        target_dir.mkdir(parents=True, exist_ok=True)
 
         if unique_target.exists():
             smart_print("(A file with the same name already exists, this one will be renamed to prevent data loss)")
