@@ -2,6 +2,7 @@ import sys
 import time
 import traceback
 from contextlib import contextmanager
+from pathlib import Path
 
 from src.lib import run
 from src.lib.config import AutoM4bArgs, cfg
@@ -75,8 +76,15 @@ def app(**kwargs):
 
         class _InboxHandler(FileSystemEventHandler):
             def on_any_event(self, event):
-                if not event.is_directory:
-                    dirty.set()
+                if event.is_directory:
+                    return
+                name = Path(event.src_path).name
+                # Ignore log files and other auto-m4b generated files that are
+                # written/deleted by process_book() itself — reacting to those
+                # would cause an immediate re-trigger loop.
+                if name.startswith("auto-m4b.") or name.endswith(".log"):
+                    return
+                dirty.set()
 
         # Initial scan
         inbox.loop_counter += 1

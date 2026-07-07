@@ -356,9 +356,11 @@ def ok_to_overwrite(book: Audiobook):
                     f"Found a copy of this book in {tint_path(cfg.archive_dir)}, it has probably already been converted"
                 )
                 print_notice("Skipping this book because OVERWRITE_EXISTING is not enabled")
+                InboxState().set_processed(book)
                 return False
             elif book.size("converted", "bytes") > 0:
                 print_notice(f"Output file already exists and OVERWRITE_EXISTING is not enabled, skipping this book")
+                InboxState().set_processed(book)
                 return False
         else:
             print_warning("Warning: Output file already exists, it and any other {{.m4b}} files will be overwritten")

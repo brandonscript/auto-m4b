@@ -257,13 +257,14 @@ class Config:
         self.load_env(quiet=True)
 
     def startup(self, args: AutoM4bArgs | None = None):
+        from src.lib.inbox_state import InboxState
         from src.lib.term import print_dark_grey, print_grey, print_mint
 
         start_time = time.perf_counter()
 
         with use_pid_file() as pid_exists:
             with self.load_env(args) as env_msg:
-                if not pid_exists:
+                if not pid_exists and not InboxState().loop_counter:
                     print_mint("\nStarting auto-m4b...")
                     print_grey(self.info_str)
                     if env_msg:

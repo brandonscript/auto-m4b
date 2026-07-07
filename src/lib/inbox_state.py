@@ -556,6 +556,13 @@ class InboxState(Hasher):
             # inserts a fake hash that also matches _last_run_end — both sides would
             # be the fake value and hash_changed would always be False.
             hash_changed = self.curr_hash != before_modified_hash
+            if not hash_changed and self.matched_ok_books and self.changed_since_last_run_ended:
+                # done()'s @scanner may have already absorbed new arrivals into
+                # curr_hash, making curr_hash == before_modified_hash even though
+                # the inbox has new books that haven't been processed yet.  Only
+                # override here when there ARE books to process so we don't produce
+                # spurious banners when books were merely removed (archived).
+                hash_changed = True
             self.inbox_hash_changed = hash_changed
 
             if hash_changed:
