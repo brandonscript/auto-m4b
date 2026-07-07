@@ -1,9 +1,12 @@
+import shutil
+
 import pytest
 
 from src.auto_m4b import app
 from src.lib.audiobook import Audiobook
 from src.lib.inbox_state import InboxState
 from src.lib.strings import en
+from src.tests.helpers.pytest_dumps import FIXTURES_ROOT, TEST_DIRS
 from src.tests.helpers.pytest_utils import testutils
 
 
@@ -91,3 +94,37 @@ class test_series:
         app(max_loops=1)
         stdout = testutils.get_stdout(capfd)
         assert stdout.count(en.BOOK_NEEDS_FLATTENING) == 2
+
+    def test_series_standalone_m4b_moves_to_series_converted_dir(
+        self,
+        Chanur_Series: list[Audiobook],
+        capfd: pytest.CaptureFixture[str],
+    ):
+        """A standalone m4b placed directly under a series parent folder (alongside
+        other mp3 books) should be moved to converted/<series>/<book_stem>/<book>.m4b —
+        not to the flat converted/<book_stem>/ path.  Regression for the crash where
+        process_already_m4b used cfg.converted_dir / item.path.stem (dropping the
+        series prefix)."""
+        from src.lib.config import cfg
+
+        series_parent = Chanur_Series[0]
+        book_stem = "06 - Chanur's Endgame"
+        book_filename = f"{book_stem}.m4b"
+
+        src_fixture = FIXTURES_ROOT / "basic_with_cover__standalone_m4b.m4b"
+        dst = series_parent.inbox_dir / book_filename
+
+        shutil.copy(src_fixture, dst)
+        dst.touch()  # refresh mtime
+
+        standalone_book = Audiobook(dst)
+        _ = standalone_book.orig_file_type  # pre-compute before app moves the file
+
+        app(max_loops=1)
+
+        assert not cfg.FATAL_FILE.exists(), "App crashed fatally"
+
+        expected_converted_dir = TEST_DIRS.converted / series_parent.path.name / book_stem
+        expected_converted_file = expected_converted_dir / book_filename
+        assert expected_converted_dir.exists(), f"Series converted dir missing: {expected_converted_dir}"
+        assert expected_converted_file.is_file(), f"Converted file missing: {expected_converted_file}"
