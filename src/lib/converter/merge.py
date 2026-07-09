@@ -318,7 +318,7 @@ def convert_book_native(book: "Audiobook") -> int:
         comment=book.comment or None,
         date=book.date or book.year or None,
         genre="Audiobook",
-        encoder="BOOKSY",
+        encoder="brandonscript/auto-m4b",
         sort_name=book.title or None,
         sort_artist=book.author or None,
         sort_album=book.sortalbum or book.title or None,
