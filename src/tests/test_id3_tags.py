@@ -427,6 +427,62 @@ def test_verify_tags_after_convert(
     testutils.set_match_filter(_orig_match_filter)
 
 
+def test_title_from_folder_beats_partno_track_title(
+    book_with_partno_track_titles: Audiobook,
+    mock_id3_tags,
+):
+    """Title/album tags must come from the folder name, not the 'N of M' common substring of track titles.
+
+    Regression: when source tracks carry titles like '1 of 04', '2 of 04', … the
+    common suffix 'of 04' was being selected as book.title instead of falling back
+    to the filesystem-derived title from the folder name.
+    """
+    book = book_with_partno_track_titles
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": "1 of 04", "album": "", "artist": "Stephen Hawking", "albumartist": "Stephen Hawking"}),
+        (book.sample_audio2, {"title": "2 of 04", "album": "", "artist": "Stephen Hawking", "albumartist": "Stephen Hawking"}),
+    )
+
+    # extract_path_info must be called before extract_metadata — this is what run.py does in
+    # production, and it populates book.fs_title / book.fs_author so the scorer can fall back
+    # to them when ID3 tags are useless (e.g. "N of M" track titles with no album tag).
+    book.extract_path_info()
+    book.extract_metadata()
+
+    assert book.title == "A Brief History of Time", (
+        f"Expected title 'A Brief History of Time' from folder name, got '{book.title}'"
+    )
+    assert "of 04" not in (book.title or ""), (
+        f"Title must not contain the track-number fragment 'of 04'; got '{book.title}'"
+    )
+    assert book.author == "Stephen Hawking", f"Expected author 'Stephen Hawking', got '{book.author}'"
+    assert book.album == book.title, f"Expected album == title ('{book.title}'), got '{book.album}'"
+
+
+@pytest.mark.slow
+def test_encoder_tag_is_auto_m4b_after_conversion(
+    blank_audiobook: Audiobook,
+):
+    """Output m4b must report encoder=brandonscript/auto-m4b, overwriting any source value.
+
+    Both the ffmetadata embed (during merge) and the mutagen correction pass
+    (verify_and_update_id3_tags) must stamp the encoder atom with the canonical
+    tool identifier; no legacy 'm4b-tool', 'BOOKSY', or source 'PHNTM' values
+    should survive in the converted file.
+    """
+    from src.auto_m4b import app
+
+    app(max_loops=1)
+
+    tags = extract_id3_tags(blank_audiobook.converted_file)
+    encoder_val = tags.get("encoder", "")
+
+    assert encoder_val == "brandonscript/auto-m4b", (
+        f"Expected encoder 'brandonscript/auto-m4b', got '{encoder_val}'"
+    )
+
+
 @pytest.mark.parametrize(
     "test_dict, expected_narrator",
     [
