@@ -153,6 +153,9 @@ def print_banner(after: Callable[..., Any] | None = None):
     msg = "Checking for" if _lc > 1 else "Watching for"
     if not skip:
         print_grey(f"{msg} books in [[{cfg.inbox_dir}]] ꨄ︎")
+        if cfg.watch_dir:
+            indent = " " * (len(msg) + len(" books in ") - len("and "))
+            print_grey(f"{indent}and [[{cfg.watch_dir}]]")
 
     if not skip and _lc == 1:
         nl()
@@ -475,7 +478,7 @@ def books_to_process() -> tuple[int, Callable[[], None]]:
 
 
 def can_process_multi_dir(book: Audiobook):
-    from src.lib.fs_utils import flatten_files_in_dir, flattening_files_in_dir_affects_order
+    from src.lib.fs_utils import flatten_files_in_dir, flattening_multi_disc_files_in_dir_affects_order
 
     inbox = InboxState()
     if book.tree.has_structure_like("series") or book.tree.has_structure_like("multi"):
@@ -487,7 +490,7 @@ def can_process_multi_dir(book: Audiobook):
                 "\nThis folder appears to be a multi-disc book, attempting to flatten it...",
                 end="",
             )
-            if flattening_files_in_dir_affects_order(book.inbox_dir):
+            if flattening_multi_disc_files_in_dir_affects_order(book.inbox_dir):
                 nl(2)
                 print_error("Flattening this book would affect the file order, cannot proceed")
                 smart_print(f"{help_msg}\n")
@@ -497,7 +500,7 @@ def can_process_multi_dir(book: Audiobook):
                 )
                 return False
             else:
-                flatten_files_in_dir(book.inbox_dir)
+                flatten_files_in_dir(book.inbox_dir, prefix_with_parent=True)
                 book.rescan()
                 # book = Audiobook(book.inbox_dir)
                 print_mint(" ✓\n")

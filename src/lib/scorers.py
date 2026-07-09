@@ -1569,6 +1569,16 @@ def score_series_parent(tree: "BooksTree") -> float:
                 return True
             if c.is_file() and score_single_standalone_file(c)[1] > 0.5:
                 # tree.tick(f"is file and likely standalone for {c.rel_path}")
+                # If sibling files form a contiguous numeric sequence they are almost
+                # certainly chapters of a single flat book (e.g. "01 - Ch1.mp3",
+                # "02 - Ch2.mp3", …) — not standalone series titles.  This guards
+                # against the no-ID3 startup scan path where individual files score
+                # higher as standalones because album-similarity data is unavailable.
+                if (
+                    c.i.this_and_siblings.have_start_nums
+                    and c.i.this_and_siblings.start_nums_are_contiguous
+                ):
+                    return False
                 return True
             # A directory with exactly one audio file and no subdirectories is a
             # strong structural indicator of a series book (e.g. numbered book dirs
@@ -1768,18 +1778,27 @@ def score_multi_parent(tree: "BooksTree") -> float:
             completion = len(tree.i.this_and_siblings.disc_nums) / len(tree.i.this_and_siblings._trees)
             contiguous = float(tree.i.this_and_siblings.disc_nums_are_contiguous or 0)
             multi_disc_score = 1 - (completion + contiguous)
-        elif tree.i.children.have_disc_nums:
-            completion = len(tree.i.children.disc_nums) / len(tree.i.children._trees)
-            contiguous = float(tree.i.children.disc_nums_are_contiguous or 0)
+        elif tree.i.dirs.have_disc_nums:
+            # Only check subdirectory names — not file names. A multi_parent requires
+            # actual subdirectory children (e.g. "Disc 1/", "Disc 2/"). Files in a flat
+            # book can have disc-like numbers in their names (e.g. "cd1-track01.mp3")
+            # but that must not inflate the multi_parent score.
+            completion = len(tree.i.dirs.disc_nums) / len(tree.i.dirs._trees)
+            contiguous = float(tree.i.dirs.disc_nums_are_contiguous or 0)
             multi_disc_score = completion + contiguous
 
         if tree.i.this_and_siblings.have_part_nums:
             completion = len(tree.i.this_and_siblings.part_nums) / len(tree.i.this_and_siblings._trees)
             contiguous = float(tree.i.this_and_siblings.part_nums_are_contiguous or 0)
             multi_part_score = 1 - (completion + contiguous)
-        elif tree.i.children.have_part_nums:
-            completion = len(tree.i.children.part_nums) / len(tree.i.children._trees)
-            contiguous = float(tree.i.children.part_nums_are_contiguous or 0)
+        elif tree.i.dirs.have_part_nums:
+            # Only check subdirectory names — not file names. Files in a flat book
+            # may contain "Chapter X." or "Part Y." in their names (e.g.
+            # "05 - Chapter 1. Understanding Emotional Dysregulation.mp3"), which
+            # would produce false-positive part_nums and cause the flat book to be
+            # misclassified as a multi_parent with a very high score.
+            completion = len(tree.i.dirs.part_nums) / len(tree.i.dirs._trees)
+            contiguous = float(tree.i.dirs.part_nums_are_contiguous or 0)
             multi_part_score = completion + contiguous
 
         if tree.is_match:

@@ -818,6 +818,13 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
         for i in range(1, 3):
             testutils.make_mock_file(disc / f"Track {i:02}.mp3")
 
+    # make a multi-disc book with "CDN" naming where each disc has one uniquely-named file
+    # (mirrors real-world books like "Beyond Letting Go" where files are named CDN.m4b)
+    for d in range(1, 15):
+        disc = MOCKED.multi_disc_dir_cdn_single / f"CD{d}"
+        disc.mkdir(parents=True, exist_ok=True)
+        testutils.make_mock_file(disc / f"CD{d}.mp3")
+
     # make a mutli-part book
     romans = ["I", "II", "III", "IV"]
     for i in range(1, 5):

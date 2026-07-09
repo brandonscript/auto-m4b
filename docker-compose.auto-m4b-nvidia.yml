@@ -21,6 +21,7 @@ services:
       - ARCHIVE_FOLDER=/media/Books/Audiobooks/#auto-m4b/archive
       - BACKUP_FOLDER=/media/Books/Audiobooks/#auto-m4b/backup
       - WORKING_FOLDER=/tmp/auto-m4b
+      - WATCH_FOLDER=/media/Downloads/books
       - OVERWRITE_EXISTING=N
       - BACKUP=N
       - ON_COMPLETE=archive
