@@ -82,19 +82,56 @@ CI runs a subset of tests (see `.github/workflows/ci.yml`) and skips some slow/e
 - Some tests require NLTK data and the spaCy `en_core_web_sm` model (CI downloads these).
 - If you need to create new test fixtures, ideally try to use the fake-generated mocked books for tests, because they are very small files. If a real file with real id3 tags is required, pause and ask the user to create small fragments of the real files.
 
-## Branching strategy
+## Development workflow
 
-The author uses a `dev` branch for small, ongoing feature work and incremental fixes. Most day-to-day development lands in `dev` first and is merged to `main` from there, avoiding the overhead of long-lived feature branches for minor changes.
+### Rules (enforced for every change)
 
-Larger, independent features or fixes that need isolation (e.g. the style of PRs #3–5) still get their own branches off `main`. But as a rule: if it's a small improvement that doesn't need a separate review context, it goes in `dev`.
+**A. All tests must pass before committing.**
 
-Agents should not create new branches for small changes unless the author asks. When in doubt, ask.
-
-Before committing anything to `dev`, all tests must pass locally:
+Run the full suite locally before committing anything — even small changes:
 
 ```bash
 poetry run python -m pytest src/tests/ -p no:randomly -q
 ```
+
+The three known-flaky tests (see [Known flaky tests](#known-flaky-tests) below) may be ignored when all other tests pass. Everything else must be green.
+
+**B. Once tests pass, push to `dev`.**
+
+After a passing run, commit and push to `origin/dev`:
+
+```bash
+git add -A
+git commit -m "your message"
+git push origin dev
+```
+
+Do not leave passing changes uncommitted on the local branch. The container runs off whatever is checked out at `/etc/docker/auto-m4b/`, but the canonical source of truth is `origin/dev`.
+
+### Branching strategy
+
+The author uses a `dev` branch for small, ongoing feature work and incremental fixes. Most day-to-day development lands in `dev` first and is released to `main` from there.
+
+Larger, independent features or fixes that need isolation still get their own branches off `main`. But as a rule: if it's a small improvement that doesn't need a separate review context, it goes in `dev`.
+
+Agents should not create new branches for small changes unless the author asks. When in doubt, ask.
+
+### Releasing to `main`
+
+When `dev` is ready to release:
+
+1. Squash-merge `dev` into `main` (preserves `dev` history):
+   ```bash
+   git checkout main
+   git merge --squash dev
+   ```
+2. Bump `version` in `pyproject.toml` (semver — patch for fixes, minor for features).
+3. Commit with a release message summarising the changes.
+4. Push both branches:
+   ```bash
+   git push origin main
+   git push origin dev
+   ```
 
 ## Docker build workflow
 
