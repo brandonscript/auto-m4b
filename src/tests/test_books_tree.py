@@ -438,6 +438,118 @@ class test_tree_structures:
         for c in tree.children:
             xt.is_book_root(c)
 
+    def test_flat_book_with_embedded_chapter_nums_in_filenames(self):
+        """A flat book whose filenames contain 'Chapter X.' patterns (like
+        '05 - Chapter 1. Understanding Emotional Dysregulation.mp3') must be
+        classified as 'flat', not 'multi_parent'.
+
+        Regression: score_multi_parent() was using tree.i.children (files + dirs)
+        to check for part_nums, so embedded chapter numbers in flat-book filenames
+        could inflate the multi_parent score above the flat score, causing the
+        book to fail with "structure unknown" in can_process_multi_dir.
+        The fix limits score_multi_parent's children check to subdirectories only
+        (tree.i.dirs), since a true multi_parent requires actual subdirectory children.
+        """
+        import shutil
+
+        book_dir = TEST_DIRS.inbox / "The DBT Workbook (regression)"
+        book_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            filenames = [
+                "01 - Opening Credits.mp3",
+                "02 - Publisher's Note.mp3",
+                "03 - Foreword.mp3",
+                "04 - Introduction.mp3",
+                "05 - Chapter 1. Understanding Emotional Dysregulation.mp3",
+                "06 - Chapter 2. The Wisdom of Presence and Acceptance.mp3",
+                "07 - Chapter 3. Understanding Emotions.mp3",
+                "08 - Chapter 4. Validation for Beginners.mp3",
+                "09 - Chapter 5. Deepening Validation Practice.mp3",
+                "10 - Chapter 6. Understanding Behavior.mp3",
+                "11 - Chapter 7. The Science of Behavioral Change.mp3",
+                "12 - Chapter 8. Effective Communication.mp3",
+                "13 - Chapter 9. Self-Compassion and Personal Limits.mp3",
+                "14 - Chapter 10. Managing Crises and Tolerating Distress.mp3",
+                "15 - Chapter 11. Radical Acceptance.mp3",
+                "16 - Chapter 12. Final Words.mp3",
+                "17 - End Credits.mp3",
+            ]
+            for f in filenames:
+                (book_dir / f).touch()
+
+            tree = BooksTree(TEST_DIRS.inbox, match_filter=[book_dir])
+            book = tree.dirs.get(book_dir.name)
+            assert book is not None, f"Book not found in tree: {book_dir.name}"
+
+            assert book.has_only_structure("flat"), xt.msg.structure_is(book, "flat")
+            assert not book.has_structure_like("multi"), (
+                f"Expected no 'multi' structure, got {book.structure}"
+            )
+            xt.is_book_root(book)
+        finally:
+            shutil.rmtree(book_dir, ignore_errors=True)
+
+    def test_flat_book_with_sequential_files_classified_as_flat_without_id3(self):
+        """A flat book whose files have contiguous start numbers must be classified as
+        'flat' (not 'series_parent') even when scanned without ID3 tags.
+
+        Regression: score_series_parent() was treating each individual MP3 file as a
+        standalone series book when ID3 tags were unavailable (score_single_standalone_file
+        returns ~0.6 without album-similarity data). This caused the parent directory to
+        score 0.761 as series_parent, beating score_flat at 0.685, and the container's
+        startup background scan (which uses scan_id3=False) would incorrectly detect the
+        book as a series and process each MP3 file individually.
+
+        The fix adds a guard in _check_series_book: files whose siblings have contiguous
+        start_nums are chapter files of a flat book, not standalone series titles.
+        """
+        import shutil
+
+        book_dir = TEST_DIRS.inbox / "The DBT Workbook (no-id3 regression)"
+        book_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            filenames = [
+                "01 - Opening Credits.mp3",
+                "02 - Publisher's Note.mp3",
+                "03 - Foreword.mp3",
+                "04 - Introduction.mp3",
+                "05 - Chapter 1. Understanding Emotional Dysregulation.mp3",
+                "06 - Chapter 2. The Wisdom of Presence and Acceptance.mp3",
+                "07 - Chapter 3. Understanding Emotions.mp3",
+                "08 - Chapter 4. Validation for Beginners.mp3",
+                "09 - Chapter 5. Deepening Validation Practice.mp3",
+                "10 - Chapter 6. Understanding Behavior.mp3",
+                "11 - Chapter 7. The Science of Behavioral Change.mp3",
+                "12 - Chapter 8. Effective Communication.mp3",
+                "13 - Chapter 9. Self-Compassion and Personal Limits.mp3",
+                "14 - Chapter 10. Managing Crises and Tolerating Distress.mp3",
+                "15 - Chapter 11. Radical Acceptance.mp3",
+                "16 - Chapter 12. Final Words.mp3",
+                "17 - End Credits.mp3",
+            ]
+            for f in filenames:
+                (book_dir / f).touch()
+
+            # Simulate the startup background scan: scan_id3=False
+            tree = BooksTree(TEST_DIRS.inbox, scan=False, match_filter=[book_dir])
+            tree.scan(scan_id3=False, determine_structure=True)
+            book = tree.dirs.get(book_dir.name)
+            assert book is not None, f"Book not found in tree: {book_dir.name}"
+
+            assert book.has_only_structure("flat"), xt.msg.structure_is(book, "flat")
+            assert not book.has_structure_like("series"), (
+                f"Expected no 'series' structure without ID3, got {book.structure}"
+            )
+            xt.is_book_root(book)
+
+            # Verify individual files are NOT treated as separate book roots
+            for f in book.files:
+                assert not f.is_book_root, (
+                    f"File {f.name!r} should not be a book root when parent is flat"
+                )
+        finally:
+            shutil.rmtree(book_dir, ignore_errors=True)
+
     def test_flatish_with_tags(self, authors_guide_to_murder__flat_mp3: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder")
         book = tree.get(cast(str, authors_guide_to_murder__flat_mp3.key))

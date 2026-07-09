@@ -572,29 +572,70 @@ def dir_is_empty_ignoring_files(d: Path) -> bool:
     return not any(filter_ignored(f for f in d.iterdir() if not f.name.startswith(".")))
 
 
+def _disc_prefix_map(path: Path) -> dict[Path, str]:
+    """Build a zero-padded disc-number prefix for each direct subdirectory of path.
+
+    Returns a mapping of subdir path → prefix string (e.g. "01"). The numeric
+    width is determined by the largest disc number found, so all prefixes sort
+    correctly alphabetically regardless of the folder naming convention
+    (e.g. 'CD1'…'CD14' maps to '01'…'14').
+
+    Returns an empty dict if any subdir lacks a parseable disc number, signalling
+    that prefix flattening is not safe for this directory.
+    """
+    from src.lib.parsers import get_disc_num
+
+    subdirs = [d for d in filter_ignored(path.iterdir()) if d.is_dir()]
+    if not subdirs:
+        return {}
+
+    disc_nums = {d: get_disc_num(d.name) for d in subdirs}
+    if any(n < 0 for n in disc_nums.values()):
+        return {}
+
+    width = len(str(max(disc_nums.values())))
+    return {d: f"{n:0{width}d}" for d, n in disc_nums.items()}
+
+
 def flatten_files_in_dir(
     path: Path,
     *,
     preview: bool = False,
     on_conflict: Literal["raise", "skip"] = "skip",
+    prefix_with_parent: bool = False,
 ):
-    """Given a directory, moves all files in any subdirectories to the root directory then removes the subdirectories."""
+    """Given a directory, moves all files in any subdirectories to the root directory then removes the subdirectories.
+
+    When prefix_with_parent is True, files in subdirectories are renamed to
+    '{zero_padded_disc_num}_{filename}' before being moved, where the disc number
+    is parsed from the parent folder name and zero-padded to match the largest disc
+    number. This guarantees correct alphabetical sort order regardless of folder
+    naming conventions (e.g. 'CD1'…'CD14' produces '01_…'…'14_…').
+    Files already at the root level are never prefixed.
+    """
     if not path.is_dir():
         raise NotADirectoryError(f"Error: {path} is not a directory")
+
+    prefix_map = _disc_prefix_map(path) if prefix_with_parent else {}
 
     # if path is a dir, get all files in the dir and its subdirs
     files = [f for f in filter_ignored(list(isorted(path.rglob("*")))) if f.is_file()]
     new_files = []
     for f in files:
-        new_files.append(path / f.name)
+        if prefix_with_parent and f.parent != path:
+            prefix = prefix_map.get(f.parent, f.parent.name)
+            new_name = f"{prefix}_{f.name}"
+        else:
+            new_name = f.name
+        new_files.append(path / new_name)
         if not preview:
             # if file would overwrite an existing file, raise or skip
-            if (path / f.name).exists():
+            if (path / new_name).exists():
                 if on_conflict == "raise":
-                    raise FileExistsError(f"Error: {path / f.name} already exists in the directory")
+                    raise FileExistsError(f"Error: {path / new_name} already exists in the directory")
                 elif on_conflict == "skip":
                     continue
-            shutil.move(f, path / f.name)
+            shutil.move(f, path / new_name)
 
     # remove the subdirs
     if not preview:
@@ -614,6 +655,32 @@ def flattening_files_in_dir_affects_order(path: Path) -> bool:
         return True
 
     return only_audio_files(files_flat_sorted) != only_audio_files(files_flat)
+
+
+def flattening_multi_disc_files_in_dir_affects_order(path: Path) -> bool:
+    """Safety check for multi-disc books using the zero-padded-disc-number prefix flattening strategy.
+
+    Returns True (unsafe) when:
+    - Any subfolder lacks a parseable disc number (e.g. 'prologue', 'epilogue').
+    - Any filename collision would occur after zero-padded prefixing.
+
+    Returns False when it is safe to proceed with prefix flattening. Folder naming
+    conventions that don't sort alphabetically in disc order (e.g. 'CD1'…'CD14')
+    are handled correctly because the prefix is always a zero-padded disc number
+    rather than the raw folder name.
+    """
+    prefix_map = _disc_prefix_map(path)
+
+    subdirs = [d for d in filter_ignored(path.iterdir()) if d.is_dir()]
+    if subdirs and not prefix_map:
+        return True
+
+    prefixed = [
+        f"{prefix_map[f.parent]}_{f.name}" if f.parent != path else f.name
+        for f in filter_ignored(path.rglob("*"))
+        if f.is_file() and (f.parent in prefix_map or f.parent == path)
+    ]
+    return len(prefixed) != len(set(prefixed))
 
 
 def name_matches(name: Any, match_filter: str | None = None) -> bool:

@@ -42,13 +42,13 @@ poetry run python -c "import sys; print(sys.executable)"
 
 ## Project layout
 
-| Path | Purpose |
-|------|---------|
-| `src/` | Application code (`src/lib/`, `src/auto_m4b.py`) |
-| `src/tests/` | Pytest suite |
-| `src/tests/helpers/` | Fixtures, mocks (`pytest_dumps.py`, `pytest_fixtures.py`) |
-| `src/tests/tmp/` | Ephemeral test dirs (inbox, converted, etc.) — created by fixtures |
-| `src/tests/fixtures/` | Static test audio/fixture files |
+| Path                  | Purpose                                                            |
+| --------------------- | ------------------------------------------------------------------ |
+| `src/`                | Application code (`src/lib/`, `src/auto_m4b.py`)                   |
+| `src/tests/`          | Pytest suite                                                       |
+| `src/tests/helpers/`  | Fixtures, mocks (`pytest_dumps.py`, `pytest_fixtures.py`)          |
+| `src/tests/tmp/`      | Ephemeral test dirs (inbox, converted, etc.) — created by fixtures |
+| `src/tests/fixtures/` | Static test audio/fixture files                                    |
 
 Tests append `src/` to `sys.path` via `src/tests/conftest.py`.
 
@@ -80,6 +80,7 @@ CI runs a subset of tests (see `.github/workflows/ci.yml`) and skips some slow/e
 - Many tests need the **`mock_inbox`** fixture, which populates `src/tests/tmp/inbox/` with synthetic audiobook dirs. Don't debug tree-finding tests against an empty inbox.
 - Pytest is configured with `--slow` in `pyproject.toml` addopts; slow tests are included by default.
 - Some tests require NLTK data and the spaCy `en_core_web_sm` model (CI downloads these).
+- If you need to create new test fixtures, ideally try to use the fake-generated mocked books for tests, because they are very small files. If a real file with real id3 tags is required, pause and ask the user to create small fragments of the real files.
 
 ## Branching strategy
 
@@ -94,6 +95,80 @@ Before committing anything to `dev`, all tests must pass locally:
 ```bash
 poetry run python -m pytest src/tests/ -p no:randomly -q
 ```
+
+## Docker build workflow
+
+The Dockerfile is split into two layers to keep dev rebuilds fast:
+
+- **`Dockerfile.base`** — all heavy dependencies: ffmpeg, Poetry packages, spaCy model, NLTK corpora. Produces `auto-m4b-base:latest`. Only needs rebuilding when `pyproject.toml`, `poetry.lock`, or system deps change.
+- **`Dockerfile`** — just `COPY src/` on top of `auto-m4b-base:latest`. Rebuilds in seconds.
+
+```bash
+# Build (or rebuild) the base — only needed when deps change:
+dr build auto-m4b-base   # or: docker compose -f docker-compose.auto-m4b.yml --profile base build auto-m4b-base
+
+# Normal dev rebuild (fast — only re-copies src/):
+dr build auto-m4b        # or: docker compose -f docker-compose.auto-m4b.yml build auto-m4b
+```
+
+## Container variants
+
+Two mutually exclusive variants are available. Starting one automatically stops and removes the other:
+
+```bash
+dr start auto-m4b          # standard (CPU-only ffmpeg)
+dr start auto-m4b:nvidia   # NVIDIA GPU-accelerated ffmpeg
+```
+
+Both use `container_name: auto-m4b`, so `docker logs -f auto-m4b` works regardless of which variant is running.
+
+## Host-mounted paths (Phantom → Ragnarok SMB share)
+
+The container works on a Ragnarok SMB share that is mounted on Phantom at `/mnt/ragnarok`. Inside the container the share appears under `/media`.
+
+| Purpose                 | Host path (Phantom)                                        | Container path                                |
+| ----------------------- | ---------------------------------------------------------- | --------------------------------------------- |
+| Inbox (drop books here) | `/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox`     | `/media/Books/Audiobooks/#auto-m4b/inbox`     |
+| Converted output        | `/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/converted` | `/media/Books/Audiobooks/#auto-m4b/converted` |
+| Archive                 | `/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/archive`   | `/media/Books/Audiobooks/#auto-m4b/archive`   |
+| Backup                  | `/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/backup`    | `/media/Books/Audiobooks/#auto-m4b/backup`    |
+| Working/temp            | `/tmp/auto-m4b` (container-local)                          | `/tmp/auto-m4b`                               |
+
+When testing against live books, drop or inspect files in the host-side inbox path above.
+
+## Key architecture notes for development
+
+### Watchdog (`src/auto_m4b.py`)
+
+- Uses `watchdog` `PollingObserver` on the inbox directory.
+- The `_InboxHandler` filters out files whose names start with `"auto-m4b."` or end with `".log"` — this prevents auto-m4b's own per-book log files from creating a re-trigger loop.
+- The observer sets a `threading.Event` (`dirty`) which the main loop waits on; it does not loop on a timer.
+
+### InboxState (`src/lib/inbox_state.py`)
+
+- `matched_ok_books` — books that are ready to process (not already processed or failed).
+- `set_processed(book)` — marks a book as done without counting it as a failure. Call this whenever a book is intentionally skipped (e.g. already converted), otherwise it will be re-queued every loop.
+- `inbox_hash_changed` — detects whether the inbox contents have changed since the last run. If books are present but the hash hasn't changed (e.g. due to a scanner race), this is overridden to `True` so the processing banner still fires.
+
+### BooksTree (`src/lib/books_tree/books_tree.py`)
+
+- `determine_structure` runs in multiple passes. Pass #3 adds `flat`/`nested`/`single` structures.
+- **Guard**: Pass #3 skips a dir if it already has a "strong" structure (`series_parent`, `series_book`, `multi_book`, `unknown`). This prevents those classifications from being overwritten by weaker ones, while still allowing `flat`, `nested`, and `single` to coexist on the same dir.
+- `score_series_parent` in `scorers.py` returns `0.85` for single-child series parents where the child's name starts with a digit — required to correctly classify e.g. "John Grisham / 1 - The Firm" directory layouts without mangling files.
+
+### ok_to_overwrite (`src/lib/run.py`)
+
+- When a book is skipped because an already-converted copy exists in the archive or converted dir, `InboxState().set_processed(book)` is called immediately. Without this, the book would be re-evaluated (and spew "Skipping..." notices) on every watchdog trigger.
+
+## Known flaky tests
+
+Three metadata-related tests fail intermittently when the full suite runs but pass in isolation. They are **not** caused by recent changes and should be treated as pre-existing flakiness:
+
+- `test_verify_tags_after_convert[touch_of_frost__flat_mp3-expected_dict0]`
+- `test_verify_tags_after_convert[house_on_the_cliff__flat_mp3-expected_dict2]`
+- `test_extract_path_info[Trenton Lee Stewart-fs_author-benedict_society__mp3]`
+
+When all other tests pass and only these three fail, it is safe to proceed.
 
 ## Conventions
 
