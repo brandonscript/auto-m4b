@@ -705,6 +705,27 @@ def blank_audiobook():
 
 
 @pytest.fixture(scope="function", autouse=False)
+def book_with_partno_track_titles(setup_teardown):
+    """Book folder named 'Author - Title' but source tracks carry 'N of M' title tags.
+
+    Reproduces the bug where the common-substring of track titles ('of 04') was
+    chosen over the real title inferred from the folder name.
+    """
+    name = "Stephen Hawking - A Brief History of Time"
+    book = TEST_DIRS.inbox / name
+    book.mkdir(parents=True, exist_ok=True)
+    for i in range(1, 5):
+        with open(book / f"{i:02d} - Chapter {i}.mp3", "wb") as f:
+            f.write(testutils.blank_audiobook_data)
+    testutils.set_match_filter(name)
+    yield Audiobook(book)
+    testutils.set_match_filter(None)
+    shutil.rmtree(book, ignore_errors=True)
+    for d in ["build", "fix", "merge"]:
+        shutil.rmtree(TEST_DIRS.working / d / name, ignore_errors=True)
+
+
+@pytest.fixture(scope="function", autouse=False)
 def mock_id3_tags():
     def write_tags(*files_and_tags: tuple[Path, Id3TagDictWithDnumTnum]):
         from src.lib.id3_tags import Id3Tags

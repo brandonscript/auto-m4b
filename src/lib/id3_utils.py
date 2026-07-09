@@ -134,6 +134,7 @@ def write_m4b_tags(
         f["trkn"] = [(1, 1)]
         f["disk"] = ""
         f["\xa9cmt"] = comment
+        f["\xa9too"] = "brandonscript/auto-m4b"
 
         # if cover exists, determine if it is jpg or png and set it
         if cover and cover.is_file():
