@@ -646,3 +646,36 @@ class test_unhappy_paths:
         out = testutils.get_stdout(capfd)
         assert not cfg.FATAL_FILE.exists(), "App should not have crashed fatally"
         assert en.BOOK_INBOX_MOVED_BEFORE_PROCESSING in out
+
+    ORDER += 1
+
+    @pytest.mark.order(ORDER)
+    def test_series_inbox_dir_removed_before_cleanup_does_not_crash(
+        self,
+        Chanur_Series: list[Audiobook],
+        capfd: CaptureFixture[str],
+    ):
+        """If the series inbox folder is removed before cleanup_series_dir runs
+        (e.g. already moved/archived by the OS after individual books were processed),
+        the app should not crash fatally — it should skip the collateral move
+        and continue normally."""
+        from src.lib import run as run_module
+        from src.lib.config import cfg
+
+        original_cleanup = run_module.cleanup_series_dir
+
+        def cleanup_after_removing_inbox(parent):
+            if parent:
+                parent_book = parent.to_audiobook()
+                shutil.rmtree(str(parent_book.inbox_dir), ignore_errors=True)
+            return original_cleanup(parent)
+
+        orig_on_complete = cfg.ON_COMPLETE
+        cfg.ON_COMPLETE = "archive"
+        try:
+            with patch("src.lib.run.cleanup_series_dir", cleanup_after_removing_inbox):
+                app(max_loops=1)
+        finally:
+            cfg.ON_COMPLETE = orig_on_complete
+
+        assert not cfg.FATAL_FILE.exists(), "App should not have crashed fatally"

@@ -1,9 +1,12 @@
+import shutil
+
 import pytest
 
 from src.auto_m4b import app
 from src.lib.audiobook import Audiobook
 from src.lib.inbox_state import InboxState
 from src.lib.strings import en
+from src.tests.helpers.pytest_dumps import FIXTURES_ROOT, TEST_DIRS
 from src.tests.helpers.pytest_utils import testutils
 
 
@@ -91,3 +94,89 @@ class test_series:
         app(max_loops=1)
         stdout = testutils.get_stdout(capfd)
         assert stdout.count(en.BOOK_NEEDS_FLATTENING) == 2
+
+    def test_series_with_single_remaining_book_does_not_flatten_to_parent(
+        self,
+        capfd: pytest.CaptureFixture[str],
+    ):
+        """When a series parent directory has only one child remaining (e.g. after other
+        books in the series were already archived), auto-m4b must NOT flatten the remaining
+        book's files into the series parent root.
+
+        Regression for the John Grisham / 'The Appeal' bug: score_series_parent returned
+        0.0 for single-child parents (< 0.75 threshold), so check_nested incorrectly marked
+        the parent as 'nested', then flatten_nested_book moved files from the child dir up
+        to the series root."""
+        from src.lib.config import cfg
+
+        # Simulates a series where all other books were archived, leaving only one
+        series_dir = TEST_DIRS.inbox / "John Grisham"
+        book_dir = series_dir / "2008 - The Appeal"
+        book_dir.mkdir(parents=True, exist_ok=True)
+
+        src_mp3 = FIXTURES_ROOT / "basic_with_cover__standalone_mp3.mp3"
+        for i in range(3):
+            shutil.copy(src_mp3, book_dir / f"Chapter {i+1:02d}.mp3")
+        # Touch so the dir is not considered "recently modified"
+        for f in book_dir.iterdir():
+            import os, time as _time
+
+            os.utime(f, (_time.time() - 120, _time.time() - 120))
+
+        try:
+            testutils.set_match_filter("^(John Grisham)")
+            app(max_loops=1)
+
+            assert not cfg.FATAL_FILE.exists(), "App crashed fatally"
+
+            # Files must NOT have been moved to the series parent root
+            mp3_at_root = [f for f in series_dir.iterdir() if f.is_file() and f.suffix == ".mp3"]
+            assert not mp3_at_root, (
+                f"Bug: mp3 files were incorrectly flattened into the series parent dir: "
+                f"{[f.name for f in mp3_at_root]}"
+            )
+
+            # The book subdirectory must still exist
+            assert book_dir.exists(), "Book subdirectory should not have been removed"
+
+            # In test_do_nothing mode the converted dir should contain the series-namespaced output
+            expected_converted_dir = TEST_DIRS.converted / "John Grisham" / "2008 - The Appeal"
+            assert expected_converted_dir.exists(), (
+                f"Expected converted output at {expected_converted_dir}"
+            )
+        finally:
+            shutil.rmtree(series_dir, ignore_errors=True)
+
+    def test_series_standalone_m4b_moves_to_series_converted_dir(
+        self,
+        Chanur_Series: list[Audiobook],
+        capfd: pytest.CaptureFixture[str],
+    ):
+        """A standalone m4b placed directly under a series parent folder (alongside
+        other mp3 books) should be moved to converted/<series>/<book_stem>/<book>.m4b —
+        not to the flat converted/<book_stem>/ path.  Regression for the crash where
+        process_already_m4b used cfg.converted_dir / item.path.stem (dropping the
+        series prefix)."""
+        from src.lib.config import cfg
+
+        series_parent = Chanur_Series[0]
+        book_stem = "06 - Chanur's Endgame"
+        book_filename = f"{book_stem}.m4b"
+
+        src_fixture = FIXTURES_ROOT / "basic_with_cover__standalone_m4b.m4b"
+        dst = series_parent.inbox_dir / book_filename
+
+        shutil.copy(src_fixture, dst)
+        dst.touch()  # refresh mtime
+
+        standalone_book = Audiobook(dst)
+        _ = standalone_book.orig_file_type  # pre-compute before app moves the file
+
+        app(max_loops=1)
+
+        assert not cfg.FATAL_FILE.exists(), "App crashed fatally"
+
+        expected_converted_dir = TEST_DIRS.converted / series_parent.path.name / book_stem
+        expected_converted_file = expected_converted_dir / book_filename
+        assert expected_converted_dir.exists(), f"Series converted dir missing: {expected_converted_dir}"
+        assert expected_converted_file.is_file(), f"Converted file missing: {expected_converted_file}"

@@ -785,23 +785,23 @@ class MetadataProps:
         self.fs_year = parse_year(self.fs_name)
 
         self.title1 = book.id3_title
-        self.title2 = sample_audio2_tags.get("title", "")
+        self.title2 = sample_audio2_tags.get("title") or ""
         self.title_c = find_greatest_common_string([self.title1, self.title2])
 
         self.album1 = book.id3_album
-        self.album2 = sample_audio2_tags.get("album", "")
+        self.album2 = sample_audio2_tags.get("album") or ""
         self.album_c = find_greatest_common_string([self.album1, self.album2])
 
         self.sortalbum1 = book.id3_sortalbum
-        self.sortalbum2 = sample_audio2_tags.get("sortalbum", "")
+        self.sortalbum2 = sample_audio2_tags.get("sortalbum") or ""
         self.sortalbum_c = find_greatest_common_string([self.sortalbum1, self.sortalbum2])
 
         self.artist1 = book.id3_artist
-        self.artist2 = sample_audio2_tags.get("artist", "")
+        self.artist2 = sample_audio2_tags.get("artist") or ""
         self.artist_c = find_greatest_common_string([self.artist1, self.artist2])
 
         self.albumartist1 = book.id3_albumartist
-        self.albumartist2 = sample_audio2_tags.get("albumartist", "")
+        self.albumartist2 = sample_audio2_tags.get("albumartist") or ""
         self.albumartist_c = find_greatest_common_string([self.albumartist1, self.albumartist2])
 
         self.date = book.id3_date
@@ -1295,21 +1295,29 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         elif not p:
             return (None, 0.0, 0.0)  # No parent, must be root, theoretically impossible
 
+        # Cache parent's file list early so every sibling-level check reuses
+        # the same TreeNodeList (and its cached @lazy properties) rather than
+        # creating per-file copies via tree.i.siblings_recursive.
+        _sibs = p.i.files
+
         p_files_have_tags = False
         p_album_sim = 0.0
         p_author_sim = 0.0
         t = t if (t := tree.id3_tags) and not t.BAD else None
-        # album_to_p_siblings_sim = 0.0
-        # author_to_p_siblings_sim = 0.0
-        if tree.depth > 1 and (p_files_have_tags := bool(tree.i.siblings_recursive.id3_tags)):
+        # Use siblings_recursive (not _sibs which includes tree itself) so that a
+        # solo file with no siblings correctly gives p_files_have_tags=False, allowing
+        # the _only_child_in_parent path to return ("single", ...) as expected.
+        # Guard with _sibs.id3_tags first: when id3 scanning is disabled, _sibs.id3_tags
+        # is always empty and we can skip the expensive tree.i creation entirely.
+        if tree.depth > 1 and _sibs.id3_tags and (p_files_have_tags := bool(tree.i.siblings_recursive.id3_tags)):
             # tree.parent.tick(f" --- p_files_have_tags: {p_files_have_tags}")
             t: Id3Tags | None = tree.id3_tags
-            # pp_album_sim = pp.i.files_recursive.similarity("id3_albums", fallback=0.0)
-            # pp_author_sim = pp.i.files_recursive.similarity("id3_authors", fallback=0.0)
             p_album_sim = 0.0 if not t else get_similarity([t.album, *tree.i.siblings_recursive.id3_albums]) or 0.0
             p_artist_sim = 0.0 if not t else get_similarity([t.artist, *tree.i.siblings_recursive.id3_artists]) or 0.0
             p_albumartist_sim = (
-                0.0 if not t else get_similarity([t.albumartist, *tree.i.siblings_recursive.id3_albumartists]) or 0.0
+                0.0
+                if not t
+                else get_similarity([t.albumartist, *tree.i.siblings_recursive.id3_albumartists]) or 0.0
             )
             p_author_sim = round(max(p_artist_sim, p_albumartist_sim), 3)
 
@@ -1341,31 +1349,37 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         if not (only_file_in_parent := len(p.files) < 2):
             # tree.parent.tick(f" --- not only file in parent: {only_file_in_parent}")
 
-            if tree.i.this_and_siblings.have_albums:
+            if _sibs.have_albums:
                 siblings_rels.append(
                     -1.0
-                    + (tree.i.this_and_siblings_recursive.similarity("id3_albums", distinct=True, fallback=0.0) * 2)
+                    + (_sibs.similarity("id3_albums", distinct=True, fallback=0.0) * 2)
                 )
 
-            if tree.i.this_and_siblings.have_authors:
+            if _sibs.have_authors:
                 siblings_rels.append(
                     -1.0
-                    + (tree.i.this_and_siblings_recursive.similarity("id3_authors", distinct=True, fallback=0.0) * 2)
+                    + (_sibs.similarity("id3_authors", distinct=True, fallback=0.0) * 2)
                 )
 
+            # For depth-3+ files, tree.i.this_and_siblings_recursive goes up to the
+            # grandparent (e.g. the series folder) and includes all files in sibling books.
+            # This gives a low similarity signal across a diverse series, which correctly
+            # boosts standalone_score. Using _sibs (parent's direct files) instead would
+            # give a high similarity among tracks within the same flat book and incorrectly
+            # suppress the standalone signal.
             siblings_rels.append(
                 tree.i.this_and_siblings_recursive.similarity("pathnames", distinct=True, fallback=0.0)
             )
 
             known_numbers_contiguity = float(
-                tree.i.this_and_siblings.track_nums_are_contiguous
-                or tree.i.this_and_siblings.start_nums_are_contiguous
-                or tree.i.this_and_siblings.part_nums_are_contiguous
+                _sibs.track_nums_are_contiguous
+                or _sibs.start_nums_are_contiguous
+                or _sibs.part_nums_are_contiguous
                 or 0
             )
             all_numbers_contiguity = (
-                float(tree.i.this_and_siblings.all_path_nums_are_contiguous or 0)
-                + (tree.i.this_and_siblings.all_path_nums_completion or 0)
+                float(_sibs.all_path_nums_are_contiguous or 0)
+                + (_sibs.all_path_nums_completion or 0)
             ) / 2
 
             siblings_rels.append(max(known_numbers_contiguity, all_numbers_contiguity))
@@ -1510,18 +1524,38 @@ def score_series_book(tree: "BooksTree") -> float:
 
 @cached_scorer
 def score_series_parent(tree: "BooksTree") -> float:
+    import re
+
     try:
         from src.lib.parsers import is_maybe_series_parent
 
-        if tree.is_root or tree.is_file() or (len(tree.dirs) == 1 and not tree.files):
+        if tree.is_root or tree.is_file():
             return 0.0
+
+        # A directory with exactly one subdirectory and no direct files is usually
+        # a redundant single-subdirectory (nested book) and not a series parent.
+        # Exception: if that subdirectory's name starts with a digit (year or sequence
+        # number like "2008 - The Appeal" or "01 - Pride Of Chanur") it is almost
+        # certainly a series book — so the parent is a series parent that still has
+        # one book remaining after the others were archived.
+        if len(tree.dirs) == 1 and not tree.files:
+            only_child_name = str(next(iter(tree.dirs)))
+            if not re.match(r"^\d", only_child_name):
+                return 0.0
+            # Fall through to normal scoring so the single series book is recognised.
 
         # If one or fewer children, it's not a series parent — unless the
         # directory appears to be a series parent on disk (e.g. children were
-        # filtered out because the tree was built with a maxdepth limit).
+        # filtered out because the tree was built with a maxdepth limit, or all
+        # other books in the series were already archived leaving just one).
         if len(tree.children) <= 1:
+            only_child = tree.children[0] if tree.children else None
             if not tree.children and is_maybe_series_parent(tree.path):
                 return 0.5
+            if only_child and only_child.is_dir() and re.match(r"^\d", only_child.path.name):
+                # Return a score above the 0.75 threshold so this parent is correctly
+                # classified as series_parent despite having only one remaining child.
+                return 0.85
             return 0.0
 
         tree.tick(f"init score_series_parent for {tree.rel_path}")
@@ -1535,6 +1569,16 @@ def score_series_parent(tree: "BooksTree") -> float:
                 return True
             if c.is_file() and score_single_standalone_file(c)[1] > 0.5:
                 # tree.tick(f"is file and likely standalone for {c.rel_path}")
+                # If sibling files form a contiguous numeric sequence they are almost
+                # certainly chapters of a single flat book (e.g. "01 - Ch1.mp3",
+                # "02 - Ch2.mp3", …) — not standalone series titles.  This guards
+                # against the no-ID3 startup scan path where individual files score
+                # higher as standalones because album-similarity data is unavailable.
+                if (
+                    c.i.this_and_siblings.have_start_nums
+                    and c.i.this_and_siblings.start_nums_are_contiguous
+                ):
+                    return False
                 return True
             # A directory with exactly one audio file and no subdirectories is a
             # strong structural indicator of a series book (e.g. numbered book dirs
@@ -1734,18 +1778,27 @@ def score_multi_parent(tree: "BooksTree") -> float:
             completion = len(tree.i.this_and_siblings.disc_nums) / len(tree.i.this_and_siblings._trees)
             contiguous = float(tree.i.this_and_siblings.disc_nums_are_contiguous or 0)
             multi_disc_score = 1 - (completion + contiguous)
-        elif tree.i.children.have_disc_nums:
-            completion = len(tree.i.children.disc_nums) / len(tree.i.children._trees)
-            contiguous = float(tree.i.children.disc_nums_are_contiguous or 0)
+        elif tree.i.dirs.have_disc_nums:
+            # Only check subdirectory names — not file names. A multi_parent requires
+            # actual subdirectory children (e.g. "Disc 1/", "Disc 2/"). Files in a flat
+            # book can have disc-like numbers in their names (e.g. "cd1-track01.mp3")
+            # but that must not inflate the multi_parent score.
+            completion = len(tree.i.dirs.disc_nums) / len(tree.i.dirs._trees)
+            contiguous = float(tree.i.dirs.disc_nums_are_contiguous or 0)
             multi_disc_score = completion + contiguous
 
         if tree.i.this_and_siblings.have_part_nums:
             completion = len(tree.i.this_and_siblings.part_nums) / len(tree.i.this_and_siblings._trees)
             contiguous = float(tree.i.this_and_siblings.part_nums_are_contiguous or 0)
             multi_part_score = 1 - (completion + contiguous)
-        elif tree.i.children.have_part_nums:
-            completion = len(tree.i.children.part_nums) / len(tree.i.children._trees)
-            contiguous = float(tree.i.children.part_nums_are_contiguous or 0)
+        elif tree.i.dirs.have_part_nums:
+            # Only check subdirectory names — not file names. Files in a flat book
+            # may contain "Chapter X." or "Part Y." in their names (e.g.
+            # "05 - Chapter 1. Understanding Emotional Dysregulation.mp3"), which
+            # would produce false-positive part_nums and cause the flat book to be
+            # misclassified as a multi_parent with a very high score.
+            completion = len(tree.i.dirs.part_nums) / len(tree.i.dirs._trees)
+            contiguous = float(tree.i.dirs.part_nums_are_contiguous or 0)
             multi_part_score = completion + contiguous
 
         if tree.is_match:

@@ -1,4 +1,5 @@
 import shutil
+import sys
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -96,13 +97,12 @@ def process_already_m4b(book: Audiobook, item: InboxItem):
     print_moving_to_converted(book)
 
     if book.tree.has_structure("standalone_file"):
-        file_name = item.key
         ext = ensure_dot(book.orig_file_type)
-        folder_name = item.path.stem
-        target_dir = cfg.converted_dir / folder_name
+        target_dir = book.converted_dir  # correctly includes series prefix when applicable
+        folder_name = target_dir.name
 
-        unique_target = target_dir / file_name
-        (target_dir).mkdir(parents=True, exist_ok=True)
+        unique_target = book.converted_file
+        target_dir.mkdir(parents=True, exist_ok=True)
 
         if unique_target.exists():
             smart_print("(A file with the same name already exists, this one will be renamed to prevent data loss)")
@@ -153,6 +153,9 @@ def print_banner(after: Callable[..., Any] | None = None):
     msg = "Checking for" if _lc > 1 else "Watching for"
     if not skip:
         print_grey(f"{msg} books in [[{cfg.inbox_dir}]] ꨄ︎")
+        if cfg.watch_dir:
+            indent = " " * (len(msg) + len(" books in ") - len("and "))
+            print_grey(f"{indent}and [[{cfg.watch_dir}]]")
 
     if not skip and _lc == 1:
         nl()
@@ -356,9 +359,11 @@ def ok_to_overwrite(book: Audiobook):
                     f"Found a copy of this book in {tint_path(cfg.archive_dir)}, it has probably already been converted"
                 )
                 print_notice("Skipping this book because OVERWRITE_EXISTING is not enabled")
+                InboxState().set_processed(book)
                 return False
             elif book.size("converted", "bytes") > 0:
                 print_notice(f"Output file already exists and OVERWRITE_EXISTING is not enabled, skipping this book")
+                InboxState().set_processed(book)
                 return False
         else:
             print_warning("Warning: Output file already exists, it and any other {{.m4b}} files will be overwritten")
@@ -473,7 +478,7 @@ def books_to_process() -> tuple[int, Callable[[], None]]:
 
 
 def can_process_multi_dir(book: Audiobook):
-    from src.lib.fs_utils import flatten_files_in_dir, flattening_files_in_dir_affects_order
+    from src.lib.fs_utils import flatten_files_in_dir, flattening_multi_disc_files_in_dir_affects_order
 
     inbox = InboxState()
     if book.tree.has_structure_like("series") or book.tree.has_structure_like("multi"):
@@ -485,7 +490,7 @@ def can_process_multi_dir(book: Audiobook):
                 "\nThis folder appears to be a multi-disc book, attempting to flatten it...",
                 end="",
             )
-            if flattening_files_in_dir_affects_order(book.inbox_dir):
+            if flattening_multi_disc_files_in_dir_affects_order(book.inbox_dir):
                 nl(2)
                 print_error("Flattening this book would affect the file order, cannot proceed")
                 smart_print(f"{help_msg}\n")
@@ -495,7 +500,7 @@ def can_process_multi_dir(book: Audiobook):
                 )
                 return False
             else:
-                flatten_files_in_dir(book.inbox_dir)
+                flatten_files_in_dir(book.inbox_dir, prefix_with_parent=True)
                 book.rescan()
                 # book = Audiobook(book.inbox_dir)
                 print_mint(" ✓\n")
@@ -508,7 +513,7 @@ def can_process_multi_dir(book: Audiobook):
             fail_book(book, f"{en.MULTI_ERR} (multi-part book) - {help_msg}")
             return False
         else:
-            print_error(f"{en.MULTI_ERR}, cannot determine book structure")
+            print_error(en.MULTI_ERR)
             smart_print(f"{help_msg}\n")
             fail_book(book, f"{en.MULTI_ERR} (structure unknown) - {help_msg}")
             return False
@@ -533,7 +538,8 @@ def can_process_roman_numeral_book(book: Audiobook):
 
 def has_audio_files(book: Audiobook):
     if book.inbox_dir.is_file():
-        raise FileNotFoundError(f"has_audio_files: '{book.inbox_dir}' is a file, not a folder")
+        print_debug(f"has_audio_files: '{book.inbox_dir}' is a standalone file, not a folder — skipping")
+        return False
     if not book.num_files("inbox"):
         print_notice(f"'{book.inbox_dir}' does not contain any known audio files, skipping")
         fail_book(book, "No audio files found in this folder")
@@ -721,14 +727,21 @@ def cleanup_series_dir(parent: InboxItem | None):
 
     parent_book = parent.to_audiobook()
     verb = "copy" if cfg.ON_COMPLETE == "test_do_nothing" else "move"
-    # Move (or copy) series collateral to converted folder
-    _mv_or_cp_dir_contents(
-        verb,
-        parent_book.inbox_dir,
-        parent_book.converted_dir,
-        only_file_exts=cfg.OTHER_EXTS,
-        overwrite_mode="overwrite-silent",
-    )
+    # Move (or copy) series collateral to converted folder.
+    # Guard: the inbox dir may already be gone if individual series books were
+    # archived/moved by the OS or another process before we reach cleanup.
+    if parent_book.inbox_dir.exists():
+        _mv_or_cp_dir_contents(
+            verb,
+            parent_book.inbox_dir,
+            parent_book.converted_dir,
+            only_file_exts=cfg.OTHER_EXTS,
+            overwrite_mode="overwrite-silent",
+        )
+    else:
+        print_debug(
+            f"cleanup_series_dir: inbox dir '{parent_book.inbox_dir}' no longer exists, skipping collateral move"
+        )
 
     parent_book.set_active_dir("converted")
 
@@ -918,21 +931,52 @@ def process_book(b: int, item: InboxItem):
 def process_inbox():
     from src.lib.fs_utils import clean_dirs, inbox_last_updated_at
     from src.lib.run import audio_files_found, print_banner
-    from src.lib.term import print_debug, print_grey
+    from src.lib.term import print_debug
 
     inbox = InboxState()
 
     if inbox.loop_counter == 1:
-        print_grey(f"\nScanning inbox for the first time...")
+        if "pytest" not in sys.modules:
+            # Production startup: print banner immediately so the user sees the app
+            # is alive, then do the (potentially slow) full scan in the background.
+            # The watchdog loop in auto_m4b.py uses dirty.wait(timeout) so it wakes
+            # up and begins processing once inbox.ready is set.
+            print_banner()
+            import threading
+
+            def _bg_scan():
+                import traceback
+                t0 = time.monotonic()
+                print_debug("[bg-scan] Starting background inbox scan...")
+                try:
+                    inbox.scan(set_ready=True, force=True, scan_id3=False)
+                    # Record the post-scan hash as both the run-start and run-end
+                    # checkpoints so the first inbox_needs_processing() call can skip
+                    # the otherwise redundant re-scan (nothing changed since we just
+                    # finished scanning).
+                    inbox.start()
+                    inbox.done()
+                    elapsed = time.monotonic() - t0
+                    print_debug(
+                        f"[bg-scan] Done in {elapsed:.1f}s — ready={inbox.ready}, "
+                        f"items={len(inbox._items)}, ok={inbox.num_matched_ok}"
+                    )
+                except Exception as e:
+                    print_debug(f"[bg-scan] ERROR: {e}\n{traceback.format_exc()}")
+
+            threading.Thread(target=_bg_scan, daemon=True).start()
+            return
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
+    print_debug(f"[process_inbox] loop={inbox.loop_counter}, checking audio_files_found...")
     if not audio_files_found():
         print_debug(
             f"No audio files found in {cfg.inbox_dir}\n        Last updated at {inbox_last_updated_at(friendly=True)}, watching for changes...",
             only_once=True,
         )
         return
+    print_debug(f"[process_inbox] audio files found, checking inbox_needs_processing...")
     if (
         # not inbox.inbox_needs_processing(on_will_scan=process_standalone_files)
         not inbox.inbox_needs_processing()
@@ -943,11 +987,19 @@ def process_inbox():
         # would violate assert_not_ends_with_banner in tests and looks wrong in
         # production when the app is just polling for new books.
         return
+    # Only print the banner when something actually changed in the inbox (new
+    # books added/removed) or on the very first processing loop. Re-processing
+    # the same set of pending books (e.g. retrying after a transient failure)
+    # should not flood the log with headers every SLEEP_TIME seconds.
+    _should_banner = inbox.loop_counter <= 1 or inbox.inbox_hash_changed
     if info := books_to_process():
         _expected, msg = info
-        # print_debug(f"Processing {expected} book(s)")
-        print_banner(after=lambda: [x() for x in (nl, msg)])
-    else:
+        if _should_banner:
+            print_banner(after=lambda: [x() for x in (nl, msg)])
+        else:
+            nl()
+            msg()
+    elif _should_banner:
         print_banner()
 
     # process_standalone_files()

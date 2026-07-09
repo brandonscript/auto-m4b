@@ -264,9 +264,6 @@ class Config:
 
         with use_pid_file() as pid_exists:
             with self.load_env(args) as env_msg:
-                if self.SLEEP_TIME and not "pytest" in sys.modules:
-                    time.sleep(min(2, self.SLEEP_TIME / 2))
-
                 if not pid_exists and not InboxState().loop_counter:
                     print_mint("\nStarting auto-m4b...")
                     print_grey(self.info_str)
@@ -279,6 +276,9 @@ class Config:
                         else ("TEST mode on" if self.TEST else "DEBUG mode on" if self.DEBUG else "")
                     ):
                         print_amber(test_debug_msg)
+
+                if self.SLEEP_TIME and not "pytest" in sys.modules:
+                    time.sleep(min(2, self.SLEEP_TIME / 2))
 
                     # if beta_msg := (
                     #     f"[Beta] features are enabled:\n{listify([f for f, b in beta_features if b])}\n"
@@ -482,6 +482,14 @@ class Config:
     @cached_property
     def backup_dir(self):
         return self.load_path_env("BACKUP_FOLDER", allow_empty=False)
+
+    @cached_property
+    def watch_dir(self) -> Path | None:
+        """Optional secondary source folder to watch for new audiobooks.
+        Set WATCH_FOLDER in the environment to enable. When set, auto-m4b will
+        scan this directory each loop and copy qualifying books (those with more
+        than one audio file) to the inbox before the normal conversion pass."""
+        return self.load_path_env("WATCH_FOLDER", allow_empty=True)
 
     @cached_property
     def tmp_dir(self):
