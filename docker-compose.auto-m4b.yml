@@ -33,3 +33,6 @@ services:
       - ON_COMPLETE=archive
       - TZ=America/Vancouver
       - DEBUG=1
+      # Optional: set to a downloads folder to automatically copy new audiobooks
+      # into the inbox. Only directories with more than one audio file are copied.
+      - WATCH_FOLDER=/media/Downloads/books

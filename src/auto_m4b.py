@@ -10,6 +10,7 @@ from src.lib.inbox_state import InboxState
 from src.lib.term import nl, print_error, print_red, was_prev_line_empty
 from src.lib.term import print_debug as _print_debug
 from src.lib.typing import copy_kwargs_omit_first_arg
+from src.lib.watch_folder import WatchFolder
 
 
 def handle_err(e: Exception):
@@ -59,6 +60,7 @@ def app(**kwargs):
             while inbox.loop_counter < args.max_loops:
                 inbox.loop_counter += 1
                 run.process_inbox()
+                WatchFolder.scan_and_copy()
                 if inbox.loop_counter < args.max_loops:
                     time.sleep(cfg.SLEEP_TIME)
 
@@ -89,6 +91,7 @@ def app(**kwargs):
         # Initial scan
         inbox.loop_counter += 1
         run.process_inbox()
+        WatchFolder.scan_and_copy()
 
         observer = PollingObserver(timeout=cfg.SLEEP_TIME)
         observer.schedule(_InboxHandler(), str(cfg.inbox_dir), recursive=True)
@@ -116,6 +119,7 @@ def app(**kwargs):
                 inbox.loop_counter += 1
                 with use_error_handler():
                     run.process_inbox()
+                    WatchFolder.scan_and_copy()
         finally:
             if observer_started:
                 observer.stop()

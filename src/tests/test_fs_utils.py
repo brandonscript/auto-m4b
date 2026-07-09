@@ -170,6 +170,61 @@ def test_flattening_files_affects_order(
     assert flattening_files_in_dir_affects_order(test_files) == expected
 
 
+@pytest.mark.parametrize(
+    "test_path, expected_prefixed",
+    [
+        (
+            # "cd 1"…"cd 9": 9 discs → width 1, prefix is just the disc number
+            MOCKED.multi_disc_dir_cd_n,
+            [f"{d}_Track {t:02}.mp3" for d in range(1, 10) for t in range(1, 3)],
+        ),
+        (
+            # "CD1"…"CD14": 14 discs → width 2, prefix is zero-padded disc number.
+            # Traversal order is alphabetical by folder path: CD1, CD10, CD11, …, CD14, CD2, …, CD9.
+            # after_files (= isorted of this list) will be "01_CD1.mp3", "02_CD2.mp3", …, "14_CD14.mp3" — correct disc order.
+            MOCKED.multi_disc_dir_cdn_single,
+            [f"{d:02d}_CD{d}.mp3" for d in [1, 10, 11, 12, 13, 14, 2, 3, 4, 5, 6, 7, 8, 9]],
+        ),
+    ],
+)
+def test_flatten_files_in_dir_with_prefix(
+    test_path: Path,
+    expected_prefixed: list[str],
+    mock_inbox,
+):
+    from src.lib.fs_utils import flatten_files_in_dir
+
+    before_files = [f.name for f in flatten_files_in_dir(test_path, preview=True, prefix_with_parent=True)]
+
+    flatten_files_in_dir(test_path, prefix_with_parent=True, on_conflict="skip")
+
+    after_files = list(isorted([f.name for f in filter_ignored(test_path.iterdir()) if f.is_file()]))
+    assert before_files == expected_prefixed
+    assert after_files == isorted(expected_prefixed)
+
+
+@pytest.mark.parametrize(
+    "test_files, expected",
+    [
+        (MOCKED.multi_disc_dir, False),
+        (MOCKED.multi_disc_dir_cd_n, False),
+        (MOCKED.multi_disc_dir_with_extras, False),
+        # "CD1"…"CD14" with multiple tracks per disc: zero-padded prefix handles it safely
+        (MOCKED.multi_disc_dir_cdn, False),
+        # "CD1"…"CD14" with one uniquely-named file per disc (mirrors "Beyond Letting Go" pattern)
+        (MOCKED.multi_disc_dir_cdn_single, False),
+    ],
+)
+def test_flattening_multi_disc_files_affects_order(
+    test_files: Path,
+    expected: bool,
+    mock_inbox,
+):
+    from src.lib.fs_utils import flattening_multi_disc_files_in_dir_affects_order
+
+    assert flattening_multi_disc_files_in_dir_affects_order(test_files) == expected
+
+
 def test_find_recently_modified_files_and_dirs():
     from src.lib.config import cfg
     from src.lib.fs_utils import find_recently_modified_files_and_dirs

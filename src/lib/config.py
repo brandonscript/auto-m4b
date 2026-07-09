@@ -484,6 +484,14 @@ class Config:
         return self.load_path_env("BACKUP_FOLDER", allow_empty=False)
 
     @cached_property
+    def watch_dir(self) -> Path | None:
+        """Optional secondary source folder to watch for new audiobooks.
+        Set WATCH_FOLDER in the environment to enable. When set, auto-m4b will
+        scan this directory each loop and copy qualifying books (those with more
+        than one audio file) to the inbox before the normal conversion pass."""
+        return self.load_path_env("WATCH_FOLDER", allow_empty=True)
+
+    @cached_property
     def tmp_dir(self):
         t = Path(tempfile.gettempdir()).resolve() / "auto-m4b"
         t.mkdir(parents=True, exist_ok=True)
