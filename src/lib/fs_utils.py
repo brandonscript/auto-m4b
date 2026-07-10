@@ -919,7 +919,18 @@ def filter_ignored(
 
     paths = [p for p in flatlist(paths) if p and isinstance(p, Path)]
 
-    return [p for p in paths if not any(fnmatch.filter([str(p.name)], ignore) for ignore in cfg.IGNORE_FILES)]
+    # Check every path component, not just the filename, so that files *inside*
+    # ignored directories (e.g. .AppleDouble/foo.mp3, __MACOSX/bar.mp3) are also
+    # excluded even though the file's own name is not in IGNORE_FILES.
+    return [
+        p
+        for p in paths
+        if not any(
+            fnmatch.filter([part], ignore)
+            for ignore in cfg.IGNORE_FILES
+            for part in p.parts
+        )
+    ]
 
 
 def is_audio_file(file: str | Path) -> bool:
