@@ -233,7 +233,10 @@ def audio_files_found():
 
 
 def fail_book(book: Audiobook, reason: str = "unknown"):
-    """Adds the book's path to the failed books dict with a value of the last modified date of of the book"""
+    """Marks the book as failed, writes a log, and moves it to FAILED_FOLDER if configured."""
+    from src.lib.config import cfg
+    from src.lib.fs_utils import mv_dir_contents, rm_dir
+
     inbox = InboxState()
     if not book.key or book.key in inbox.failed_books:
         return
@@ -251,6 +254,21 @@ def fail_book(book: Audiobook, reason: str = "unknown"):
         else:
             # move build dir log to inbox dir
             shutil.move(build_log, book.log_file)
+
+    # Move failed book out of the inbox so it doesn't block the queue.
+    if cfg.failed_dir and cfg.ON_COMPLETE != "test_do_nothing" and book.inbox_dir.exists():
+        from src.lib.term import print_warning
+
+        failed_dest = book.failed_dir
+        try:
+            mv_dir_contents(book.inbox_dir, failed_dest, overwrite_mode="overwrite-silent")
+            if book.inbox_dir.exists():
+                rm_dir(book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
+            if not book.inbox_dir.exists():
+                inbox.set_gone(book)
+                smart_print(f"\nMoved failed book to {tint_path(failed_dest)}")
+        except Exception as e:
+            print_warning(f"Could not move failed book to failed dir: {e}")
 
 
 def backup_ok(book: Audiobook):
