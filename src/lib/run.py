@@ -132,32 +132,26 @@ def print_banner(after: Callable[..., Any] | None = None):
 
     inbox = InboxState()
     _found = found_banner_in_print_log()
-    _bp = inbox.banner_printed
     _lc = inbox.loop_counter
     _lbc = inbox._last_banner_lc
 
-    # Skip reprinting the ⌐◒-◒ header only when it was already printed during
-    # the CURRENT loop counter value. This ensures:
-    # - Consecutive processing loops (new books detected) each get a fresh banner.
-    # - Pre-set banner_printed=True (simulating a prior session) does NOT suppress
-    #   the banner for the current loop (handles the [2-1-*] test pattern).
-    skip = _found and (_lbc >= _lc)
+    # The decorative header (dashes + timestamp + "Watching for…") only prints
+    # once, on the very first loop.  Subsequent loops process books silently —
+    # no "Checking for…" or repeated header — so the startup banner remains
+    # visible and uncluttered.  after() is still called on every invocation so
+    # that callers like inbox_needs_processing can still emit their own message
+    # (e.g. "New activity detected") without the decorative wrapper.
+    header_skip = _lc > 1 or (_found and _lbc >= _lc)
 
     current_local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     dash = "-" * 25
 
-    if not skip:
+    if not header_skip:
         print_mint(f"{dash}  ⌐◒-◒  auto-m4b • {current_local_time}  {dash}")
-
-    msg = "Checking for" if _lc > 1 else "Watching for"
-    if not skip:
-        print_grey(f"{msg} books in [[{cfg.inbox_dir}]] ꨄ︎")
+        print_grey(f"Watching for books in [[{cfg.inbox_dir}]] ꨄ︎")
         if cfg.watch_dir:
-            indent = " " * (len(msg) + len(" books in ") - len("and "))
-            print_grey(f"{indent}and [[{cfg.watch_dir}]]")
-
-    if not skip and _lc == 1:
+            print_grey(f"        and [[{cfg.watch_dir}]]")
         nl()
 
     time.sleep(0.25 if not cfg.TEST else 0)
@@ -165,7 +159,7 @@ def print_banner(after: Callable[..., Any] | None = None):
     if after:
         after()
 
-    if not skip:
+    if not header_skip:
         inbox.banner_printed = True
         inbox._last_banner_lc = _lc
 
@@ -1039,7 +1033,7 @@ def process_inbox():
     # books added/removed) or on the very first processing loop. Re-processing
     # the same set of pending books (e.g. retrying after a transient failure)
     # should not flood the log with headers every SLEEP_TIME seconds.
-    _should_banner = inbox.loop_counter <= 1 or inbox.inbox_hash_changed
+    _should_banner = inbox.loop_counter <= 1
     if info := books_to_process():
         _expected, msg = info
         if _should_banner:
