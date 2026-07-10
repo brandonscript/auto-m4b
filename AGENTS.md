@@ -133,6 +133,26 @@ When `dev` is ready to release:
    git push origin dev
    ```
 
+## Open Library author/narrator swap detection
+
+auto-m4b can query the [Open Library API](https://openlibrary.org/developers/api) to detect when
+author and narrator tags are swapped in source files (common with MP3 rips that use the music
+convention: `artist = narrator`, `composer = author`, no `albumartist`).
+
+To enable it, set `OPEN_LIBRARY_USER_AGENT` in the compose file to a valid identification string:
+
+```
+OPEN_LIBRARY_USER_AGENT=MyAppName/1.0 (myemail@example.com)
+```
+
+Per OL's API policy, the string must identify your application and include a contact email so they
+can reach you if your bot misbehaves. Do **not** use the literal placeholder above — replace both
+the app name and email with real values.
+
+When the env var is absent or the placeholder text is left unchanged, the swap-detection step in
+`verify_and_update_id3_tags()` is silently skipped and author/narrator are taken from the raw ID3
+scores only (which can be wrong for music-convention-tagged files).
+
 ## Docker build workflow
 
 The Dockerfile is split into two layers to keep dev rebuilds fast:
@@ -142,10 +162,11 @@ The Dockerfile is split into two layers to keep dev rebuilds fast:
 
 ```bash
 # Build (or rebuild) the base — only needed when deps change:
-dr build auto-m4b-base   # or: docker compose -f docker-compose.auto-m4b.yml --profile base build auto-m4b-base
+dr build auto-m4b-base       # or: docker compose -f docker-compose.auto-m4b.yml --profile base build auto-m4b-base
 
 # Normal dev rebuild (fast — only re-copies src/):
-dr build auto-m4b        # or: docker compose -f docker-compose.auto-m4b.yml build auto-m4b
+# Phantom runs the NVIDIA variant, so always build and start auto-m4b:nvidia
+dr build auto-m4b:nvidia     # or: docker compose -f docker-compose.auto-m4b-nvidia.yml build auto-m4b
 ```
 
 ## Container variants
@@ -154,7 +175,7 @@ Two mutually exclusive variants are available. Starting one automatically stops 
 
 ```bash
 dr start auto-m4b          # standard (CPU-only ffmpeg)
-dr start auto-m4b:nvidia   # NVIDIA GPU-accelerated ffmpeg
+dr start auto-m4b:nvidia   # NVIDIA GPU-accelerated ffmpeg  ← used on Phantom
 ```
 
 Both use `container_name: auto-m4b`, so `docker logs -f auto-m4b` works regardless of which variant is running.

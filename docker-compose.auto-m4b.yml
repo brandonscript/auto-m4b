@@ -33,6 +33,9 @@ services:
       - ON_COMPLETE=archive
       - TZ=America/Vancouver
       - DEBUG=0
+      # Open Library API user agent — required to enable author/narrator swap detection.
+      # Format: AppName/1.0 (your@email.com)  See: https://openlibrary.org/developers/api
+      - OPEN_LIBRARY_USER_AGENT=
       # Optional: set to a downloads folder to automatically copy new audiobooks
       # into the inbox. Only directories with more than one audio file are copied.
       - WATCH_FOLDER=/media/Downloads/books

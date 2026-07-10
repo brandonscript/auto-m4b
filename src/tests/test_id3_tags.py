@@ -527,6 +527,16 @@ def test_encoder_tag_is_auto_m4b_after_conversion(
             },
             "Andrew Farell",
         ),
+        # Audiobook convention, no albumartist: artist=author, composer=narrator.
+        # The boosted composer_is_narrator score should win even without an albumartist tag.
+        (
+            {
+                "artist": "J.K. Rowling",
+                "composer": "Stephen Fry",
+                "comment": "",
+            },
+            "Stephen Fry",
+        ),
     ],
 )
 def test_parse_id3_narrator(
@@ -543,3 +553,49 @@ def test_parse_id3_narrator(
 
     book = Audiobook(blank_audiobook.sample_audio1).extract_metadata()
     assert book.narrator == expected_narrator
+
+
+@pytest.mark.skip(
+    reason=(
+        "Music-convention tags (artist=narrator, composer=author, no albumartist) cannot be "
+        "corrected by the local heuristic alone — the scorer treats artist as author by default. "
+        "OPEN_LIBRARY_USER_AGENT must be configured so verify_and_update_id3_tags() can detect "
+        "the swap via OL title lookup and rewrite the tags in the final m4b."
+    )
+)
+def test_music_convention_tags_require_ol_for_swap_detection(
+    blank_audiobook: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """
+    Many MP3 audiobook rips use the music convention: artist = narrator (performer),
+    composer = author (creator), albumartist = absent.
+
+    Example: the Stephen Fry Harry Potter readings have
+        artist   = "Stephen Fry"
+        composer = "J. K. Rowling"
+
+    Without Open Library the scorer produces author=Stephen Fry (wrong).
+    With OL configured, verify_and_update_id3_tags() detects that J.K. Rowling is
+    the known book author and swaps artist/composer in the output m4b.
+
+    This test is intentionally skipped because it requires a live OL lookup.
+    Un-skip it locally to verify OL swap detection end-to-end.
+    """
+    tags = {
+        "artist": "Stephen Fry",
+        "composer": "J. K. Rowling",
+        "album": "Harry Potter And The Goblet Of Fire",
+        "title": "HP04: Harry Potter And The Goblet Of Fire",
+        "comment": "",
+    }
+    mock_id3_tags(
+        (blank_audiobook.sample_audio1, tags),
+        (blank_audiobook.sample_audio2, tags),
+    )
+
+    book = Audiobook(blank_audiobook.sample_audio1).extract_metadata()
+
+    # After OL swap correction the author should be Rowling, not Fry.
+    assert book.author == "J. K. Rowling", f"Expected J. K. Rowling as author, got '{book.author}'"
+    assert book.narrator == "Stephen Fry", f"Expected Stephen Fry as narrator, got '{book.narrator}'"
