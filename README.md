@@ -172,7 +172,45 @@ All options are set via environment variables (`.env` file or shell environment)
 | `CRASH_PROTECTION` | `Y` | Set to `N` to disable skipping books that previously failed |
 | `USE_FILENAMES_AS_CHAPTERS` | `N` | Set to `Y` to derive chapter titles from filenames instead of ID3 tags |
 | `NO_CATS` | `N` | Set to `Y` to suppress the ASCII cat art between loops |
-| `OPEN_LIBRARY_USER_AGENT` | *(none)* | User-agent string for Open Library API lookups (format: `AppName/1.0 (email)`) |
+| `OPEN_LIBRARY_USER_AGENT` | *(none)* | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup)) |
+
+## Open Library setup
+
+auto-m4b can query the [Open Library API](https://openlibrary.org/developers/api) to detect and correct
+swapped author/narrator tags. This is most useful for audiobook MP3 rips that use the "music
+convention" — where the narrator (performer) is stored in the `artist` field and the author
+(creator) is in `composer`, without an `albumartist` tag. Without this correction, auto-m4b may
+tag the output `.m4b` with the narrator as the author and vice versa.
+
+### Why this happens
+
+Many torrent-sourced audiobook rips follow music tagging conventions:
+
+| ID3 field | Music meaning | Audiobook meaning | auto-m4b output |
+|---|---|---|---|
+| `artist` | performer | **narrator** | should become `composer` |
+| `composer` | creator | **author** | should become `artist` / `albumartist` |
+
+auto-m4b's local scoring heuristics handle the majority of cases, but when the tags are ambiguous
+(e.g. only `artist` and `composer` are set, no `albumartist`) OL is the only reliable way to
+determine which name is the actual book author.
+
+### How to enable it
+
+Set `OPEN_LIBRARY_USER_AGENT` in your compose file or `.env`:
+
+```
+OPEN_LIBRARY_USER_AGENT=MyApp/1.0 (you@example.com)
+```
+
+Per [OL's API policy](https://openlibrary.org/developers/api), the string must include:
+- A short name and version for your application (`MyApp/1.0`)
+- A contact email in parentheses (`you@example.com`)
+
+Replace both placeholders with real values — do **not** leave the example text as-is.
+
+When the variable is unset or left as the placeholder, OL lookups are silently skipped and
+author/narrator are determined from ID3 tags alone.
 
 ## Development
 

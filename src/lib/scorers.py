@@ -545,7 +545,14 @@ class MetadataScore:
                 albumartist_is_narrator += int(10 if self._p._aar1_eq_aar2 else -10)
 
         if self._p.composer and self._p.composer != self._p.artist1:
-            composer_is_narrator = 5 * int(len(to_words(self._p.composer)))
+            # Give composer a stronger narrator signal when albumartist is absent.
+            # Many audiobook MP3 rips use the music convention (artist=narrator, composer=author),
+            # and when there's no albumartist to disambiguate, composer is the most reliable
+            # signal that someone other than the artist is involved (i.e., one is author, one
+            # is narrator). OL swap-detection handles the music-convention case explicitly;
+            # the boosted score here ensures composer wins as narrator when OL confirms it.
+            no_albumartist = not self._p.albumartist1
+            composer_is_narrator = 15 * int(len(to_words(self._p.composer))) * (2 if no_albumartist else 1)
 
         self.narrator.artist_is_narrator = artist_is_narrator
         self.narrator.albumartist_is_narrator = albumartist_is_narrator
