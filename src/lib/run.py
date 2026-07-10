@@ -979,12 +979,32 @@ def process_inbox():
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
+    def _sweep_empty_inbox_dirs():
+        """Remove empty leftover dirs from the inbox (e.g. series parent dirs whose
+        children were all archived in a previous run). Safe because:
+        - only removes dirs with no content at all
+        - skips dirs modified within WAIT_TIME seconds (actively receiving files)
+        - skips dirs that are currently tracked as books in _items"""
+        from src.lib.fs_utils import rm_dir, was_recently_modified
+
+        for subdir in sorted(cfg.inbox_dir.iterdir()):
+            if (
+                subdir.is_dir()
+                and not any(subdir.iterdir())
+                and not was_recently_modified(subdir)
+                and not inbox.get(subdir)
+            ):
+                print_debug(f"Removing empty leftover inbox dir: {subdir.name}")
+                rm_dir(subdir, ignore_errors=True)
+
     print_debug(f"[process_inbox] loop={inbox.loop_counter}, checking audio_files_found...")
     if not audio_files_found():
         print_debug(
             f"No audio files found in {cfg.inbox_dir}\n        Last updated at {inbox_last_updated_at(friendly=True)}, watching for changes...",
             only_once=True,
         )
+        # Still sweep for empty leftover dirs (e.g. series parents from a previous run).
+        _sweep_empty_inbox_dirs()
         return
     print_debug(f"[process_inbox] audio files found, checking inbox_needs_processing...")
     if (
@@ -1023,6 +1043,21 @@ def process_inbox():
 
         if item.is_series_book and item.is_last_book_in_series:
             cleanup_series_dir(item.series_parent)
+
+    # Sweep 1: series parents still in _items whose inbox dir became empty during this
+    # run. Catches cases where is_last_book_in_series didn't fire (e.g. dict ordering
+    # placed the "last" child first and it converted before the others).
+    for parent_item in list(inbox._items.values()):
+        if (
+            parent_item.is_series_parent
+            and parent_item.status not in ("gone", "processed")
+            and parent_item.path.is_dir()
+            and not any(parent_item.path.iterdir())
+        ):
+            cleanup_series_dir(parent_item)
+
+    # Sweep 2: empty inbox subdirs not in _items — container-restart scenario.
+    _sweep_empty_inbox_dirs()
 
     print_footer(b)
     clean_dirs([cfg.merge_dir, cfg.build_dir, cfg.trash_dir])
