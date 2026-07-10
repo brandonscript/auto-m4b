@@ -19,6 +19,7 @@ services:
       - INBOX_FOLDER=/media/Books/Audiobooks/#auto-m4b/inbox
       - CONVERTED_FOLDER=/media/Books/Audiobooks/#auto-m4b/converted
       - ARCHIVE_FOLDER=/media/Books/Audiobooks/#auto-m4b/archive
+      - FAILED_FOLDER=/media/Books/Audiobooks/#auto-m4b/failed
       - BACKUP_FOLDER=/media/Books/Audiobooks/#auto-m4b/backup
       - WORKING_FOLDER=/tmp/auto-m4b
       - WATCH_FOLDER=/media/Downloads/books

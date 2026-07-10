@@ -220,6 +220,12 @@ class Audiobook(BaseModel):
         return cfg.archive_dir.resolve() / (self.key or "")
 
     @property
+    def failed_dir(self) -> Path | None:
+        if cfg.failed_dir is None:
+            return None
+        return cfg.failed_dir.resolve() / (self.key or "")
+
+    @property
     def merge_dir(self) -> Path:
         return cfg.merge_dir.resolve() / (self.key or "")
 
