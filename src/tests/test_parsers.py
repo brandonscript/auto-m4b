@@ -7,11 +7,58 @@ from src.lib.ffmpeg_utils import get_bitrate_py, is_variable_bitrate
 from src.lib.formatters import human_bitrate
 from src.lib.parsers import (
     extract_path_info,
+    get_name_from_str,
+    parse_author,
     romans,
 )
 from src.tests.helpers.pytest_statics import PART_ROMANS, ROTK_ROMANS
 from src.tests.helpers.pytest_utils import testutils
 from src.tests.test_cleaners import strip_partno_tests
+
+
+@pytest.mark.parametrize(
+    "input_str, expected",
+    [
+        # fmt: off
+        # Author names with middle initials — 'A.' must not be treated as the article 'a'
+        ("James S.A. Corey", "James S.A. Corey"),
+        ("James S. A. Corey", "James S. A. Corey"),
+        # Folder-style strings: author before the dash
+        ("James S.A. Corey - The Expanse Series", "James S.A. Corey"),
+        ("James S. A. Corey - Leviathan Wakes (2011)", "James S. A. Corey"),
+        # Other authors with 'a'-initial patterns should still work
+        ("T.A. Barron - The Lost Years of Merlin", "T.A. Barron"),
+        ("R.A. Salvatore - The Legend of Drizzt", "R.A. Salvatore"),
+        # fmt: on
+    ],
+)
+def test_parse_author_with_a_initials(input_str, expected):
+    """parse_author must not truncate names at uppercase 'A.' initials.
+
+    'get_name_from_str' split on the article 'a', which incorrectly treated
+    'A.' (a name initial) as a separator, producing e.g. 'James S.' instead of
+    'James S.A. Corey'.
+    """
+    result = parse_author(input_str, "fs" if " - " in input_str else "generic", fallback="")
+    assert result == expected, f"parse_author({input_str!r}) returned {result!r}, expected {expected!r}"
+
+
+@pytest.mark.parametrize(
+    "input_str, expected",
+    [
+        # fmt: off
+        ("James S.A. Corey", "James S.A. Corey"),
+        ("James S. A. Corey", "James S. A. Corey"),
+        ("Alexandre Dumas", "Alexandre Dumas"),
+        # Still splits on title-casing articles in book titles
+        ("Alexandre Dumas The Count of Monte Cristo", "Alexandre Dumas"),
+        # fmt: on
+    ],
+)
+def test_get_name_from_str_preserves_a_initials(input_str, expected):
+    """get_name_from_str must not split 'James S.A.' at the 'A.' initial."""
+    result = get_name_from_str(input_str)
+    assert result == expected, f"get_name_from_str({input_str!r}) returned {result!r}, expected {expected!r}"
 
 
 @pytest.mark.parametrize(

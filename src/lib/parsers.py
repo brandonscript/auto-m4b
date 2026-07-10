@@ -377,7 +377,7 @@ def get_name_from_str(s: str, max_words=6) -> str:
 
         e.g.
         Input: "Alexandre Dumas The Count of Monte Cristo Alexandre Dumas The Count of Monte Cristo"
-            with ["the", "a", "of"]
+            with ["the", "of"]
         Output: ['Alexandre Dumas', 'The Count', 'of Monte Cristo Alexandre Dumas', 'The Count', 'of Monte Cristo']
 
         Args:
@@ -409,8 +409,10 @@ def get_name_from_str(s: str, max_words=6) -> str:
         # Filter out any empty strings from the result
         return [part for part in result if part.strip()]
 
-    # split on articles and conjunctions, remove any empty strings
-    candidates = [c for c in _split(s, ["the", "and", "or", "of", "a"]) if c]
+    # Split on multi-character articles/conjunctions. "a" is intentionally excluded because
+    # single-letter "A." is extremely common as a name initial (e.g. "James S. A. Corey",
+    # "R.A. Salvatore", "T.A. Barron") and would cause incorrect name truncation.
+    candidates = [c for c in _split(s, ["the", "and", "or", "of"]) if c]
 
     # get the first candidate
     s = candidates[0] if candidates else s

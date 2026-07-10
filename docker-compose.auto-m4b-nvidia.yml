@@ -24,6 +24,7 @@ services:
       - WATCH_FOLDER=/media/Downloads/books
       - OVERWRITE_EXISTING=N
       - BACKUP=N
+      - DEBUG=0
       - ON_COMPLETE=archive
       - TZ=America/Vancouver
       - NVIDIA_VISIBLE_DEVICES=all

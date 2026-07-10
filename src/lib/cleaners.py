@@ -3,8 +3,20 @@ from typing import Literal
 
 from src.lib.misc import re_group
 
-disc_no_strip_pattern = re.compile(r"\W*?-?\W*?[\(\[]*(disc|cd)\W*\d+[\)\]]*", flags=re.I)
-part_no_strip_pattern = re.compile(r"(\W*?-?\W*?[\(\[]*(?P<part>[Pp]([Aa][Rr])?[Tt]\W*\d+[\)\]]*|P[Aa][Rr][Tt]$))")
+# Strips "Disc 1", "CD 2", etc., and also orphaned "Disc"/"CD" at the end of a
+# string (e.g. after GCS removed the varying number: "Dreadnought Disc " → "Dreadnought").
+disc_no_strip_pattern = re.compile(
+    r"\W*?-?\W*?[\(\[]*(disc|cd)\W*(?:\d+[\)\]]*|\s*$)", flags=re.I
+)
+
+# Strips "Part 1", "Pt. 2", "Ch. 3", "Chapter 4", and also orphaned "Part"/"Pt"
+# keywords at the end (e.g. "Dreadnought Part " after GCS). "Chapter" alone is
+# intentionally excluded from the no-number case to avoid false-positives on titles
+# like "The Last Chapter".
+part_no_strip_pattern = re.compile(
+    r"(\W*?-?\W*?[\(\[]*(?P<part>(?:p(?:ar)?t|ch(?:apter)?)\W*\d+[\)\]]*|p(?:ar)?t\s*$))",
+    re.I,
+)
 non_alpha_strip_pattern = re.compile(r"^\W+|\W+$")
 
 html_tag_pattern = re.compile(r"</?\w+\s*/?>", flags=re.DOTALL)
