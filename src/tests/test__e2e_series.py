@@ -180,3 +180,63 @@ class test_series:
         expected_converted_file = expected_converted_dir / book_filename
         assert expected_converted_dir.exists(), f"Series converted dir missing: {expected_converted_dir}"
         assert expected_converted_file.is_file(), f"Converted file missing: {expected_converted_file}"
+
+    def test_empty_series_parent_dir_cleaned_up_in_same_run(
+        self,
+        Chanur_Series: list[Audiobook],
+        enable_archiving,
+    ):
+        """
+        When all series children are archived in one process_inbox pass, the parent
+        inbox dir must also be removed — even if is_last_book_in_series did not fire
+        (e.g. due to dict insertion order placing the "last" scan-order child first).
+
+        Regression for: series parent dir left empty in inbox after all books converted.
+        """
+        app(max_loops=1)
+        series_parent = Chanur_Series[0]
+
+        # All children converted — parent inbox dir must be gone.
+        assert not series_parent.inbox_dir.exists(), (
+            f"Series parent inbox dir should be cleaned up but still exists: {series_parent.inbox_dir}"
+        )
+
+    def test_empty_series_parent_dir_cleaned_up_on_next_run(
+        self,
+        Chanur_Series: list[Audiobook],
+        enable_archiving,
+    ):
+        """
+        If the series parent dir is left empty on disk (e.g. after a container restart
+        where _items was reset and prune_gone removed all children), the next
+        process_inbox call must detect and remove the empty dir.
+
+        This covers the restart scenario: BooksTree won't classify an empty dir as
+        series_parent (no children = no audio files), so it never enters _items again.
+        The Sweep 2 path in process_inbox must catch it via inbox dir iteration.
+        """
+        app(max_loops=1)
+        series_parent = Chanur_Series[0]
+
+        # Simulate the "stuck empty parent" state by recreating the empty inbox dir.
+        series_parent.inbox_dir.mkdir(parents=True, exist_ok=True)
+        assert series_parent.inbox_dir.exists()
+        assert not any(series_parent.inbox_dir.iterdir()), "Sanity: dir should be empty"
+
+        # Force mtime to be old enough to pass the was_recently_modified guard.
+        import os
+        import time
+        old_time = time.time() - 3600  # 1 hour ago
+        os.utime(series_parent.inbox_dir, (old_time, old_time))
+
+        # Reset the loop counter so the second app() call actually runs.
+        # (InboxState is a singleton; its loop_counter stays at 1 after the first
+        # app() call, which would make the second while-loop skip entirely.)
+        InboxState().reset_loop_counter()
+
+        # Second pass should remove it via Sweep 2 (not-in-_items, empty, not recent).
+        app(max_loops=1)
+
+        assert not series_parent.inbox_dir.exists(), (
+            f"Empty series parent dir should have been removed on the next run: {series_parent.inbox_dir}"
+        )
