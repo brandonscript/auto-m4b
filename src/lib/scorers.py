@@ -815,8 +815,13 @@ class MetadataProps:
         self._t_is_partno, self._t_partno_score, self._t_is_only_part_no = get_title_partno_score(
             self.title1, self.title2, self.album1, self.sortalbum1
         )
-        if self._t_is_partno:
-            self.title_c = strip_part_number(self.title_c)
+        # Always strip part/disc markers from the common title — even when _t_is_partno
+        # is False.  The GCS of two titles like "Dreadnought Part 1" / "Dreadnought Part 2"
+        # produces "Dreadnought Part " (the varying digit is gone but the keyword remains).
+        # Without this, the orphaned "Part" rides through to the output m4b tag.
+        from src.lib.cleaners import strip_disc_number
+
+        self.title_c = strip_disc_number(strip_part_number(self.title_c))
 
         # Title
         self._t1_numbers = ""
@@ -1198,6 +1203,29 @@ def score_flat(tree: "BooksTree") -> float:
                 # If identical to parent's album, this could be flatish (or multi-disc/part).
                 return round(1.0 - max(multi_disc_score, multi_part_score), 3)
 
+            # If children have contiguous part numbers ("Part 1", "Part 2"), bypass
+            # the album_sim check — but ONLY when the discrepancy is a MISSING tag
+            # (not genuinely different albums). Guard conditions:
+            #   (a) at least one tagged file is missing its album specifically
+            #       (id3_albums filters None/empty, so len < len(id3_tags) means missing)
+            #   (b) the albums that ARE present all agree with each other
+            #   (c) filenames are highly similar (same title, different part number)
+            # This avoids false-positives where two different books happen to be named
+            # "Part 1" and "Part 2" but have explicitly different, fully-set album tags.
+            _albums = tree.i.files_recursive.id3_albums   # non-empty album strings only
+            _tagged = tree.i.files_recursive.id3_tags     # files with any tag at all
+            _has_missing = len(_albums) < len(_tagged)    # some tagged files lack an album
+            _present_agree = len(set(_albums)) <= 1       # present albums are consistent
+
+            if (
+                tree.i.children.have_part_nums
+                and tree.i.children.part_nums_are_contiguous
+                and _has_missing
+                and _present_agree
+                and path_sim > 0.8
+            ):
+                return round(1.0 - max(multi_disc_score, multi_part_score), 3)
+
             if author_sim < 0.65 or album_sim < 0.95:
                 # If very dissimilar authors, or not identical albums, it's not a flat.
                 return round(min(album_sim, author_sim), 3)
@@ -1532,6 +1560,30 @@ def score_series_parent(tree: "BooksTree") -> float:
         if tree.is_root or tree.is_file():
             return 0.0
 
+        # A directory with NO subdirectories is almost never a series parent.
+        # Genuine series parents always hold each book in its own named subdirectory
+        # (e.g. "01 - The Name of the Wind/", "02 - The Wise Man's Fear/").  A flat
+        # folder of audio files — however those files are named — is a flat book.
+        #
+        # Safety hatch 1: if the files carry *different* ID3 year tags they could
+        # be distinct volumes published in different years (e.g. a LitRPG publisher
+        # storing each volume as a single "Part N.mp3" with its own release year).
+        # In that case fall through to normal scoring.
+        #
+        # Safety hatch 2: if the directory physically contains subdirectories that
+        # were not scanned (e.g. due to a maxdepth scan limit), the absence of
+        # tree.dirs is a depth-limit artifact rather than a genuine flat layout.
+        # In that case skip the early return so normal scoring applies.
+        if not tree.dirs and tree.children:
+            has_physical_subdirs = tree.path.exists() and next(
+                (True for p in tree.path.iterdir() if p.is_dir()), False
+            )
+            if not has_physical_subdirs:
+                years = tree.i.files_recursive.id3_years
+                years_agree = len(set(years)) <= 1  # all same year, or no years at all
+                if years_agree:
+                    return 0.0
+
         # A directory with exactly one subdirectory and no direct files is usually
         # a redundant single-subdirectory (nested book) and not a series parent.
         # Exception: if that subdirectory's name starts with a digit (year or sequence
@@ -1574,16 +1626,26 @@ def score_series_parent(tree: "BooksTree") -> float:
                 # "02 - Ch2.mp3", …) — not standalone series titles.  This guards
                 # against the no-ID3 startup scan path where individual files score
                 # higher as standalones because album-similarity data is unavailable.
+                # The same logic applies to contiguous part numbers ("Part 1", "Part 2")
+                # which are clearly parts of the same book, not standalone series titles.
                 if (
                     c.i.this_and_siblings.have_start_nums
                     and c.i.this_and_siblings.start_nums_are_contiguous
+                ) or (
+                    c.i.this_and_siblings.have_part_nums
+                    and c.i.this_and_siblings.part_nums_are_contiguous
                 ):
                     return False
                 return True
             # A directory with exactly one audio file and no subdirectories is a
             # strong structural indicator of a series book (e.g. numbered book dirs
             # each containing a single m4a/mp3 when ID3 tags are not yet scanned).
+            # Exception: siblings with disc/part numbers ("CD1", "Disc 1 of 4",
+            # "Part 1") are clearly disc/part children of a multi_parent book, not
+            # standalone series titles.
             if c.is_dir() and not c._dirs and len(c.files) == 1:
+                if c.i.this_and_siblings.have_disc_nums or c.i.this_and_siblings.have_part_nums:
+                    return False
                 return True
             return False
 

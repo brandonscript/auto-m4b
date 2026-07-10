@@ -26,7 +26,7 @@ class test_series:
         app(max_loops=1)
         assert testutils.assert_processed_output(
             capfd,
-            *[b.path for b in books if not b.tree.has_structure("series_parent")],
+            *[b.path for b in books if b.tree.is_book_root],
             loops=[testutils.check_output(converted_eq=22, already_converted_eq=0)],
         )
 

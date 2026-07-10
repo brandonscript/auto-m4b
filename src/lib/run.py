@@ -759,6 +759,11 @@ def cleanup_series_dir(parent: InboxItem | None):
                     overwrite_mode="skip-silent",
                 )
 
+                if parent_book.inbox_dir.exists():
+                    # Cross-partition: fell back to copy, leaving source intact.
+                    # Remove it now so the series folder isn't reprocessed.
+                    rm_dir(parent_book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
+
             elif cfg.ON_COMPLETE == "delete":
                 can_del = is_ok_to_delete(parent_book.inbox_dir)
                 if can_del or cfg.BACKUP:
@@ -796,6 +801,11 @@ def archive_inbox_book(book: Audiobook):
                 book.archive_dir,
                 overwrite_mode="overwrite-silent",
             )
+
+            if book.inbox_dir.exists():
+                # Cross-partition: mv_dir_contents fell back to copy, leaving source
+                # intact. Remove it now so the book isn't reprocessed on the next loop.
+                rm_dir(book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
 
             if book.inbox_dir.exists():
                 print_warning(
@@ -1018,4 +1028,5 @@ def process_inbox():
     clean_dirs([cfg.merge_dir, cfg.build_dir, cfg.trash_dir])
     inbox.done()
     inbox.prune_gone()
+    return b
     trim_print_log()
