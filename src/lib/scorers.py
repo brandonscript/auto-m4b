@@ -830,6 +830,21 @@ class MetadataProps:
 
         self.title_c = strip_disc_number(strip_part_number(self.title_c))
 
+        # When title_c is a digit-truncated GCS prefix of title1, use title1 instead.
+        # This happens when two files share a base title but differ only in trailing
+        # track-number notation (e.g. "...1993 001-033" vs "...1993 034-066"), causing
+        # find_greatest_common_string to stop at the first diverging digit (e.g. "...0").
+        # Preferring title1 lets the subsequent author-prefix stripping produce a complete
+        # book title rather than a nonsensical truncated fragment.
+        if (
+            self.title_c
+            and self.title1
+            and self.title_c != self.title1
+            and self.title1.startswith(self.title_c)
+            and self.title_c[-1].isdigit()
+        ):
+            self.title_c = self.title1
+
         # Title
         self._t1_numbers = ""
         self._t2_numbers = ""

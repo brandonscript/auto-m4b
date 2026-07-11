@@ -686,6 +686,20 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     book.narrator = id3_score.determine_narrator(fallback=book.fs_narrator)
     book.albumartist = id3_score.determine_albumartist(fallback=book.fs_author)
 
+    # Strip "Author - " prefix from the title when the title tag was set to the full
+    # filesystem name (e.g. "Jeffery Deaver - The Cold Moon 2006" → "The Cold Moon 2006").
+    # Many rippers embed the folder/filename verbatim as the title tag.  Only strip when
+    # the author appears at the very start followed by a dash separator so we don't
+    # accidentally truncate legitimate subtitles like "Cat's Cradle - A Novel".
+    if book.title and book.artist:
+        _author_prefix = re.compile(r"^" + re.escape(book.artist) + r"\s*[-–—]\s*", re.I)
+        if _m := _author_prefix.match(book.title):
+            _remainder = book.title[_m.end():].strip()
+            if _remainder:
+                book.title = _remainder
+                book.album = book.title
+                book.sortalbum = strip_leading_articles(book.title)
+
     t4 = time.time()
 
     li(f"Title: {book.title}")
