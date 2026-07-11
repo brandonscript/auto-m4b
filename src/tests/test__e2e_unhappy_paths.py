@@ -352,7 +352,8 @@ class test_unhappy_paths:
                 testutils.check_output(found_books_eq=2, converted_eq=2),
             ],
         )
-        assert testutils.assert_header_count(out, expected_eq=2)
+        # Banner prints only once (on the very first loop); subsequent loops run silently.
+        assert testutils.assert_header_count(out, expected_eq=1)
 
     ORDER += 1
 
@@ -646,6 +647,59 @@ class test_unhappy_paths:
         out = testutils.get_stdout(capfd)
         assert not cfg.FATAL_FILE.exists(), "App should not have crashed fatally"
         assert en.BOOK_INBOX_MOVED_BEFORE_PROCESSING in out
+
+    ORDER += 1
+
+    @pytest.mark.order(ORDER)
+    def test_failed_book_moved_to_failed_dir_without_crash(
+        self,
+        tiny__flat_mp3: Audiobook,
+        capfd: CaptureFixture[str],
+    ):
+        """Regression: when a book fails during ffmpeg conversion and FAILED_FOLDER is
+        configured, fail_book() moves inbox_dir to failed/.  log_global_results() was
+        previously called *after* fail_book(), so it tried to stat book.num_files('inbox')
+        etc. on the now-missing directory → FileNotFoundError → fatal crash.
+
+        Fix: call log_global_results() *before* fail_book() in convert_book()."""
+        import os
+        from src.lib.config import cfg
+
+        failed_dir = TEST_DIRS.working.parent / "test_failed_dir"
+        failed_dir.mkdir(parents=True, exist_ok=True)
+
+        orig_on_complete = cfg.ON_COMPLETE
+
+        # Use env var so cfg.startup() picks it up when it clears cached_property values.
+        os.environ["FAILED_FOLDER"] = str(failed_dir)
+        cfg.ON_COMPLETE = "archive"
+
+        try:
+            with patch(
+                "src.lib.run.convert_book_native",
+                side_effect=Exception("Simulated ffmpeg failure"),
+            ):
+                testutils.backdate_inbox_files()
+                app(max_loops=1)
+
+            out = testutils.get_stdout(capfd)
+
+            # Book must be in failed dir, not inbox
+            assert not tiny__flat_mp3.inbox_dir.exists(), (
+                "Inbox dir should have been moved to failed/"
+            )
+            book_in_failed = failed_dir / tiny__flat_mp3.key
+            assert book_in_failed.exists(), (
+                f"Book should be in failed_dir at {book_in_failed}"
+            )
+
+            # No fatal crash
+            assert not cfg.FATAL_FILE.exists(), "App should not have crashed fatally"
+        finally:
+            cfg.ON_COMPLETE = orig_on_complete
+            os.environ.pop("FAILED_FOLDER", None)
+            cfg.__dict__.pop("failed_dir", None)  # force re-read from env on next access
+            shutil.rmtree(failed_dir, ignore_errors=True)
 
     ORDER += 1
 

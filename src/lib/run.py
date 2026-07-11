@@ -625,16 +625,19 @@ def convert_book(book: Audiobook):
         nl()
         print_error(f"Native converter error: {err_msg}")
         smart_print(f"See log file in {tint_light_grey(book.inbox_dir)} for details\n")
-        fail_book(book, reason=err_msg)
+        # Log before moving: log_global_results accesses book.num_files/size/duration
+        # for the inbox dir. fail_book() may move that dir to FAILED_FOLDER, making
+        # the inbox dir disappear and causing a FileNotFoundError in log_global_results.
         log_global_results(book, "FAILED", 0)
+        fail_book(book, reason=err_msg)
         return False
 
     if not book.build_file.exists():
         err_msg = f"Native converter failed to produce output .m4b for {book}"
         book.write_log(err_msg)
         print_error(f"Error: {err_msg}")
-        fail_book(book, reason=err_msg)
         log_global_results(book, "FAILED", 0)
+        fail_book(book, reason=err_msg)
         return False
 
     verify_and_update_id3_tags(book, in_dir="build")
