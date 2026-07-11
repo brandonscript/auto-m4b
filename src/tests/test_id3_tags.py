@@ -555,6 +555,82 @@ def test_parse_id3_narrator(
     assert book.narrator == expected_narrator
 
 
+def test_title_strips_author_prefix_from_filename_style_tag(
+    book_with_filename_as_title_tag: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """When a title tag is set to the full filesystem name (author + dash + title),
+    the scorer must strip the author prefix so the displayed title is clean.
+
+    Regression: rippers like mp3tag embed the folder name verbatim as the title
+    tag (e.g. "Jeffery Deaver - Pellham Series 02 Bloody River Blues 1993 001-033").
+    Two files in the same folder differ only in the trailing track range, so GCS
+    produces a truncated common prefix ending with a bare digit ("...1993 0").
+    The fix in TagScorer recovers title1 from the truncated GCS, and the
+    post-processing step in extract_metadata strips the author prefix.
+    """
+    book = book_with_filename_as_title_tag
+    author = "Jeffery Deaver"
+
+    # Set title tags to the full filename — mimics what many rippers do.
+    file1_title = f"{author} - Pellham Series 02 Bloody River Blues 1993 001-033"
+    file2_title = f"{author} - Pellham Series 02 Bloody River Blues 1993 034-066"
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": file1_title, "album": "", "artist": author, "albumartist": author}),
+        (book.sample_audio2, {"title": file2_title, "album": "", "artist": author, "albumartist": author}),
+    )
+
+    book.extract_path_info()
+    book.extract_metadata()
+
+    # The GCS-truncated version ends with a bare "0" (from "1993 001" vs "1993 034").
+    # After the fix, title_c is replaced with title1 so the full track suffix is present.
+    assert book.title and not book.title.rstrip().endswith("0"), (
+        f"Title must not end with truncated digit '0'; got '{book.title}'"
+    )
+    # The author prefix should have been stripped.
+    assert not book.title.startswith(author), (
+        f"Title must not start with the author name '{author}'; got '{book.title}'"
+    )
+    # The real book title should be present.
+    assert "Bloody River Blues" in (book.title or ""), (
+        f"Expected 'Bloody River Blues' in title, got '{book.title}'"
+    )
+    # Author should still be correct.
+    assert book.author == author, f"Expected author '{author}', got '{book.author}'"
+
+
+def test_title_strips_author_prefix_single_file(
+    book_with_partno_track_titles: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """Single-file book where the title tag equals 'Author - Book Title (Year)'.
+
+    The author prefix and year suffix should be stripped so the final title is
+    just the book title.  This covers the Lincoln Rhyme / Cold Moon scenario.
+    """
+    book = book_with_partno_track_titles
+    author = "Jeffery Deaver"
+    full_title = "Jeffery Deaver - Lincoln Rhyme Series 07 The Cold Moon 2006"
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": full_title, "album": "", "artist": author, "albumartist": author}),
+        (book.sample_audio2, {"title": full_title, "album": "", "artist": author, "albumartist": author}),
+    )
+
+    book.extract_path_info()
+    book.extract_metadata()
+
+    assert not book.title.startswith(author), (
+        f"Author prefix must be stripped from title; got '{book.title}'"
+    )
+    assert "The Cold Moon" in (book.title or ""), (
+        f"Expected 'The Cold Moon' in title, got '{book.title}'"
+    )
+    assert book.author == author, f"Expected author '{author}', got '{book.author}'"
+
+
 @pytest.mark.skip(
     reason=(
         "Music-convention tags (artist=narrator, composer=author, no albumartist) cannot be "
