@@ -675,7 +675,10 @@ class testutils:
         if not (did_process_all := all(exact_matches)):
             fuzzy_matches = [process.extractOne(key, processed) for key in book_keys]
             did_process_all = all([m for m in fuzzy_matches if m and m[1] > 85])
-        ok = did_process_all and len(processed) == len(book_keys)
+        # When no expected paths are provided, skip the exact-count check here
+        # (the caller relies solely on loops=[check_output(converted_eq=N)] for
+        # the count assertion).  When paths ARE provided they must match exactly.
+        ok = did_process_all and (not book_keys or len(processed) == len(book_keys))
         books_list = f"\n{listify(book_keys)}" if book_keys else ""
         processed_list = f"\n{listify(processed)}" if processed else ""
         outs = out.split("CATS")[:-1] if "CATS" in out else [out]
