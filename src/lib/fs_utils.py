@@ -122,7 +122,9 @@ def find_files_in_dir(  # type: ignore
             if all(
                 [
                     f.is_file(),
-                    not f.name.startswith("."),
+                    # Exclude hidden files AND files inside hidden directories (e.g.
+                    # .AppleDouble/foo.mp3 — the file name is not hidden but its parent is).
+                    not any(part.startswith(".") for part in f.relative_to(d).parts),
                     f.name not in ignore_files,
                     not only_file_exts or f.suffix in only_file_exts,
                 ]
@@ -951,7 +953,10 @@ def is_audio_ext(ext: str) -> bool:
 def only_audio_files(path_or_paths: Path | Iterable[Path] | Iterable[str]):
     # make iterable if not already
     paths = [path_or_paths] if isinstance(path_or_paths, (str, Path)) else path_or_paths
-    return [p for p in map(Path, paths) if is_audio_file(p)]
+    return [
+        p for p in map(Path, paths)
+        if is_audio_file(p) and not any(part.startswith(".") for part in p.parts)
+    ]
 
 
 def find_recently_modified_files_and_dirs(
