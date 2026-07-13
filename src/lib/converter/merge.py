@@ -88,7 +88,7 @@ def _convert_file_to_mp4(
             "-acodec",
             codec,
             "-b:a",
-            f"{bitrate}k",
+            f"{bitrate // 1000}k",
             "-ar",
             str(samplerate),
             # No faststart for intermediate temp files – faststart requires
