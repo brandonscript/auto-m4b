@@ -838,13 +838,14 @@ def test_ol_first_extraction_album_is_author(
     ol_result.author_score = MagicMock(return_value=0.95)
 
     # Simulate OL-first returning a confident match: title and author resolved.
-    def _fake_ol(b, t1, t2) -> bool:
+    # The function now returns the OpenLibraryTitle object (or None on failure).
+    def _fake_ol(b, t1, t2):
         b.title = book_title
         b.album = book_title
         b.sortalbum = book_title
         b.artist = author
         b.albumartist = author
-        return True
+        return ol_result  # truthy → ol_resolved = True
 
     with patch("src.lib.id3_utils._ol_early_extraction", side_effect=_fake_ol):
         book.extract_metadata()
