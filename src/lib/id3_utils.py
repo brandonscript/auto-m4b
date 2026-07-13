@@ -277,7 +277,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     ol_author, author_prop = next(
         (
             c
-            for c in sorted(ol_author_candidates, key=lambda x: x[0].score(fallback=999) if x[0] else 0.0)
+            for c in sorted(ol_author_candidates, key=lambda x: x[0].score(fallback=0.0) if x[0] else 0.0, reverse=True)
             if c[0] and c[0].has_match
         ),
         (None, None),
@@ -296,7 +296,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         nonlocal title_needs_updating, new_tags
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
         if bool(ol_title):
-            if ol_title.has_match and ol_title.score(fallback=999) < 0.9:
+            if ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
                 new_title = _strip_ol_edition_suffix(NotNone(ol_title).title)
                 # OL stores many titles in sentence case (e.g. "The assassin king").
                 # Normalise: if OL title and book.title are the same words (ignoring case),
@@ -328,7 +328,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
         if bool(ol_title):
             if ol_title.has_match and (
-                ol_title.author_score(fallback=999) < 0.9 or ol_title.author_and_narrator_swapped
+                ol_title.author_score(fallback=0.0) >= 0.5 or ol_title.author_and_narrator_swapped
             ):
                 new_author = NotNone(ol_title).author  # will return correct author or narrator if swapped
                 # Never overwrite a valid author with an empty string — OL may
@@ -345,7 +345,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
                     updates.append(lambda: _print_needs_updating(prop, tag_value, new_narrator))
                     new_tags["composer"] = new_narrator
         elif bool(ol_author):
-            if ol_author.has_match and (ol_author.score(fallback=999) < 0.9 or author_prop == "narrator"):
+            if ol_author.has_match and (ol_author.score(fallback=0.0) >= 0.5 or author_prop == "narrator"):
                 if author_prop == "author":
                     author_needs_updating = True
                     new_author = NotNone(ol_author).name
@@ -719,7 +719,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
             author_hints.append(cleaned)
 
     best_ol: "OpenLibraryTitle | None" = None
-    best_score = 1.0
+    best_score = 0.0
 
     for title_cand in title_cands:
         # Try with each author hint, then without
@@ -727,19 +727,19 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
             # Use module-level open_library_lookup_title so tests can patch it
             ol = open_library_lookup_title(title_cand, author=author_hint, method="similarity")
             if ol and ol.has_match:
-                score = ol.score(fallback=1.0)
-                if score < best_score:
+                score = ol.score(fallback=0.0)
+                if score > best_score:
                     best_score = score
                     best_ol = ol
-            if best_score < 0.2:
+            if best_score >= 0.9:
                 break
-        if best_score < 0.2:
+        if best_score >= 0.9:
             break
 
     # Only trust OL when both title and author are resolved — a partial result
     # (title only) would cause us to skip heuristic author detection and leave
     # book.artist empty.
-    if best_ol is None or best_score >= 0.5 or not best_ol.title or not best_ol.author:
+    if best_ol is None or best_score < 0.5 or not best_ol.title or not best_ol.author:
         return None
 
     book.title = _strip_ol_edition_suffix(best_ol.title)

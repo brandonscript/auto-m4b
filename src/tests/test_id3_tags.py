@@ -721,7 +721,7 @@ def test_ol_sentence_case_does_not_downgrade_title(
     mock_ol_result = MagicMock()
     mock_ol_result.__bool__ = lambda self: True
     mock_ol_result.has_match = True
-    mock_ol_result.score = MagicMock(return_value=0.5)  # < 0.9 → triggers update
+    mock_ol_result.score = MagicMock(return_value=0.8)  # >= 0.5 → triggers update
     mock_ol_result.title = ol_sentence_case
     mock_ol_result.author_and_narrator_swapped = False
     mock_ol_result.author_score = MagicMock(return_value=0.95)
