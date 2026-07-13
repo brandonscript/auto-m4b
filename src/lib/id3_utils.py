@@ -679,23 +679,24 @@ def _strip_ol_edition_suffix(title: str) -> str:
     return _OL_EDITION_SUFFIX.sub("", title).strip()
 
 
-def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> bool:
+def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibraryTitle | None":
     """Try Open Library *before* heuristic scoring.
 
     Strategy:
     1. Build title candidates from ID3 title, album, sortalbum, then fs_title.
     2. Build author hints from albumartist, artist (stripped of narrator
        prefixes), composer, then fs_author.
-    3. Try each title candidate with OL (up to 2 author hints per candidate).
-    4. On a confident match (score < 0.5) set book.title, book.artist, and
-       book.albumartist from OL; leave narrator determination to the caller.
+    3. Try each title candidate with OL (up to 3 author hints per candidate).
+    4. On a confident match (score < 0.5) with both title + author resolved,
+       set book.title / book.artist / book.albumartist from OL.
 
-    Returns True when OL gave us a confident title + author.
+    Returns the winning OpenLibraryTitle on success, None otherwise.
     """
     from src.lib.config import cfg
+    from src.lib.ol_lookup import OpenLibraryTitle
 
     if not cfg.OPEN_LIBRARY_USER_AGENT:
-        return False
+        return None
 
     def _clean(v: str) -> str:
         return _READ_BY_PATTERN.sub("", (v or "").strip()).strip()
@@ -708,7 +709,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> bool:
             title_cands.append(cleaned)
 
     if not title_cands:
-        return False
+        return None
 
     # Author hints: albumartist first (most reliable), then artist, composer, fs
     author_hints: list[str] = []
@@ -717,7 +718,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> bool:
         if cleaned and cleaned not in author_hints:
             author_hints.append(cleaned)
 
-    best_ol = None
+    best_ol: "OpenLibraryTitle | None" = None
     best_score = 1.0
 
     for title_cand in title_cands:
@@ -739,7 +740,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> bool:
     # (title only) would cause us to skip heuristic author detection and leave
     # book.artist empty.
     if best_ol is None or best_score >= 0.5 or not best_ol.title or not best_ol.author:
-        return False
+        return None
 
     book.title = _strip_ol_edition_suffix(best_ol.title)
     book.album = book.title
@@ -747,7 +748,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> bool:
     book.artist = best_ol.author
     book.albumartist = best_ol.author
 
-    return True
+    return best_ol
 
 
 def _narrator_from_remaining_tags(book: "Audiobook") -> str:
@@ -811,7 +812,8 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # OL knows the canonical title/author, so a confident match avoids
     # misassigning fields (e.g. album="Laurie R. King", title="The God of
     # the Hive" → OL confirms title and author rather than guessing).
-    ol_resolved = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
+    ol_match = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
+    ol_resolved = ol_match is not None
 
     id3_score = MetadataScore(book, sample_audio2_tags)  # type: ignore
 
@@ -871,7 +873,9 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             book.id3_comment = f"Read by {book.narrator} // {book.id3_comment}"
         book.composer = book.narrator
 
-    book.date = id3_score.determine_date(book.fs_year)
+    # Use OL first-publish year when available; fall back to ID3 / filesystem.
+    ol_year = ol_match.date if ol_match else ""
+    book.date = ol_year or id3_score.determine_date(book.fs_year)
     if book.date:
         li(f"Date: {book.date}")
     # extract 4 digits from date
@@ -882,6 +886,22 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     li(f"Duration: {book.duration('inbox', 'human')}")
     if not book.has_id3_cover:
         li(f"No cover art")
+
+    # ── Open Library match summary ─────────────────────────────────────────────
+    if console:
+        from src.lib.config import cfg
+        if cfg.OPEN_LIBRARY_USER_AGENT:
+            if ol_match:
+                ol_details = [f"Title: {ol_match.title}", f"Author: {ol_match.author}"]
+                if ol_match.narrator:
+                    ol_details.append(f"Narrator: {ol_match.narrator}")
+                if ol_year:
+                    ol_details.append(f"First published: {ol_year}")
+                smart_print("Matched book on openlibrary.org:")
+                for detail in ol_details:
+                    li(detail)
+            else:
+                smart_print("Could not find a good match on openlibrary.org")
 
     t5 = time.time()
 
