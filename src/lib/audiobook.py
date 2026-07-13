@@ -247,7 +247,6 @@ class Audiobook(BaseModel):
     @property
     def converted_file(self) -> Path:
         from src.lib.config import cfg
-        from src.lib.fs_utils import find_first_audio_file
 
         def _build_filename():
             b = Path(self.basename)
@@ -256,25 +255,26 @@ class Audiobook(BaseModel):
             return self.converted_dir / filename
 
         def _find_m4b_matching_basename():
+            # Only search the immediate directory (non-recursive) to avoid
+            # matching sibling books in an author-level folder.  For example,
+            # if converted_dir is "converted/Rollins, James/" and other books
+            # live in subdirs, rglob would return those as false positives.
             first_found = None
-            for f in self.converted_dir.rglob("*.m4b"):
+            for f in self.converted_dir.glob("*.m4b"):
                 if not first_found:
                     first_found = f
                 if self.basename in f.stem or f.stem in self.basename:
                     return f
-            # If no basename match but a file exists, return it (handles renamed outputs)
-            return first_found or _build_filename()
+            # If no basename match but exactly one file exists, return it
+            # (handles renamed outputs where OL changed the title).
+            return first_found
 
         if self.converted_dir == cfg.converted_dir:
-            if found := _find_m4b_matching_basename():
-                return found
-            return _build_filename()
-        try:
-            if found := _find_m4b_matching_basename():
-                return found
-            return find_first_audio_file(self.converted_dir, ext="m4b")
-        except FileNotFoundError:
-            return _build_filename()
+            return _find_m4b_matching_basename() or _build_filename()
+        # For all other cases: prefer a matching file in the immediate
+        # converted_dir; fall back to the expected built filename (which
+        # may not exist yet, triggering normal conversion flow).
+        return _find_m4b_matching_basename() or _build_filename()
 
     @property
     def sample_audio1(self):
