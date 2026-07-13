@@ -675,3 +675,105 @@ def test_music_convention_tags_require_ol_for_swap_detection(
     # After OL swap correction the author should be Rowling, not Fry.
     assert book.author == "J. K. Rowling", f"Expected J. K. Rowling as author, got '{book.author}'"
     assert book.narrator == "Stephen Fry", f"Expected Stephen Fry as narrator, got '{book.narrator}'"
+
+
+def test_ol_sentence_case_does_not_downgrade_title(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """When OL returns the title in sentence case but the existing tag is already
+    properly title-cased, _check_title must keep the existing casing.
+
+    Regression: 'The Assassin King' (correct) was being replaced by
+    'The assassin king' (sentence case from the OL database).
+    """
+    import shutil
+    from unittest.mock import MagicMock, PropertyMock, patch
+
+    from src.lib.id3_utils import verify_and_update_id3_tags
+
+    book = book_in_author_named_folder
+    title = "The Assassin King"
+    author = "Elizabeth Haydon"
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": title, "album": title, "artist": author, "albumartist": author}),
+        (book.sample_audio2, {"title": title, "album": title, "artist": author, "albumartist": author}),
+    )
+
+    book.extract_path_info()
+    book.extract_metadata()
+
+    # Place a tagged copy in the build dir as an mp3 and patch build_file to
+    # return it — verify_and_update_id3_tags only needs a readable audio file,
+    # and mutagen can write ID3 tags to mp3 but not to a fake .m4b stub.
+    book.build_dir.mkdir(parents=True, exist_ok=True)
+    build_mp3 = book.build_dir / f"{title}.mp3"
+    shutil.copy(book.sample_audio1, build_mp3)
+    write_id3_tags_mutagen(build_mp3, {"title": title, "album": title, "artist": author, "albumartist": author})
+
+    # Simulate OL returning the title in sentence case (common in OL database)
+    ol_sentence_case = title.lower().capitalize()  # "The assassin king"
+    mock_ol_result = MagicMock()
+    mock_ol_result.__bool__ = lambda self: True
+    mock_ol_result.has_match = True
+    mock_ol_result.score = MagicMock(return_value=0.5)  # < 0.9 → triggers update
+    mock_ol_result.title = ol_sentence_case
+    mock_ol_result.author_and_narrator_swapped = False
+    mock_ol_result.author_score = MagicMock(return_value=0.95)
+    mock_ol_result.author = author
+    mock_ol_result.narrator = ""
+    mock_ol_result.date = ""
+
+    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=mock_ol_result):
+        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=MagicMock(__bool__=lambda self: False)):
+            with patch.object(type(book), "build_file", new_callable=PropertyMock, return_value=build_mp3):
+                verify_and_update_id3_tags(book, in_dir="build")
+
+    result_tags = extract_id3_tags(build_mp3)
+    assert result_tags.get("title") == title, (
+        f"OL sentence-case title '{ol_sentence_case}' must not overwrite properly-cased '{title}'; "
+        f"got '{result_tags.get('title')}'"
+    )
+
+
+def test_build_file_uses_title_not_folder_name(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """When the inbox folder is named after the author (e.g. 'Haydon, Elizabeth'),
+    build_file and final_desc_file must use the book title as the stem, not the
+    folder name.
+
+    Regression: the output m4b was named 'Haydon, Elizabeth.m4b' and the
+    description file 'Haydon, Elizabeth [~61 kbps @ 44.1 kHz].txt'.
+    """
+    book = book_in_author_named_folder
+    title = "The Assassin King"
+    author = "Elizabeth Haydon"
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": title, "album": title, "artist": author, "albumartist": author}),
+        (book.sample_audio2, {"title": title, "album": title, "artist": author, "albumartist": author}),
+    )
+
+    book.extract_path_info()
+    book.extract_metadata()
+    book.set_active_dir("build")
+
+    # build_file stem must be the title, not the folder name
+    assert book.build_file.stem == title, (
+        f"build_file stem must be '{title}' (title), not '{book.build_file.stem}' (folder name)"
+    )
+    assert "Haydon" not in book.build_file.stem, (
+        f"build_file must not use the author folder name; got '{book.build_file}'"
+    )
+
+    # final_desc_file stem must also use the title
+    book.set_active_dir("converted")
+    assert title in book.final_desc_file.name, (
+        f"final_desc_file must contain the book title '{title}'; got '{book.final_desc_file.name}'"
+    )
+    assert "Haydon, Elizabeth" not in book.final_desc_file.stem, (
+        f"final_desc_file must not use the author folder name; got '{book.final_desc_file.name}'"
+    )

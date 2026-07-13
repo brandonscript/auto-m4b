@@ -238,7 +238,11 @@ class Audiobook(BaseModel):
         try:
             return find_first_audio_file(self.build_dir, ext="m4b")
         except FileNotFoundError:
-            return self.build_dir / f"{self.basename}.m4b"
+            # Prefer title as filename so the output is "The Assassin King.m4b"
+            # rather than the inbox folder name (e.g. "Haydon, Elizabeth.m4b")
+            # when the folder is named after the author rather than the book.
+            stem = self.title or self.basename
+            return self.build_dir / f"{stem}.m4b"
 
     @property
     def converted_file(self) -> Path:
@@ -505,7 +509,8 @@ class Audiobook(BaseModel):
     @property
     def final_desc_file(self):
         quality = f"{self.bitrate_friendly} @ {self.samplerate_friendly}".replace("kb/s", "kbps")
-        return self.converted_dir / f"{self.basename} [{quality}].txt"
+        stem = self.title or self.basename
+        return self.converted_dir / f"{stem} [{quality}].txt"
 
     def write_description_txt(self, out_path: Path | None = None):
 
