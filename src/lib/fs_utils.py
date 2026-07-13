@@ -390,6 +390,9 @@ def _mv_or_cp_dir_contents(
 
         src_rel_path = src_file.relative_to(src_dir)
         if src_file.is_dir():
+            # Skip ignored directories entirely (e.g. .AppleDouble, __MACOSX).
+            if src_file.name in (ignore_files or cfg.IGNORE_FILES):
+                continue
             _mv_or_cp_dir_contents(
                 operation,
                 src_file,
