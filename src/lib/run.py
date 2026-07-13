@@ -204,12 +204,9 @@ def print_book_done(b: int, book: Audiobook, elapsedtime: int):
 
 def print_footer(b: int):
     divider("\n")
-    if b:
-        print_grey(en.DONE_CONVERTING)
-        if not cfg.NO_CATS:
-            print_dark_grey(CATS_ASCII)
-    else:
-        print_dark_grey(f"Waiting for books to be added to the inbox...")
+    print_grey(en.DONE_CONVERTING)
+    if not cfg.NO_CATS:
+        print_dark_grey(CATS_ASCII)
 
 
 # @cachetools.func.ttl_cache(maxsize=1, ttl=SCAN_TTL)
@@ -901,10 +898,10 @@ def process_book(b: int, item: InboxItem):
     if not backup_ok(book):
         return b
 
-    flatten_nested_book(book)
-
     if not ok_to_overwrite(book):
         return b
+
+    flatten_nested_book(book)
 
     inbox.set_ok(book)
 
@@ -1076,7 +1073,8 @@ def process_inbox():
     # Sweep 2: empty inbox subdirs not in _items — container-restart scenario.
     _sweep_empty_inbox_dirs()
 
-    print_footer(b)
+    if b:
+        print_footer(b)
     clean_dirs([cfg.merge_dir, cfg.build_dir, cfg.trash_dir])
     inbox.done()
     inbox.prune_gone()
