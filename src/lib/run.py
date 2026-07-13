@@ -556,16 +556,19 @@ def has_audio_files(book: Audiobook):
     return True
 
 
-def flatten_nested_book(book: Audiobook):
+def flatten_nested_book(book: Audiobook, series_rerouted: bool = False):
     from src.lib.fs_utils import flatten_files_in_dir
 
     is_nested = book.tree.has_structure("nested")
     is_messy = book.is_flatish
     if is_nested or is_messy:
-        smart_print(
-            en.BOOK_NEEDS_FLATTENING if is_nested else en.BOOK_IS_FLAT_BUT_MESSY,
-            end="",
-        )
+        if series_rerouted and is_nested:
+            msg = en.BOOK_SERIES_PART_FLATTEN
+        elif is_nested:
+            msg = en.BOOK_NEEDS_FLATTENING
+        else:
+            msg = en.BOOK_IS_FLAT_BUT_MESSY
+        smart_print(msg, end="")
         flatten_files_in_dir(book.inbox_dir)
         print_mint(" ✓\n")
         book.rescan()
@@ -899,7 +902,7 @@ def _find_series_subfolder(book: "Audiobook") -> "Path | None":
     return None
 
 
-def process_book(b: int, item: InboxItem):
+def process_book(b: int, item: InboxItem, _series_rerouted: bool = False):
     from src.lib.fs_utils import clean_dirs, rm_all_empty_dirs, rm_dirs, was_recently_modified
     from src.lib.term import print_notice
 
@@ -916,7 +919,7 @@ def process_book(b: int, item: InboxItem):
 
         sub_tree = BooksTree(series_subdir)
         sub_tree.scan()
-        return process_book(b, _InboxItem(sub_tree))
+        return process_book(b, _InboxItem(sub_tree), _series_rerouted=True)
 
     print_book_header(item)
 
@@ -973,7 +976,7 @@ def process_book(b: int, item: InboxItem):
     if not ok_to_overwrite(book):
         return b
 
-    flatten_nested_book(book)
+    flatten_nested_book(book, series_rerouted=_series_rerouted)
 
     inbox.set_ok(book)
 
