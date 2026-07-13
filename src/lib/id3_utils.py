@@ -672,8 +672,15 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             setattr(book, f"id3_{tag}", value)
 
     book.id3_year = get_year_from_date(book.id3_date)
-    # Note: only works for mp3 files, will always return None for m4b files
-    book.has_id3_cover = bool(extract_cover_art(book.sample_audio1))
+    # Detect embedded cover art via ffprobe stream inspection — much faster than
+    # extracting bytes with ffmpeg.  For m4b/m4a files the cover image is interleaved
+    # with audio data inside the mdat chunk, so ffmpeg must scan the entire file to
+    # extract it (O(filesize)), whereas ffprobe only reads the moov atom header.
+    _probe = ffprobe_file(book.sample_audio1) or {}
+    book.has_id3_cover = any(
+        s.get("codec_name") in ("mjpeg", "png") and s.get("disposition", {}).get("attached_pic")
+        for s in _probe.get("streams", [])
+    )
 
     id3_score = MetadataScore(book, sample_audio2_tags)  # type: ignore
 
