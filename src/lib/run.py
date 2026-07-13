@@ -1,3 +1,4 @@
+import re
 import shutil
 import sys
 import time
@@ -840,12 +841,83 @@ def archive_inbox_book(book: Audiobook):
         print_mint(" ✓")
 
 
+_SERIES_NUM_RE = re.compile(r"\s+0*\d+\s*[-–\s]")
+
+
+def _series_prefix(name: str) -> str:
+    """Return the series prefix from a folder name, or '' if none detected.
+
+    E.g. 'SIGMA Force 02 - Map of Bones (2006)' → 'SIGMA Force'
+         'Jake Ransom 02 - The Howling Sphinx'   → 'Jake Ransom'
+         'Map of Bones (2006)'                   → '' (no series number)
+    """
+    m = _SERIES_NUM_RE.search(name)
+    return name[: m.start()].strip() if m else ""
+
+
+def _find_series_subfolder(book: "Audiobook") -> "Path | None":
+    """If book.inbox_dir contains exactly one sub-directory whose name shares
+    a series prefix with an existing converted sibling, return that sub-dir.
+
+    This is used to reroute processing for cases like:
+      inbox/Rollins, James/SIGMA Force 02 - Map of Bones (2006)/…
+    where  converted/Rollins, James/SIGMA Force 01 - Sandstorm (2004)/
+    already exists — the book belongs in the series tree, not the author root.
+    """
+    if not book.tree.has_structure("nested"):
+        return None
+
+    try:
+        subdirs = [
+            d
+            for d in book.inbox_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        ]
+    except OSError:
+        return None
+
+    if len(subdirs) != 1:
+        return None
+
+    candidate = subdirs[0]
+    prefix = _series_prefix(candidate.name)
+    if not prefix:
+        return None
+
+    converted_parent = book.converted_dir
+    if not converted_parent.exists():
+        return None
+
+    for sibling in converted_parent.iterdir():
+        if (
+            sibling.is_dir()
+            and sibling.name != candidate.name
+            and sibling.name.lower().startswith(prefix.lower())
+        ):
+            return candidate
+
+    return None
+
+
 def process_book(b: int, item: InboxItem):
     from src.lib.fs_utils import clean_dirs, rm_all_empty_dirs, rm_dirs, was_recently_modified
     from src.lib.term import print_notice
 
     inbox = InboxState()
     book = item.to_audiobook()
+
+    # Before printing anything: if this is a single nested entry whose series
+    # is already present in the converted dir, silently reroute to the
+    # sub-folder so the output lands in the correct series location rather
+    # than the author root (e.g. Author/Series 02 - Title/ not Author/).
+    if series_subdir := _find_series_subfolder(book):
+        from src.lib.books_tree.books_tree import BooksTree
+        from src.lib.inbox_item import InboxItem as _InboxItem
+
+        sub_tree = BooksTree(series_subdir)
+        sub_tree.scan()
+        return process_book(b, _InboxItem(sub_tree))
+
     print_book_header(item)
 
     if not item.path.exists():
