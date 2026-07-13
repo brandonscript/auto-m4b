@@ -997,18 +997,21 @@ def process_inbox():
     def _sweep_empty_inbox_dirs():
         """Remove empty leftover dirs from the inbox (e.g. series parent dirs whose
         children were all archived in a previous run). Safe because:
-        - only removes dirs with no content at all
+        - first prunes any empty sub-directories recursively (shell folders left
+          behind after individual books were archived)
+        - only then removes the top-level dir if it is now also empty
         - skips dirs modified within WAIT_TIME seconds (actively receiving files)
         - skips dirs that are currently tracked as books in _items"""
-        from src.lib.fs_utils import rm_dir, was_recently_modified
+        from src.lib.fs_utils import rm_all_empty_dirs, rm_dir, was_recently_modified
 
         for subdir in sorted(cfg.inbox_dir.iterdir()):
-            if (
-                subdir.is_dir()
-                and not any(subdir.iterdir())
-                and not was_recently_modified(subdir)
-                and not inbox.get(subdir)
-            ):
+            if not subdir.is_dir() or was_recently_modified(subdir) or inbox.get(subdir):
+                continue
+            # First remove any nested empty dirs (e.g. individual book folders
+            # whose audio was already archived, leaving an empty shell).
+            rm_all_empty_dirs(subdir)
+            # Now remove the top-level dir if it is itself empty.
+            if not any(subdir.iterdir()):
                 print_debug(f"Removing empty leftover inbox dir: {subdir.name}")
                 rm_dir(subdir, ignore_errors=True)
 
