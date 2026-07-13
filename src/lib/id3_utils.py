@@ -891,6 +891,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     if console:
         from src.lib.config import cfg
         if cfg.OPEN_LIBRARY_USER_AGENT:
+            print()
             if ol_match:
                 ol_details = [f"Title: {ol_match.title}", f"Author: {ol_match.author}"]
                 if ol_match.narrator:
