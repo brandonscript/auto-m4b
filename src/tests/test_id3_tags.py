@@ -343,6 +343,9 @@ def test_parse_id3_date(
         (
             "house_on_the_cliff__flat_mp3",
             {
+                # Source album tag includes the LibriVox edition suffix ", Version 3".
+                # extract_metadata preserves this faithfully; verify_and_update_id3_tags
+                # strips it when writing the final output (see test_verify_tags_after_convert).
                 "title": "The House on the Cliff, Version 3",
                 "author": "Franklin W. Dixon",
                 "narrator": "",
@@ -372,11 +375,12 @@ def test_parse_tags_from_fixtures(
     [
         (
             "touch_of_frost__flat_mp3",
-            # Author stays as-is because the ID3 tags have "TouchofFrost" (camelCase
-            # filename artifact) as both title and author — NLP / OL does not reliably
-            # detect this as an invalid name, so the author is preserved rather than
-            # cleared.
-            {"title": "TouchofFrost", "author": "TouchofFrost", "narrator": ""},
+            # Source files have garbled camelCase tags (no artist/album, title =
+            # "TouchofFrostPart1...").  Without OL configured the heuristic cannot
+            # find an author, so author stays empty.  With OL, it would resolve to
+            # the real author ("Jennifer Estep").  Title is the common filename
+            # prefix "TouchofFrost".
+            {"title": "TouchofFrost", "author": "", "narrator": ""},
         ),
         (
             "count_of_monte_cristo__flat_mp3",
@@ -776,4 +780,81 @@ def test_build_file_uses_title_not_folder_name(
     )
     assert "Haydon, Elizabeth" not in book.final_desc_file.stem, (
         f"final_desc_file must not use the author folder name; got '{book.final_desc_file.name}'"
+    )
+
+
+def test_ol_first_extraction_album_is_author(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """When a ripper stores author-name in the album field and the real book
+    title in the title field, OL-first extraction must identify the correct
+    title and author without relying on heuristic scoring.
+
+    Regression scenario (Laurie R. King – 'The God of the Hive'):
+        title  = "The God of the Hive"   ← correct book title
+        artist = "read by Jenny Sterlin" ← narrator, not author
+        album  = "Laurie R. King"        ← author stored as album
+
+    Without OL-first, the heuristic scorer sees album="Laurie R. King" and
+    may select it as the title because artist/album scoring is ambiguous.
+    With OL-first, OL looks up "The God of the Hive" (title field) and
+    returns author="Laurie R. King", resolving the confusion immediately.
+    """
+    from unittest.mock import MagicMock, patch
+
+    book = book_in_author_named_folder
+    book_title = "The Assassin King"
+    author = "Elizabeth Haydon"
+    narrator = "Jenny Sterlin"
+
+    mock_id3_tags(
+        (book.sample_audio1, {
+            "title": book_title,
+            "artist": f"read by {narrator}",
+            "album": author,          # ← author stored as album (the bug pattern)
+            "albumartist": "",
+        }),
+        (book.sample_audio2, {
+            "title": book_title,
+            "artist": f"read by {narrator}",
+            "album": author,
+            "albumartist": "",
+        }),
+    )
+
+    book.extract_path_info()
+
+    # Mock OL: when queried with the book title it returns the correct author
+    ol_result = MagicMock()
+    ol_result.__bool__ = lambda self: True
+    ol_result.has_match = True
+    ol_result.score = MagicMock(return_value=0.15)  # very confident
+    ol_result.title = book_title
+    ol_result.author = author
+    ol_result.narrator = ""
+    ol_result.date = "2006"
+    ol_result.author_and_narrator_swapped = False
+    ol_result.author_score = MagicMock(return_value=0.95)
+
+    # Simulate OL-first returning a confident match: title and author resolved.
+    def _fake_ol(b, t1, t2) -> bool:
+        b.title = book_title
+        b.album = book_title
+        b.sortalbum = book_title
+        b.artist = author
+        b.albumartist = author
+        return True
+
+    with patch("src.lib.id3_utils._ol_early_extraction", side_effect=_fake_ol):
+        book.extract_metadata()
+
+    assert book.title == book_title, (
+        f"OL-first: title should be '{book_title}', got '{book.title}'"
+    )
+    assert book.artist == author, (
+        f"OL-first: author (artist) should be '{author}', got '{book.artist}'"
+    )
+    assert book.narrator == narrator, (
+        f"OL-first: narrator should be '{narrator}', got '{book.narrator}'"
     )
