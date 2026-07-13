@@ -267,6 +267,8 @@ class Config:
                 if not pid_exists and not InboxState().loop_counter:
                     print_mint("\nStarting auto-m4b...")
                     print_grey(self.info_str)
+                    if self.OPEN_LIBRARY_USER_AGENT:
+                        print_grey(f"openlibrary.org UserAgent: {self.OPEN_LIBRARY_USER_AGENT}")
                     if env_msg:
                         print_dark_grey(env_msg)
 
