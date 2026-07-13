@@ -726,6 +726,31 @@ def book_with_partno_track_titles(setup_teardown):
 
 
 @pytest.fixture(scope="function", autouse=False)
+def book_in_author_named_folder(setup_teardown):
+    """Inbox folder named after the author only (e.g. 'Haydon, Elizabeth'), containing
+    multi-part files whose names carry the real book title.
+
+    Reproduces two bugs:
+    1. build_file / final_desc_file used the folder name (author) as the stem instead
+       of the book title.
+    2. OL returned the title in sentence case and overwrote the properly-cased tag.
+    """
+    folder_name = "Haydon, Elizabeth"
+    book_title = "The Assassin King"
+    book = TEST_DIRS.inbox / folder_name
+    book.mkdir(parents=True, exist_ok=True)
+    for i in (1, 2):
+        with open(book / f"{book_title}, Part {i}.mp3", "wb") as f:
+            f.write(testutils.blank_audiobook_data)
+    testutils.set_match_filter(folder_name)
+    yield Audiobook(book)
+    testutils.set_match_filter(None)
+    shutil.rmtree(book, ignore_errors=True)
+    for d in ["build", "fix", "merge"]:
+        shutil.rmtree(TEST_DIRS.working / d / folder_name, ignore_errors=True)
+
+
+@pytest.fixture(scope="function", autouse=False)
 def book_with_filename_as_title_tag(setup_teardown):
     """Two m4b-style files whose title tags are set to the full filename.
 

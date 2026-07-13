@@ -297,8 +297,16 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
         if bool(ol_title):
             if ol_title.has_match and ol_title.score(fallback=999) < 0.9:
-                title_needs_updating = True
                 new_title = NotNone(ol_title).title
+                # OL stores many titles in sentence case (e.g. "The assassin king").
+                # Normalise: if OL title and book.title are the same words (ignoring case),
+                # prefer book.title's casing — it was derived from properly-cased source data.
+                if book.title and new_title.lower() == book.title.lower():
+                    new_title = strip_leading_the(book.title) if id3_tag == "sortalbum" else book.title
+                # Guard: if the tag already holds the correct value, skip the update.
+                if new_title.lower() == (tag_value or "").lower():
+                    return
+                title_needs_updating = True
                 updates.append(lambda: _print_needs_updating(orop, tag_value, new_title))
                 new_tags[id3_tag] = new_title
                 new_tags["sortalbum"] = strip_leading_the(new_title)
