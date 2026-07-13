@@ -206,11 +206,10 @@ def print_footer(b: int):
     divider("\n")
     if b:
         print_grey(en.DONE_CONVERTING)
+        if not cfg.NO_CATS:
+            print_dark_grey(CATS_ASCII)
     else:
         print_dark_grey(f"Waiting for books to be added to the inbox...")
-
-    if not cfg.NO_CATS:
-        print_dark_grey(CATS_ASCII)
 
 
 # @cachetools.func.ttl_cache(maxsize=1, ttl=SCAN_TTL)

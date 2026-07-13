@@ -17,7 +17,7 @@ from src.lib.hasher import Hasher
 from src.lib.inbox_item import get_item, get_key, InboxItem, InboxItemStatus
 from src.lib.misc import any_in
 from src.lib.strings import en
-from src.lib.term import print_debug, print_notice
+from src.lib.term import print_dark_grey, print_debug, print_notice
 
 SCAN_CALLS = 0
 
@@ -519,7 +519,7 @@ class InboxState(Hasher):
             # items match the filter — the activity itself is worth notifying about).
             if self.changed_after_waiting and not _banner_printed:
                 self.stale = True
-                print_banner(after=lambda: print_notice(f"{en.INBOX_RECENTLY_MODIFIED}\n"))
+                print_banner(after=lambda: print_dark_grey(f"{en.INBOX_RECENTLY_MODIFIED}\n"))
                 _banner_printed = True
 
             waited_count += 1
