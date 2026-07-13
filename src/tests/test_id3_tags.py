@@ -829,7 +829,7 @@ def test_ol_first_extraction_album_is_author(
     ol_result = MagicMock()
     ol_result.__bool__ = lambda self: True
     ol_result.has_match = True
-    ol_result.score = MagicMock(return_value=0.15)  # very confident
+    ol_result.score = MagicMock(return_value=0.95)  # very confident (high similarity)
     ol_result.title = book_title
     ol_result.author = author
     ol_result.narrator = ""
@@ -858,4 +858,147 @@ def test_ol_first_extraction_album_is_author(
     )
     assert book.narrator == narrator, (
         f"OL-first: narrator should be '{narrator}', got '{book.narrator}'"
+    )
+
+
+def _make_ol_result(score: float, title: str, author: str, date: str = "") -> "MagicMock":
+    """Helper to build a mock OpenLibraryTitle for _ol_early_extraction tests."""
+    from unittest.mock import MagicMock
+
+    r = MagicMock()
+    r.__bool__ = lambda self: True
+    r.has_match = True
+    r.score = MagicMock(return_value=score)
+    r.title = title
+    r.author = author
+    r.narrator = ""
+    r.date = date
+    return r
+
+
+def test_ol_early_extraction_accepts_high_similarity_score(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """_ol_early_extraction must accept a high-similarity OL result (score >= 0.5).
+
+    Regression: the scoring convention was inverted — a perfect fuzz.ratio match
+    returns score=1.0, but the old code checked `score < best_score` starting from
+    1.0 so 1.0 < 1.0 is False and best_ol was never set, causing all good matches
+    (including exact ones like 'Map of Bones') to be silently rejected.
+    """
+    from unittest.mock import PropertyMock, patch
+
+    from src.lib.id3_utils import _ol_early_extraction
+
+    book = book_in_author_named_folder
+    title = "Map of Bones"
+    author = "James Rollins"
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": title, "artist": author, "album": title, "albumartist": author}),
+        (book.sample_audio2, {"title": title, "artist": author, "album": title, "albumartist": author}),
+    )
+    book.extract_path_info()
+
+    ol_result = _make_ol_result(score=1.0, title=title, author=author, date="2005")
+
+    from src.lib.config import cfg as real_cfg
+    from src.lib.id3_tags import Id3Tags
+
+    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
+    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
+        with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
+            result = _ol_early_extraction(book, tag1, tag1)
+
+    assert result is not None, "High-similarity OL match (score=1.0) must be accepted"
+    assert book.title == title, f"Expected title '{title}', got '{book.title}'"
+    assert book.artist == author, f"Expected author '{author}', got '{book.artist}'"
+
+
+def test_ol_early_extraction_rejects_low_similarity_score(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """_ol_early_extraction must reject a low-similarity OL result (score < 0.5).
+
+    A poor fuzzy match should not override heuristic extraction.
+    """
+    from unittest.mock import PropertyMock, patch
+
+    from src.lib.id3_utils import _ol_early_extraction
+
+    book = book_in_author_named_folder
+    mock_id3_tags(
+        (book.sample_audio1, {"title": "Some Book", "artist": "Some Author", "album": "", "albumartist": ""}),
+        (book.sample_audio2, {"title": "Some Book", "artist": "Some Author", "album": "", "albumartist": ""}),
+    )
+    book.extract_path_info()
+
+    ol_result = _make_ol_result(score=0.3, title="Completely Different Book", author="Wrong Author")
+
+    from src.lib.config import cfg as real_cfg
+    from src.lib.id3_tags import Id3Tags
+
+    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
+    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
+        with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
+            result = _ol_early_extraction(book, tag1, tag1)
+
+    assert result is None, "Low-similarity OL match (score=0.3) must be rejected"
+
+
+def test_verify_tags_applies_ol_with_perfect_similarity_score(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """verify_and_update_id3_tags must apply OL data even when score=1.0 (perfect match).
+
+    Regression: the old threshold was `score < 0.9` (treating score as distance),
+    so a perfect similarity score of 1.0 was never < 0.9 and OL corrections were
+    silently skipped. The fixed threshold is `score >= 0.5`.
+    """
+    import shutil
+    from unittest.mock import MagicMock, PropertyMock, patch
+
+    from src.lib.id3_utils import verify_and_update_id3_tags
+
+    book = book_in_author_named_folder
+    title = "Map of Bones"
+    corrected_author = "James Rollins"
+    wrong_author = "James Rolins"  # typo in source tag
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": title, "album": title, "artist": wrong_author, "albumartist": wrong_author}),
+        (book.sample_audio2, {"title": title, "album": title, "artist": wrong_author, "albumartist": wrong_author}),
+    )
+    book.extract_path_info()
+    book.artist = wrong_author
+    book.albumartist = wrong_author
+    book.title = title
+
+    book.build_dir.mkdir(parents=True, exist_ok=True)
+    build_mp3 = book.build_dir / f"{title}.mp3"
+    shutil.copy(book.sample_audio1, build_mp3)
+    write_id3_tags_mutagen(build_mp3, {"title": title, "album": title, "artist": wrong_author, "albumartist": wrong_author})
+
+    ol_result = MagicMock()
+    ol_result.__bool__ = lambda self: True
+    ol_result.has_match = True
+    ol_result.score = MagicMock(return_value=1.0)  # perfect match — previously skipped
+    ol_result.title = title
+    ol_result.author = corrected_author
+    ol_result.narrator = ""
+    ol_result.date = "2005"
+    ol_result.author_score = MagicMock(return_value=0.9)
+    ol_result.author_and_narrator_swapped = False
+
+    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
+        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=MagicMock(__bool__=lambda self: False)):
+            with patch.object(type(book), "build_file", new_callable=PropertyMock, return_value=build_mp3):
+                verify_and_update_id3_tags(book, in_dir="build")
+
+    result_tags = extract_id3_tags(build_mp3)
+    assert result_tags.get("artist") == corrected_author, (
+        f"OL perfect-score correction must apply: expected '{corrected_author}', got '{result_tags.get('artist')}'"
     )
