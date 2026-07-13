@@ -287,8 +287,10 @@ def rm_dir(dir_path: Path, ignore_errors: bool = False, even_if_not_empty: bool 
 
 
 def rm_all_empty_dirs(dir_path: Path):
-    # Recursively remove all empty directories in the current directory, using ok_to_del
-    for current_dir in dir_path.glob("**"):
+    """Recursively remove all empty directories under dir_path (deepest first)."""
+    # Sort descending by path depth so children are removed before parents,
+    # allowing a now-empty parent to also be pruned in the same pass.
+    for current_dir in sorted(dir_path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         if current_dir.is_dir() and not any(current_dir.iterdir()) and is_ok_to_delete(current_dir):
             rm_dir(current_dir, ignore_errors=True)
 
