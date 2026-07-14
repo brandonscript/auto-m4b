@@ -88,7 +88,7 @@ def _convert_file_to_mp4(
             "-acodec",
             codec,
             "-b:a",
-            f"{bitrate}k",
+            f"{bitrate // 1000}k",
             "-ar",
             str(samplerate),
             # No faststart for intermediate temp files – faststart requires
@@ -340,25 +340,27 @@ def convert_book_native(book: "Audiobook") -> int:
     # Per-file conversion uses -vn which strips video/cover streams, so we must
     # explicitly re-embed cover art regardless of source format.
     cover: Optional[Path] = None
-    if book.has_id3_cover:
-        # Embedded cover in source audio → extract bytes and write to tmp dir
+
+    # Prefer a standalone cover.jpg in the merge dir — it was already copied there
+    # from the inbox and requires no ffmpeg extraction.
+    cover = book._merge_cover_art_file
+    if cover and not cover.is_file():
+        cover = None
+
+    if cover is None and book.has_id3_cover:
+        # No standalone cover file → extract embedded cover from the first source
+        # file in merge_dir.  Using src_files[0] (a known local copy) avoids the
+        # active-dir ambiguity of book.sample_audio1 at this point in the flow.
         from src.lib.id3_utils import extract_cover_art as _extract_cover
-        try:
-            cover_bytes = _extract_cover(book.sample_audio1, save_to_file=False)
-            if cover_bytes:
-                cover = tmp_dir / "cover.jpg"
-                cover.write_bytes(cover_bytes)
-        except Exception:
-            cover = None
-    if cover is None:
-        # No embedded cover → fall back to a standalone image file
-        cover = book._merge_cover_art_file or (
-            book.inbox_dir / book.cover_art_file.relative_to(book.inbox_dir)
-            if book.cover_art_file
-            else None
-        )
-        if cover and not cover.is_file():
-            cover = None
+        _src = src_files[0] if src_files else None
+        if _src:
+            try:
+                cover_bytes = _extract_cover(_src, save_to_file=False)
+                if cover_bytes:
+                    cover = tmp_dir / "cover.jpg"
+                    cover.write_bytes(cover_bytes)
+            except Exception:
+                cover = None
 
     # ── 9. Embed metadata + cover → build_file ────────────────────────────────
     _embed_metadata_and_cover(

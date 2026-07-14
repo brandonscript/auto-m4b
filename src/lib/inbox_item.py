@@ -327,6 +327,11 @@ class InboxItem:
         }
 
     def to_audiobook(self, active_dir: DirName = "inbox") -> Audiobook:
-        book = Audiobook(self.path)
+        # Pass the pre-scanned tree directly so Audiobook.__init__ skips the
+        # InboxState parent-climbing lookup.  When a rerouted series subfolder
+        # is wrapped in a fresh InboxItem, passing self.path would cause
+        # InboxState.get() to climb up to the author-level item and return
+        # the wrong key / converted_dir.
+        book = Audiobook(self.tree)
         book._active_dir = active_dir
         return book

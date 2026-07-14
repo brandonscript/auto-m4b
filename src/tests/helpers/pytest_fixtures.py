@@ -446,6 +446,19 @@ def tower_treasure__nested_mp3():
 
 
 @pytest.fixture(scope="function")
+def tower_treasure__author_dir_mp3():
+    """Book wrapped inside an author-name directory: inbox/Dixon, Franklin W./The Tower Treasure/…
+    The fixture contents are loaded into inbox/Dixon, Franklin W./ so the resulting
+    structure is: inbox/Dixon, Franklin W./The Tower Treasure/audio.mp3.
+    """
+    yield from load_test_fixture(
+        "tower_treasure__author_dir_mp3",
+        exclusive=True,
+        override_name="Dixon, Franklin W.",
+    )
+
+
+@pytest.fixture(scope="function")
 def hardy_boys__flat_mp3(request: pytest.FixtureRequest):
     yield from load_test_fixtures(
         "tower_treasure__flat_mp3",
@@ -716,6 +729,57 @@ def book_with_partno_track_titles(setup_teardown):
     book.mkdir(parents=True, exist_ok=True)
     for i in range(1, 5):
         with open(book / f"{i:02d} - Chapter {i}.mp3", "wb") as f:
+            f.write(testutils.blank_audiobook_data)
+    testutils.set_match_filter(name)
+    yield Audiobook(book)
+    testutils.set_match_filter(None)
+    shutil.rmtree(book, ignore_errors=True)
+    for d in ["build", "fix", "merge"]:
+        shutil.rmtree(TEST_DIRS.working / d / name, ignore_errors=True)
+
+
+@pytest.fixture(scope="function", autouse=False)
+def book_in_author_named_folder(setup_teardown):
+    """Inbox folder named after the author only (e.g. 'Haydon, Elizabeth'), containing
+    multi-part files whose names carry the real book title.
+
+    Reproduces two bugs:
+    1. build_file / final_desc_file used the folder name (author) as the stem instead
+       of the book title.
+    2. OL returned the title in sentence case and overwrote the properly-cased tag.
+    """
+    folder_name = "Haydon, Elizabeth"
+    book_title = "The Assassin King"
+    book = TEST_DIRS.inbox / folder_name
+    book.mkdir(parents=True, exist_ok=True)
+    for i in (1, 2):
+        with open(book / f"{book_title}, Part {i}.mp3", "wb") as f:
+            f.write(testutils.blank_audiobook_data)
+    testutils.set_match_filter(folder_name)
+    yield Audiobook(book)
+    testutils.set_match_filter(None)
+    shutil.rmtree(book, ignore_errors=True)
+    for d in ["build", "fix", "merge"]:
+        shutil.rmtree(TEST_DIRS.working / d / folder_name, ignore_errors=True)
+
+
+@pytest.fixture(scope="function", autouse=False)
+def book_with_filename_as_title_tag(setup_teardown):
+    """Two m4b-style files whose title tags are set to the full filename.
+
+    Mimics the common ripper behaviour of embedding the file name verbatim as
+    the ID3 title (e.g. "Author - Series 02 Book Title 1993 001-033").  When
+    two such files share the same prefix but differ in track-range suffix the
+    GCS would otherwise produce a truncated common prefix that ends with a
+    bare digit (e.g. "Author - Series 02 Book Title 1993 0").
+    """
+    author = "Jeffery Deaver"
+    name = f"{author} - Pellham Series 02 Bloody River Blues"
+    book = TEST_DIRS.inbox / name
+    book.mkdir(parents=True, exist_ok=True)
+    for suffix in ["001-033", "034-066"]:
+        fname = f"{name} 1993 {suffix}.mp3"
+        with open(book / fname, "wb") as f:
             f.write(testutils.blank_audiobook_data)
     testutils.set_match_filter(name)
     yield Audiobook(book)

@@ -122,7 +122,9 @@ def find_files_in_dir(  # type: ignore
             if all(
                 [
                     f.is_file(),
-                    not f.name.startswith("."),
+                    # Exclude hidden files AND files inside hidden directories (e.g.
+                    # .AppleDouble/foo.mp3 — the file name is not hidden but its parent is).
+                    not any(part.startswith(".") for part in f.relative_to(d).parts),
                     f.name not in ignore_files,
                     not only_file_exts or f.suffix in only_file_exts,
                 ]
@@ -285,8 +287,10 @@ def rm_dir(dir_path: Path, ignore_errors: bool = False, even_if_not_empty: bool 
 
 
 def rm_all_empty_dirs(dir_path: Path):
-    # Recursively remove all empty directories in the current directory, using ok_to_del
-    for current_dir in dir_path.glob("**"):
+    """Recursively remove all empty directories under dir_path (deepest first)."""
+    # Sort descending by path depth so children are removed before parents,
+    # allowing a now-empty parent to also be pruned in the same pass.
+    for current_dir in sorted(dir_path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         if current_dir.is_dir() and not any(current_dir.iterdir()) and is_ok_to_delete(current_dir):
             rm_dir(current_dir, ignore_errors=True)
 
@@ -390,6 +394,9 @@ def _mv_or_cp_dir_contents(
 
         src_rel_path = src_file.relative_to(src_dir)
         if src_file.is_dir():
+            # Skip ignored directories entirely (e.g. .AppleDouble, __MACOSX).
+            if src_file.name in (ignore_files or cfg.IGNORE_FILES):
+                continue
             _mv_or_cp_dir_contents(
                 operation,
                 src_file,
@@ -919,7 +926,18 @@ def filter_ignored(
 
     paths = [p for p in flatlist(paths) if p and isinstance(p, Path)]
 
-    return [p for p in paths if not any(fnmatch.filter([str(p.name)], ignore) for ignore in cfg.IGNORE_FILES)]
+    # Check every path component, not just the filename, so that files *inside*
+    # ignored directories (e.g. .AppleDouble/foo.mp3, __MACOSX/bar.mp3) are also
+    # excluded even though the file's own name is not in IGNORE_FILES.
+    return [
+        p
+        for p in paths
+        if not any(
+            fnmatch.filter([part], ignore)
+            for ignore in cfg.IGNORE_FILES
+            for part in p.parts
+        )
+    ]
 
 
 def is_audio_file(file: str | Path) -> bool:
@@ -937,7 +955,10 @@ def is_audio_ext(ext: str) -> bool:
 def only_audio_files(path_or_paths: Path | Iterable[Path] | Iterable[str]):
     # make iterable if not already
     paths = [path_or_paths] if isinstance(path_or_paths, (str, Path)) else path_or_paths
-    return [p for p in map(Path, paths) if is_audio_file(p)]
+    return [
+        p for p in map(Path, paths)
+        if is_audio_file(p) and not any(part.startswith(".") for part in p.parts)
+    ]
 
 
 def find_recently_modified_files_and_dirs(

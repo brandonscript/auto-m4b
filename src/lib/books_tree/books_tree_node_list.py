@@ -173,6 +173,10 @@ class TreeNodeList:
         return [a for a in (id3.album for id3 in self.id3_tags if id3) if a]
 
     @lazy
+    def id3_years(self):
+        return [y for y in (id3.year for id3 in self.id3_tags if id3) if y]
+
+    @lazy
     def id3_albumartists(self):
         return [aa for aa in (id3.albumartist for id3 in self.id3_tags if id3) if aa]
 

@@ -26,6 +26,7 @@ from src.lib.converter.chapters import (
 )
 from src.lib.converter.encoder import CODEC_AAC, CODEC_LIBFDK_AAC, detect_aac_codec
 from src.lib.converter.ffmetadata import build_ffmetadata, _escape
+from src.lib.converter.merge import _convert_file_to_mp4
 from src.lib.converter.naturalsort import natural_sort_files
 
 
@@ -324,6 +325,72 @@ class TestDetectAacCodec:
         assert mock_run.call_count == 1
 
 
+# ─── Bitrate command construction ─────────────────────────────────────────────
+
+
+class TestConvertFileBitrateArg:
+    """Verify that _convert_file_to_mp4 passes the bitrate to ffmpeg in kbps (Nk),
+    not in bps with an appended k (N000k).
+
+    Regression: get_bitrate_py returns bps (e.g. 64000 for a 64 kb/s file).
+    The old code did f'{bitrate}k', producing '-b:a 64000k' (64 Mbps).
+    The fix divides by 1000 first: f'{bitrate // 1000}k' → '-b:a 64k'.
+    """
+
+    def _run_and_capture_cmd(self, bitrate_bps: int, tmp_path: Path) -> list[str]:
+        """Call _convert_file_to_mp4 with a mock subprocess and return the ffmpeg args."""
+        src = tmp_path / "input.mp3"
+        src.touch()
+        dst = tmp_path / "output.mp4"
+
+        captured: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            captured.append(list(cmd))
+            result = subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+            return result
+
+        with patch("src.lib.converter.merge.subprocess.run", side_effect=fake_run):
+            _convert_file_to_mp4(
+                src, dst,
+                copy=False,
+                codec=CODEC_AAC,
+                bitrate=bitrate_bps,
+                samplerate=44100,
+            )
+
+        assert captured, "subprocess.run was never called"
+        return captured[0]
+
+    def test_bitrate_64kbps_source_produces_64k_flag(self, tmp_path):
+        """A 64 kb/s source (64000 bps from ffprobe) must produce '-b:a 64k'."""
+        cmd = self._run_and_capture_cmd(bitrate_bps=64000, tmp_path=tmp_path)
+        ba_idx = cmd.index("-b:a")
+        assert cmd[ba_idx + 1] == "64k", (
+            f"Expected '-b:a 64k', got '-b:a {cmd[ba_idx + 1]}'. "
+            "Regression: bps value must be divided by 1000 before appending 'k'."
+        )
+
+    def test_bitrate_128kbps_source_produces_128k_flag(self, tmp_path):
+        """A 128 kb/s source (128000 bps from ffprobe) must produce '-b:a 128k'."""
+        cmd = self._run_and_capture_cmd(bitrate_bps=128000, tmp_path=tmp_path)
+        ba_idx = cmd.index("-b:a")
+        assert cmd[ba_idx + 1] == "128k", (
+            f"Expected '-b:a 128k', got '-b:a {cmd[ba_idx + 1]}'."
+        )
+
+    def test_bitrate_flag_never_contains_raw_bps(self, tmp_path):
+        """The -b:a value must never be a raw bps integer (e.g. '64000k' or '64000')."""
+        for bps in [32000, 64000, 96000, 128000, 192000, 256000, 320000]:
+            cmd = self._run_and_capture_cmd(bitrate_bps=bps, tmp_path=tmp_path)
+            ba_idx = cmd.index("-b:a")
+            ba_val = cmd[ba_idx + 1]
+            kbps = bps // 1000
+            assert ba_val == f"{kbps}k", (
+                f"For {bps} bps input: expected '-b:a {kbps}k', got '-b:a {ba_val}'"
+            )
+
+
 # ─── Integration: chapter embedding via ffprobe ───────────────────────────────
 
 
@@ -373,3 +440,13 @@ class TestChapterEmbedding:
         # Duration tolerance: within 2 seconds of total input
         format_duration = float(probe["format"]["duration"])
         assert format_duration > 0, "Output duration should be positive"
+
+        # Bitrate sanity: output must not be wildly over-bitrated.
+        # The regression produced '-b:a 64000k' (64 Mbps) instead of '-b:a 64k'.
+        # Even if the encoder caps internally, the output bitrate should stay
+        # well below 1 Mbps for any normal audiobook source.
+        format_bitrate = int(probe["format"]["bit_rate"])
+        assert format_bitrate < 1_000_000, (
+            f"Output bitrate {format_bitrate} bps is unreasonably high (> 1 Mbps). "
+            "Regression: ffmpeg may be receiving bps as the 'k' bitrate argument."
+        )

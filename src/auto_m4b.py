@@ -118,8 +118,15 @@ def app(**kwargs):
                     observer_started = True
                 inbox.loop_counter += 1
                 with use_error_handler():
-                    run.process_inbox()
-                    WatchFolder.scan_and_copy()
+                    n = run.process_inbox()
+                    copied = WatchFolder.scan_and_copy()
+                    # After converting books or copying new ones from the watch
+                    # folder, immediately re-trigger the loop instead of waiting
+                    # a full SLEEP_TIME poll.  This drains any books that arrived
+                    # during a long conversion without relying on the PollingObserver
+                    # to notice the inbox change within its polling window.
+                    if n or copied:
+                        dirty.set()
         finally:
             if observer_started:
                 observer.stop()

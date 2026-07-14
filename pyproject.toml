@@ -107,7 +107,7 @@ skip_covered = false
 
 [tool.poetry]
 name = "auto-m4b"
-version = "0.2.0"
+version = "0.3.0"
 description = "Python-native audiobook converter — watches a folder and converts multi-file mp3/m4a books to chapterized m4b"
 authors = ["Brandon Shelley <brandon@brandonscript.com>"]
 license = "MIT"

@@ -267,6 +267,8 @@ class Config:
                 if not pid_exists and not InboxState().loop_counter:
                     print_mint("\nStarting auto-m4b...")
                     print_grey(self.info_str)
+                    if self.OPEN_LIBRARY_USER_AGENT:
+                        print_grey(f"openlibrary.org UserAgent: {self.OPEN_LIBRARY_USER_AGENT}")
                     if env_msg:
                         print_dark_grey(env_msg)
 
@@ -482,6 +484,14 @@ class Config:
     @cached_property
     def backup_dir(self):
         return self.load_path_env("BACKUP_FOLDER", allow_empty=False)
+
+    @cached_property
+    def failed_dir(self) -> Path | None:
+        """Optional directory to move books that fail conversion.
+        Set FAILED_FOLDER in the environment to enable. When set, any book that
+        encounters a fatal conversion error will be moved here (with its log file)
+        and removed from the inbox so it does not block the queue."""
+        return self.load_path_env("FAILED_FOLDER", allow_empty=True)
 
     @cached_property
     def watch_dir(self) -> Path | None:

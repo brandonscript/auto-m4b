@@ -107,16 +107,18 @@ def ffprobe_file(file: Path | None, *, options: dict[str, Any] | None = None, th
 
         # ignore_paths = ["mock_", "fails_", "not_an_audio_file"]
 
-        # Some mock files are not readable by ffprobe, so we return None
-        # if "pytest" in sys.modules and any([s in err_str for s in ignore_paths]) and "Invalid data" in err_str:
-        if "Invalid data" in err_str:
-            if "pytest" in sys.modules and not throw:
+        # Files that ffprobe cannot decode (corrupt, truncated, or macOS AppleDouble
+        # data-fork stubs that look like audio by extension but contain no valid frames).
+        # "Invalid data"    → ffprobe couldn't parse the container at all
+        # "Invalid argument" → file is readable but too short / seekable range exceeded
+        # Both cases are unrecoverable; return None silently rather than spamming logs.
+        _unreadable = any(marker in err_str for marker in ("Invalid data", "Invalid argument"))
+        if _unreadable:
+            if not throw:
                 return None
             split_err_str = [s for s in err_str.split("\\n") if len(s) > 3]
             err = f"ffprobe failed for {split_err_str[-1]}" if split_err_str else f"ffprobe failed for {file}"
-            if throw:
-                raise BadFileError(err) from e
-            return None
+            raise BadFileError(err) from e
 
         if "No such file or directory: 'ffprobe'" in err_str and FFPROBE_REPAIRS <= 3:
             fix_ffprobe()
