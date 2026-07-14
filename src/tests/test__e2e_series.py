@@ -242,3 +242,49 @@ class test_series:
         assert not series_parent.inbox_dir.exists(), (
             f"Empty series parent dir should have been removed on the next run: {series_parent.inbox_dir}"
         )
+
+    def test_book_in_author_dir_is_not_flattened(
+        self,
+        tower_treasure__author_dir_mp3: Audiobook,
+        capfd: pytest.CaptureFixture[str],
+    ):
+        """When a book lives inside an author-named folder (e.g.
+        inbox/Dixon, Franklin W./The Tower Treasure/audio.mp3), the audio must
+        NOT be flattened up to the author root.  The book should be processed
+        from the inner book directory and its converted output should land in a
+        dedicated sub-folder, not at the author root level.
+
+        Regression for: flatten_nested_book moving audio to the author dir when
+        the outer dir had a comma-separated "Last, First" name.
+        """
+        from src.lib.config import cfg
+
+        testutils.set_match_filter("^(Dixon)")
+        app(max_loops=1)
+
+        assert not cfg.FATAL_FILE.exists(), "App crashed fatally"
+
+        author_inbox_dir = TEST_DIRS.inbox / "Dixon, Franklin W."
+
+        # Audio must NOT have been flattened to the author root
+        mp3_at_author_root = [
+            f for f in author_inbox_dir.iterdir()
+            if f.is_file() and f.suffix == ".mp3"
+        ] if author_inbox_dir.exists() else []
+        assert not mp3_at_author_root, (
+            f"Bug: mp3 files were incorrectly flattened to the author dir: "
+            f"{[f.name for f in mp3_at_author_root]}"
+        )
+
+        # The converted output must be in a book-named sub-folder, not at the
+        # author root (i.e. converted/Dixon, Franklin W./The Tower Treasure/)
+        expected_book_dir = TEST_DIRS.converted / "Dixon, Franklin W." / "The Tower Treasure"
+        assert expected_book_dir.exists(), (
+            f"Expected converted output in book subfolder: {expected_book_dir}"
+        )
+
+        out = testutils.get_stdout(capfd)
+        # No flatten message should appear — the book folder was preserved
+        assert en.BOOK_NEEDS_FLATTENING not in out, (
+            "Flatten message should not appear when book is inside an author dir"
+        )

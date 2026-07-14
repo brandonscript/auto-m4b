@@ -446,6 +446,19 @@ def tower_treasure__nested_mp3():
 
 
 @pytest.fixture(scope="function")
+def tower_treasure__author_dir_mp3():
+    """Book wrapped inside an author-name directory: inbox/Dixon, Franklin W./The Tower Treasure/…
+    The fixture contents are loaded into inbox/Dixon, Franklin W./ so the resulting
+    structure is: inbox/Dixon, Franklin W./The Tower Treasure/audio.mp3.
+    """
+    yield from load_test_fixture(
+        "tower_treasure__author_dir_mp3",
+        exclusive=True,
+        override_name="Dixon, Franklin W.",
+    )
+
+
+@pytest.fixture(scope="function")
 def hardy_boys__flat_mp3(request: pytest.FixtureRequest):
     yield from load_test_fixtures(
         "tower_treasure__flat_mp3",
