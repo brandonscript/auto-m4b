@@ -858,6 +858,86 @@ def _series_prefix(name: str) -> str:
     return name[: m.start()].strip() if m else ""
 
 
+def _name_matches_author_tag(search_root: "Path", dir_name: str, threshold: float = 0.75) -> bool:
+    """Return True if dir_name fuzzy-matches the artist/author ID3 tag found on
+    the first audio file discovered under search_root (any depth).  Used as a
+    fallback when the directory name is not in "Last, First" comma format.
+    """
+    from difflib import SequenceMatcher
+
+    _AUDIO_EXTS = {".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".aac", ".wav"}
+    first_audio = next(
+        (f for f in search_root.rglob("*") if f.is_file() and f.suffix.lower() in _AUDIO_EXTS),
+        None,
+    )
+    if not first_audio:
+        return False
+    try:
+        import mutagen
+        tags = mutagen.File(first_audio, easy=True)
+        if not tags:
+            return False
+        author = (tags.get("artist") or tags.get("albumartist") or [""])[0]
+        if not author:
+            return False
+        ratio = SequenceMatcher(None, dir_name.lower(), author.lower()).ratio()
+        return ratio >= threshold
+    except Exception:
+        return False
+
+
+def _find_author_subfolder(book: "Audiobook") -> "Path | None":
+    """If book.inbox_dir sits directly under cfg.inbox_dir, looks like an
+    author name, and contains exactly one sub-directory with audio, return
+    that sub-directory.
+
+    This prevents flattening structures like:
+      inbox/Weir, Alison/A dangerous inheritance/audio.mp3
+    where the outer folder is an author dir, not a book title.  Without this
+    check the audio would be flattened up to the author root and the book
+    subfolder would be lost.
+
+    Author-name detection uses two heuristics (either is sufficient):
+      1. The directory name contains a comma  ("Weir, Alison" / "King, S.J.")
+      2. The directory name fuzzy-matches the artist ID3 tag on the first
+         audio file found inside it (handles "First Last" or slight typos).
+    """
+    from src.lib.config import cfg
+
+    if not book.tree.has_structure("nested"):
+        return None
+
+    # Must be a top-level inbox entry (direct child of inbox_dir)
+    if book.inbox_dir.parent != cfg.inbox_dir:
+        return None
+
+    dir_name = book.inbox_dir.name
+
+    # Heuristic 1: "Last, First" or "Last, First M." comma format
+    is_author = "," in dir_name
+    # Heuristic 2: fuzzy-match against the ID3 author tag (handles "First Last")
+    if not is_author:
+        is_author = _name_matches_author_tag(book.inbox_dir, dir_name)
+
+    if not is_author:
+        return None
+
+    try:
+        subdirs = [
+            d for d in book.inbox_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        ]
+    except OSError:
+        return None
+
+    # Only reroute when there is exactly one book subfolder; if there are
+    # multiple, the inbox scanner already picked them up as individual books.
+    if len(subdirs) != 1:
+        return None
+
+    return subdirs[0]
+
+
 def _find_series_subfolder(book: "Audiobook") -> "Path | None":
     """If book.inbox_dir contains exactly one sub-directory whose name shares
     a series prefix with an existing converted sibling, return that sub-dir.
@@ -920,6 +1000,17 @@ def process_book(b: int, item: InboxItem, _series_rerouted: bool = False):
         sub_tree = BooksTree(series_subdir)
         sub_tree.scan()
         return process_book(b, _InboxItem(sub_tree), _series_rerouted=True)
+
+    # Similarly, if the book root looks like an author-name directory
+    # (e.g. "Weir, Alison") containing a single book subfolder, reroute to
+    # the subfolder so we don't flatten away the book's own directory.
+    if author_subdir := _find_author_subfolder(book):
+        from src.lib.books_tree.books_tree import BooksTree
+        from src.lib.inbox_item import InboxItem as _InboxItem
+
+        sub_tree = BooksTree(author_subdir)
+        sub_tree.scan()
+        return process_book(b, _InboxItem(sub_tree))
 
     print_book_header(item)
 
