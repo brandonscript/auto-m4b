@@ -550,6 +550,62 @@ class test_tree_structures:
         finally:
             shutil.rmtree(book_dir, ignore_errors=True)
 
+    def test_two_part_book_with_part_nums_in_filenames_not_series(self):
+        """A book split into two MP3 files named 'Title Part 1.mp3' and 'Title Part 2.mp3'
+        must be classified as 'flat', not 'series_parent'.
+
+        Regression: when Part 2 is missing its album ID3 tag, score_series_parent sees
+        'same author, different (or absent) albums' which matches the series pattern and
+        scores 1.0.  score_flat also scores 1.0, but determine_structure uses strict '>'
+        so without a tiebreaker, series_parent wins.
+
+        Fix: score_series_parent returns 0.0 early for flat directories (no subdirs) whose
+        children have contiguous part_nums, unless the files have *different* ID3 year tags
+        (which would indicate genuinely distinct books in a series, e.g. a LitRPG publisher
+        storing each volume as "Series Part N.mp3" with different publication years).
+
+        Supporting fixes:
+        1. score_flat: if children have contiguous part_nums, return a high flat score
+           regardless of album tag inconsistency (tag might just be missing on one part).
+        2. _check_series_book: contiguous part_nums among siblings is a strong signal the
+           files are parts of a single title, not standalone series books — return False.
+        """
+        import shutil
+
+        book_dir = TEST_DIRS.inbox / "The Clockwork Century 02 - Dreadnought (2010)"
+        book_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            for f in ["Dreadnought Part 1.mp3", "Dreadnought Part 2.mp3"]:
+                (book_dir / f).touch()
+
+            # With-ID3 scan (tags absent for touched files, but filename-based checks apply)
+            tree = BooksTree(TEST_DIRS.inbox, match_filter=[book_dir])
+            book = tree.dirs.get(book_dir.name)
+            assert book is not None, f"Book not found in tree: {book_dir.name}"
+            assert book.has_only_structure("flat"), xt.msg.structure_is(book, "flat")
+            assert not book.has_structure_like("series"), (
+                f"Expected no 'series' structure, got {book.structure}"
+            )
+            xt.is_book_root(book)
+
+            # No-ID3 scan (simulating startup background scan)
+            tree2 = BooksTree(TEST_DIRS.inbox, scan=False, match_filter=[book_dir])
+            tree2.scan(scan_id3=False, determine_structure=True)
+            book2 = tree2.dirs.get(book_dir.name)
+            assert book2 is not None, f"Book not found in tree: {book_dir.name}"
+            assert book2.has_only_structure("flat"), xt.msg.structure_is(book2, "flat")
+            assert not book2.has_structure_like("series"), (
+                f"Expected no 'series' structure without ID3, got {book2.structure}"
+            )
+            xt.is_book_root(book2)
+
+            for f in book2.files:
+                assert not f.is_book_root, (
+                    f"File {f.name!r} should not be a book root when parent is flat"
+                )
+        finally:
+            shutil.rmtree(book_dir, ignore_errors=True)
+
     def test_flatish_with_tags(self, authors_guide_to_murder__flat_mp3: Audiobook):
         tree = BooksTree(TEST_DIRS.inbox, match_filter="^authors_guide_to_murder")
         book = tree.get(cast(str, authors_guide_to_murder__flat_mp3.key))
@@ -1097,6 +1153,7 @@ class test_tree_finding:
                 MOCKED.multi_disc_dir,
                 MOCKED.multi_disc_dir_cd_n,
                 MOCKED.multi_disc_dir_cdn,
+                MOCKED.multi_disc_dir_cdn_single,
                 MOCKED.multi_disc_dir_with_extras,
                 MOCKED.multi_nested_dir,
                 MOCKED.multi_part_dir,
@@ -1126,6 +1183,16 @@ class test_tree_finding:
         extra_paths_found = [p for p in found_sorted if p not in expected_sorted]
         missing_paths_expected = [p for p in expected_sorted if p not in found_sorted]
 
+        if extra_paths_found or missing_paths_expected:
+            print(f"\nfound_sorted={found_sorted}")
+            container = tree.get(path.parent / path.name / 'mock_book_container') or tree.get(path / 'mock_book_container')
+            if container:
+                from src.lib.scorers import score_series_parent, score_flat, score_container_mixed
+                print(f"mock_book_container: struct={container.structure}, book_root={container.is_book_root}, sp={score_series_parent(container):.3f}, flat={score_flat(container):.3f}, cm={score_container_mixed(container)}")
+                print(f"  _dirs={list(container._dirs.keys())}, _files={[f.name for f in container._files]}")
+                for ch in container.children:
+                    sp_c = score_series_parent(ch)
+                    print(f"  child {ch.name}: struct={ch.structure} sp={sp_c:.3f}, _dirs={list(ch._dirs.keys())}, _files={[f.name for f in ch._files]}")
         assert not extra_paths_found, f"Extra paths found: {extra_paths_found}"
         assert not missing_paths_expected, f"Missing paths expected: {missing_paths_expected}"
 

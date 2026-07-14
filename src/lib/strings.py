@@ -11,6 +11,9 @@ class en:
     BOOK_IS_FLAT_BUT_MESSY = (
         "Some audio files for this book are in a subfolder, moving them to the book's root folder..."
     )
+    BOOK_SERIES_PART_FLATTEN = (
+        "Part of an ongoing series — moving audio files to the series folder root..."
+    )
     DEBUG_WAITING_FOR_INBOX = "Waiting for inbox updates:"
     DEBUG_INBOX_HASH_UNCHANGED = "Inbox hash is the same, no changes since"
     BOOK_ALREADY_CONVERTED = "This book has already been converted 🎉"

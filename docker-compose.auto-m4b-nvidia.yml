@@ -19,11 +19,16 @@ services:
       - INBOX_FOLDER=/media/Books/Audiobooks/#auto-m4b/inbox
       - CONVERTED_FOLDER=/media/Books/Audiobooks/#auto-m4b/converted
       - ARCHIVE_FOLDER=/media/Books/Audiobooks/#auto-m4b/archive
+      - FAILED_FOLDER=/media/Books/Audiobooks/#auto-m4b/failed
       - BACKUP_FOLDER=/media/Books/Audiobooks/#auto-m4b/backup
       - WORKING_FOLDER=/tmp/auto-m4b
       - WATCH_FOLDER=/media/Downloads/books
       - OVERWRITE_EXISTING=N
       - BACKUP=N
+      - DEBUG=0
+      # Open Library API user agent — required to enable author/narrator swap detection.
+      # Format: AppName/1.0 (your@email.com)  See: https://openlibrary.org/developers/api
+      - OPEN_LIBRARY_USER_AGENT=auto-m4b/1.0 (brandon@pacificaviator.co)
       - ON_COMPLETE=archive
       - TZ=America/Vancouver
       - NVIDIA_VISIBLE_DEVICES=all

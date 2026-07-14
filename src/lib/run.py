@@ -1,3 +1,4 @@
+import re
 import shutil
 import sys
 import time
@@ -132,32 +133,26 @@ def print_banner(after: Callable[..., Any] | None = None):
 
     inbox = InboxState()
     _found = found_banner_in_print_log()
-    _bp = inbox.banner_printed
     _lc = inbox.loop_counter
     _lbc = inbox._last_banner_lc
 
-    # Skip reprinting the ⌐◒-◒ header only when it was already printed during
-    # the CURRENT loop counter value. This ensures:
-    # - Consecutive processing loops (new books detected) each get a fresh banner.
-    # - Pre-set banner_printed=True (simulating a prior session) does NOT suppress
-    #   the banner for the current loop (handles the [2-1-*] test pattern).
-    skip = _found and (_lbc >= _lc)
+    # The decorative header (dashes + timestamp + "Watching for…") only prints
+    # once, on the very first loop.  Subsequent loops process books silently —
+    # no "Checking for…" or repeated header — so the startup banner remains
+    # visible and uncluttered.  after() is still called on every invocation so
+    # that callers like inbox_needs_processing can still emit their own message
+    # (e.g. "New activity detected") without the decorative wrapper.
+    header_skip = _lc > 1 or (_found and _lbc >= _lc)
 
     current_local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     dash = "-" * 25
 
-    if not skip:
+    if not header_skip:
         print_mint(f"{dash}  ⌐◒-◒  auto-m4b • {current_local_time}  {dash}")
-
-    msg = "Checking for" if _lc > 1 else "Watching for"
-    if not skip:
-        print_grey(f"{msg} books in [[{cfg.inbox_dir}]] ꨄ︎")
+        print_grey(f"Watching for books in [[{cfg.inbox_dir}]] ꨄ︎")
         if cfg.watch_dir:
-            indent = " " * (len(msg) + len(" books in ") - len("and "))
-            print_grey(f"{indent}and [[{cfg.watch_dir}]]")
-
-    if not skip and _lc == 1:
+            print_grey(f"        and [[{cfg.watch_dir}]]")
         nl()
 
     time.sleep(0.25 if not cfg.TEST else 0)
@@ -165,7 +160,7 @@ def print_banner(after: Callable[..., Any] | None = None):
     if after:
         after()
 
-    if not skip:
+    if not header_skip:
         inbox.banner_printed = True
         inbox._last_banner_lc = _lc
 
@@ -210,11 +205,7 @@ def print_book_done(b: int, book: Audiobook, elapsedtime: int):
 
 def print_footer(b: int):
     divider("\n")
-    if b:
-        print_grey(en.DONE_CONVERTING)
-    else:
-        print_dark_grey(f"Waiting for books to be added to the inbox...")
-
+    print_grey(en.DONE_CONVERTING)
     if not cfg.NO_CATS:
         print_dark_grey(CATS_ASCII)
 
@@ -233,7 +224,10 @@ def audio_files_found():
 
 
 def fail_book(book: Audiobook, reason: str = "unknown"):
-    """Adds the book's path to the failed books dict with a value of the last modified date of of the book"""
+    """Marks the book as failed, writes a log, and moves it to FAILED_FOLDER if configured."""
+    from src.lib.config import cfg
+    from src.lib.fs_utils import mv_dir_contents, rm_dir
+
     inbox = InboxState()
     if not book.key or book.key in inbox.failed_books:
         return
@@ -251,6 +245,21 @@ def fail_book(book: Audiobook, reason: str = "unknown"):
         else:
             # move build dir log to inbox dir
             shutil.move(build_log, book.log_file)
+
+    # Move failed book out of the inbox so it doesn't block the queue.
+    if cfg.failed_dir and cfg.ON_COMPLETE != "test_do_nothing" and book.inbox_dir.exists():
+        from src.lib.term import print_warning
+
+        failed_dest = book.failed_dir
+        try:
+            mv_dir_contents(book.inbox_dir, failed_dest, overwrite_mode="overwrite-silent")
+            if book.inbox_dir.exists():
+                rm_dir(book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
+            if not book.inbox_dir.exists():
+                inbox.set_gone(book)
+                smart_print(f"\nMoved failed book to {tint_path(failed_dest)}")
+        except Exception as e:
+            print_warning(f"Could not move failed book to failed dir: {e}")
 
 
 def backup_ok(book: Audiobook):
@@ -547,16 +556,19 @@ def has_audio_files(book: Audiobook):
     return True
 
 
-def flatten_nested_book(book: Audiobook):
+def flatten_nested_book(book: Audiobook, series_rerouted: bool = False):
     from src.lib.fs_utils import flatten_files_in_dir
 
     is_nested = book.tree.has_structure("nested")
     is_messy = book.is_flatish
     if is_nested or is_messy:
-        smart_print(
-            en.BOOK_NEEDS_FLATTENING if is_nested else en.BOOK_IS_FLAT_BUT_MESSY,
-            end="",
-        )
+        if series_rerouted and is_nested:
+            msg = en.BOOK_SERIES_PART_FLATTEN
+        elif is_nested:
+            msg = en.BOOK_NEEDS_FLATTENING
+        else:
+            msg = en.BOOK_IS_FLAT_BUT_MESSY
+        smart_print(msg, end="")
         flatten_files_in_dir(book.inbox_dir)
         print_mint(" ✓\n")
         book.rescan()
@@ -613,16 +625,19 @@ def convert_book(book: Audiobook):
         nl()
         print_error(f"Native converter error: {err_msg}")
         smart_print(f"See log file in {tint_light_grey(book.inbox_dir)} for details\n")
-        fail_book(book, reason=err_msg)
+        # Log before moving: log_global_results accesses book.num_files/size/duration
+        # for the inbox dir. fail_book() may move that dir to FAILED_FOLDER, making
+        # the inbox dir disappear and causing a FileNotFoundError in log_global_results.
         log_global_results(book, "FAILED", 0)
+        fail_book(book, reason=err_msg)
         return False
 
     if not book.build_file.exists():
         err_msg = f"Native converter failed to produce output .m4b for {book}"
         book.write_log(err_msg)
         print_error(f"Error: {err_msg}")
-        fail_book(book, reason=err_msg)
         log_global_results(book, "FAILED", 0)
+        fail_book(book, reason=err_msg)
         return False
 
     verify_and_update_id3_tags(book, in_dir="build")
@@ -759,6 +774,11 @@ def cleanup_series_dir(parent: InboxItem | None):
                     overwrite_mode="skip-silent",
                 )
 
+                if parent_book.inbox_dir.exists():
+                    # Cross-partition: fell back to copy, leaving source intact.
+                    # Remove it now so the series folder isn't reprocessed.
+                    rm_dir(parent_book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
+
             elif cfg.ON_COMPLETE == "delete":
                 can_del = is_ok_to_delete(parent_book.inbox_dir)
                 if can_del or cfg.BACKUP:
@@ -798,6 +818,11 @@ def archive_inbox_book(book: Audiobook):
             )
 
             if book.inbox_dir.exists():
+                # Cross-partition: mv_dir_contents fell back to copy, leaving source
+                # intact. Remove it now so the book isn't reprocessed on the next loop.
+                rm_dir(book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
+
+            if book.inbox_dir.exists():
                 print_warning(
                     f"Warning: {tint_warning(book)} is still in the inbox folder, it should have been archived"
                 )
@@ -819,12 +844,174 @@ def archive_inbox_book(book: Audiobook):
         print_mint(" ✓")
 
 
-def process_book(b: int, item: InboxItem):
+_SERIES_NUM_RE = re.compile(r"\s+0*\d+\s*[-–\s]")
+
+
+def _series_prefix(name: str) -> str:
+    """Return the series prefix from a folder name, or '' if none detected.
+
+    E.g. 'SIGMA Force 02 - Map of Bones (2006)' → 'SIGMA Force'
+         'Jake Ransom 02 - The Howling Sphinx'   → 'Jake Ransom'
+         'Map of Bones (2006)'                   → '' (no series number)
+    """
+    m = _SERIES_NUM_RE.search(name)
+    return name[: m.start()].strip() if m else ""
+
+
+def _name_matches_author_tag(search_root: "Path", dir_name: str, threshold: float = 0.75) -> bool:
+    """Return True if dir_name fuzzy-matches the artist/author ID3 tag found on
+    the first audio file discovered under search_root (any depth).  Used as a
+    fallback when the directory name is not in "Last, First" comma format.
+    """
+    from difflib import SequenceMatcher
+
+    _AUDIO_EXTS = {".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".aac", ".wav"}
+    first_audio = next(
+        (f for f in search_root.rglob("*") if f.is_file() and f.suffix.lower() in _AUDIO_EXTS),
+        None,
+    )
+    if not first_audio:
+        return False
+    try:
+        import mutagen
+        tags = mutagen.File(first_audio, easy=True)
+        if not tags:
+            return False
+        author = (tags.get("artist") or tags.get("albumartist") or [""])[0]
+        if not author:
+            return False
+        ratio = SequenceMatcher(None, dir_name.lower(), author.lower()).ratio()
+        return ratio >= threshold
+    except Exception:
+        return False
+
+
+def _find_author_subfolder(book: "Audiobook") -> "Path | None":
+    """If book.inbox_dir sits directly under cfg.inbox_dir, looks like an
+    author name, and contains exactly one sub-directory with audio, return
+    that sub-directory.
+
+    This prevents flattening structures like:
+      inbox/Weir, Alison/A dangerous inheritance/audio.mp3
+    where the outer folder is an author dir, not a book title.  Without this
+    check the audio would be flattened up to the author root and the book
+    subfolder would be lost.
+
+    Author-name detection uses two heuristics (either is sufficient):
+      1. The directory name contains a comma  ("Weir, Alison" / "King, S.J.")
+      2. The directory name fuzzy-matches the artist ID3 tag on the first
+         audio file found inside it (handles "First Last" or slight typos).
+    """
+    from src.lib.config import cfg
+
+    if not book.tree.has_structure("nested"):
+        return None
+
+    # Must be a top-level inbox entry (direct child of inbox_dir)
+    if book.inbox_dir.parent != cfg.inbox_dir:
+        return None
+
+    dir_name = book.inbox_dir.name
+
+    # Heuristic 1: "Last, First" or "Last, First M." comma format
+    is_author = "," in dir_name
+    # Heuristic 2: fuzzy-match against the ID3 author tag (handles "First Last")
+    if not is_author:
+        is_author = _name_matches_author_tag(book.inbox_dir, dir_name)
+
+    if not is_author:
+        return None
+
+    try:
+        subdirs = [
+            d for d in book.inbox_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        ]
+    except OSError:
+        return None
+
+    # Only reroute when there is exactly one book subfolder; if there are
+    # multiple, the inbox scanner already picked them up as individual books.
+    if len(subdirs) != 1:
+        return None
+
+    return subdirs[0]
+
+
+def _find_series_subfolder(book: "Audiobook") -> "Path | None":
+    """If book.inbox_dir contains exactly one sub-directory whose name shares
+    a series prefix with an existing converted sibling, return that sub-dir.
+
+    This is used to reroute processing for cases like:
+      inbox/Rollins, James/SIGMA Force 02 - Map of Bones (2006)/…
+    where  converted/Rollins, James/SIGMA Force 01 - Sandstorm (2004)/
+    already exists — the book belongs in the series tree, not the author root.
+    """
+    if not book.tree.has_structure("nested"):
+        return None
+
+    try:
+        subdirs = [
+            d
+            for d in book.inbox_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        ]
+    except OSError:
+        return None
+
+    if len(subdirs) != 1:
+        return None
+
+    candidate = subdirs[0]
+    prefix = _series_prefix(candidate.name)
+    if not prefix:
+        return None
+
+    converted_parent = book.converted_dir
+    if not converted_parent.exists():
+        return None
+
+    for sibling in converted_parent.iterdir():
+        if (
+            sibling.is_dir()
+            and sibling.name != candidate.name
+            and sibling.name.lower().startswith(prefix.lower())
+        ):
+            return candidate
+
+    return None
+
+
+def process_book(b: int, item: InboxItem, _series_rerouted: bool = False):
     from src.lib.fs_utils import clean_dirs, rm_all_empty_dirs, rm_dirs, was_recently_modified
     from src.lib.term import print_notice
 
     inbox = InboxState()
     book = item.to_audiobook()
+
+    # Before printing anything: if this is a single nested entry whose series
+    # is already present in the converted dir, silently reroute to the
+    # sub-folder so the output lands in the correct series location rather
+    # than the author root (e.g. Author/Series 02 - Title/ not Author/).
+    if series_subdir := _find_series_subfolder(book):
+        from src.lib.books_tree.books_tree import BooksTree
+        from src.lib.inbox_item import InboxItem as _InboxItem
+
+        sub_tree = BooksTree(series_subdir)
+        sub_tree.scan()
+        return process_book(b, _InboxItem(sub_tree), _series_rerouted=True)
+
+    # Similarly, if the book root looks like an author-name directory
+    # (e.g. "Weir, Alison") containing a single book subfolder, reroute to
+    # the subfolder so we don't flatten away the book's own directory.
+    if author_subdir := _find_author_subfolder(book):
+        from src.lib.books_tree.books_tree import BooksTree
+        from src.lib.inbox_item import InboxItem as _InboxItem
+
+        sub_tree = BooksTree(author_subdir)
+        sub_tree.scan()
+        return process_book(b, _InboxItem(sub_tree))
+
     print_book_header(item)
 
     if not item.path.exists():
@@ -877,10 +1064,10 @@ def process_book(b: int, item: InboxItem):
     if not backup_ok(book):
         return b
 
-    flatten_nested_book(book)
-
     if not ok_to_overwrite(book):
         return b
+
+    flatten_nested_book(book, series_rerouted=_series_rerouted)
 
     inbox.set_ok(book)
 
@@ -969,12 +1156,35 @@ def process_inbox():
         inbox.scan(set_ready=True, force=True)
         print_banner()
 
+    def _sweep_empty_inbox_dirs():
+        """Remove empty leftover dirs from the inbox (e.g. series parent dirs whose
+        children were all archived in a previous run). Safe because:
+        - first prunes any empty sub-directories recursively (shell folders left
+          behind after individual books were archived)
+        - only then removes the top-level dir if it is now also empty
+        - skips dirs modified within WAIT_TIME seconds (actively receiving files)
+        - skips dirs that are currently tracked as books in _items"""
+        from src.lib.fs_utils import rm_all_empty_dirs, rm_dir, was_recently_modified
+
+        for subdir in sorted(cfg.inbox_dir.iterdir()):
+            if not subdir.is_dir() or was_recently_modified(subdir) or inbox.get(subdir):
+                continue
+            # First remove any nested empty dirs (e.g. individual book folders
+            # whose audio was already archived, leaving an empty shell).
+            rm_all_empty_dirs(subdir)
+            # Now remove the top-level dir if it is itself empty.
+            if not any(subdir.iterdir()):
+                print_debug(f"Removing empty leftover inbox dir: {subdir.name}")
+                rm_dir(subdir, ignore_errors=True)
+
     print_debug(f"[process_inbox] loop={inbox.loop_counter}, checking audio_files_found...")
     if not audio_files_found():
         print_debug(
             f"No audio files found in {cfg.inbox_dir}\n        Last updated at {inbox_last_updated_at(friendly=True)}, watching for changes...",
             only_once=True,
         )
+        # Still sweep for empty leftover dirs (e.g. series parents from a previous run).
+        _sweep_empty_inbox_dirs()
         return
     print_debug(f"[process_inbox] audio files found, checking inbox_needs_processing...")
     if (
@@ -991,7 +1201,7 @@ def process_inbox():
     # books added/removed) or on the very first processing loop. Re-processing
     # the same set of pending books (e.g. retrying after a transient failure)
     # should not flood the log with headers every SLEEP_TIME seconds.
-    _should_banner = inbox.loop_counter <= 1 or inbox.inbox_hash_changed
+    _should_banner = inbox.loop_counter <= 1
     if info := books_to_process():
         _expected, msg = info
         if _should_banner:
@@ -1014,8 +1224,25 @@ def process_inbox():
         if item.is_series_book and item.is_last_book_in_series:
             cleanup_series_dir(item.series_parent)
 
-    print_footer(b)
+    # Sweep 1: series parents still in _items whose inbox dir became empty during this
+    # run. Catches cases where is_last_book_in_series didn't fire (e.g. dict ordering
+    # placed the "last" child first and it converted before the others).
+    for parent_item in list(inbox._items.values()):
+        if (
+            parent_item.is_series_parent
+            and parent_item.status not in ("gone", "processed")
+            and parent_item.path.is_dir()
+            and not any(parent_item.path.iterdir())
+        ):
+            cleanup_series_dir(parent_item)
+
+    # Sweep 2: empty inbox subdirs not in _items — container-restart scenario.
+    _sweep_empty_inbox_dirs()
+
+    if b:
+        print_footer(b)
     clean_dirs([cfg.merge_dir, cfg.build_dir, cfg.trash_dir])
     inbox.done()
     inbox.prune_gone()
+    return b
     trim_print_log()

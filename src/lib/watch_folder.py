@@ -8,6 +8,11 @@ from src.lib.term import print_debug, print_warning, smart_print, tint_path
 
 _IGNORE_DIR_NAMES: frozenset[str] = frozenset({"@eaDir", "@tmp", ".DS_Store"})
 
+# Written into the SOURCE directory after a successful copy to inbox.
+# Prevents re-copying if the user later moves/deletes the converted m4b
+# or the archive, which would otherwise fool _is_already_handled.
+_MARKER_NAME = ".auto-m4b"
+
 
 class WatchFolder:
     """
@@ -59,13 +64,22 @@ class WatchFolder:
         return True
 
     @staticmethod
-    def _is_already_handled(name: str) -> bool:
+    def _is_already_handled(source: Path) -> bool:
         """
-        Return True if a directory named *name* already exists in the inbox,
-        converted, or archive folder.
+        Return True if *source* has already been queued or processed.
+
+        Checks in order:
+        1. Our own marker file inside the source directory (written after a
+           successful copy).  This survives the user moving/deleting the
+           converted m4b or the archive entry.
+        2. The directory name exists in the inbox, converted, or archive folder.
         """
         from src.lib.config import cfg
 
+        if (source / _MARKER_NAME).exists():
+            return True
+
+        name = source.name
         for root in (cfg.inbox_dir, cfg.converted_dir, cfg.archive_dir):
             if (root / name).exists():
                 return True
@@ -105,7 +119,7 @@ class WatchFolder:
             if WatchFolder._should_ignore(candidate):
                 print_debug(f"[watch_folder] ignoring: {candidate.name!r}")
                 continue
-            if WatchFolder._is_already_handled(candidate.name):
+            if WatchFolder._is_already_handled(candidate):
                 print_debug(f"[watch_folder] already handled: {candidate.name!r}")
                 continue
             count = WatchFolder._audio_file_count(candidate)
@@ -148,6 +162,13 @@ class WatchFolder:
             try:
                 shutil.copytree(book, dest, dirs_exist_ok=True)
                 copied.append(dest)
+                # Drop a marker so this source dir is recognised as already
+                # handled on the next scan, even if the user later removes
+                # the converted m4b or archive entry.
+                try:
+                    (book / _MARKER_NAME).write_text("")
+                except OSError:
+                    pass  # read-only share or permission denied — silent fallback
             except OSError as exc:
                 print_warning(f"[watch_folder] copy failed for {book.name!r}: {exc}")
 

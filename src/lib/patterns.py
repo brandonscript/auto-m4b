@@ -4,7 +4,7 @@ import regex as rex
 
 # TODO: Add test coverage for narrator with /
 # fmt: off
-_titlecase_word = r"[A-Z][\p{Ll}\.'-]*[^_]"
+_titlecase_word = r"[A-Z][\p{Ll}\.'-]*[^_]\.?"
 _short_any_case_word = r"(?:[A-Za-z][\p{Ll}\.'-]*[^_]){1,3}"
 _author_prefixes = r"[Ww]ritten.?[Bb]y|[Aa]uthor"
 _narrator_prefixes = r"(?:[Rr]ead|[Nn]arrated|[Pp]erformed).?[Bb]y|[Nn]arrator"

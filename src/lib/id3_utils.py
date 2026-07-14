@@ -277,7 +277,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     ol_author, author_prop = next(
         (
             c
-            for c in sorted(ol_author_candidates, key=lambda x: x[0].score(fallback=999) if x[0] else 0.0)
+            for c in sorted(ol_author_candidates, key=lambda x: x[0].score(fallback=0.0) if x[0] else 0.0, reverse=True)
             if c[0] and c[0].has_match
         ),
         (None, None),
@@ -296,17 +296,31 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         nonlocal title_needs_updating, new_tags
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
         if bool(ol_title):
-            if ol_title.has_match and ol_title.score(fallback=999) < 0.9:
+            if ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
+                new_title = _strip_ol_edition_suffix(NotNone(ol_title).title)
+                # OL stores many titles in sentence case (e.g. "The assassin king").
+                # Normalise: if OL title and book.title are the same words (ignoring case),
+                # prefer book.title's casing — it was derived from properly-cased source data.
+                if book.title and new_title.lower() == book.title.lower():
+                    new_title = strip_leading_the(book.title) if id3_tag == "sortalbum" else book.title
+                # Guard: if the tag already holds the correct value, skip the update.
+                if new_title.lower() == (tag_value or "").lower():
+                    return
                 title_needs_updating = True
-                new_title = NotNone(ol_title).title
                 updates.append(lambda: _print_needs_updating(orop, tag_value, new_title))
                 new_tags[id3_tag] = new_title
                 new_tags["sortalbum"] = strip_leading_the(new_title)
-        elif book.title and (tag_value != book.title):
-            title_needs_updating = True
-            updates.append(lambda: _print_needs_updating(orop, tag_value, book.title))
-            new_tags[id3_tag] = book.title
-            new_tags["sortalbum"] = strip_leading_the(book.title)
+        elif book.title:
+            # Strip edition suffixes even when OL isn't configured —
+            # source tags sometimes embed LibriVox/archive.org edition info
+            # (e.g. ", Version 3", ", Brown Cloth") that shouldn't appear in
+            # the final audiobook title tag.
+            cleaned_title = _strip_ol_edition_suffix(book.title)
+            if tag_value != cleaned_title:
+                title_needs_updating = True
+                updates.append(lambda: _print_needs_updating(orop, tag_value, cleaned_title))
+                new_tags[id3_tag] = cleaned_title
+                new_tags["sortalbum"] = strip_leading_the(cleaned_title)
 
     def _check_author(prop: str, id3_tag: TagSource):
         nonlocal author_needs_updating, narrator_needs_updating, new_tags
@@ -314,19 +328,24 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
         if bool(ol_title):
             if ol_title.has_match and (
-                ol_title.author_score(fallback=999) < 0.9 or ol_title.author_and_narrator_swapped
+                ol_title.author_score(fallback=0.0) >= 0.5 or ol_title.author_and_narrator_swapped
             ):
-                author_needs_updating = True
                 new_author = NotNone(ol_title).author  # will return correct author or narrator if swapped
-                updates.append(lambda: _print_needs_updating(prop, tag_value, new_author))
-                new_tags[id3_tag] = new_author
+                # Never overwrite a valid author with an empty string — OL may
+                # match a title but not know the author for this edition.
+                if not new_author:
+                    pass
+                else:
+                    author_needs_updating = True
+                    updates.append(lambda: _print_needs_updating(prop, tag_value, new_author))
+                    new_tags[id3_tag] = new_author
                 if ol_title.author_and_narrator_swapped:
                     narrator_needs_updating = True
                     new_narrator = NotNone(ol_title).narrator
                     updates.append(lambda: _print_needs_updating(prop, tag_value, new_narrator))
                     new_tags["composer"] = new_narrator
         elif bool(ol_author):
-            if ol_author.has_match and (ol_author.score(fallback=999) < 0.9 or author_prop == "narrator"):
+            if ol_author.has_match and (ol_author.score(fallback=0.0) >= 0.5 or author_prop == "narrator"):
                 if author_prop == "author":
                     author_needs_updating = True
                     new_author = NotNone(ol_author).name
@@ -646,6 +665,112 @@ def custom_sort(key: str, next_key: str) -> int:
     return -1 if key < next_key else int(key > next_key)
 
 
+_READ_BY_PATTERN = re.compile(r"^\s*(?:read|narrated)\s+by\s+", re.I)
+
+# Matches OL edition suffixes like ", Version 3", ", Second Edition", ", Brown Cloth"
+_OL_EDITION_SUFFIX = re.compile(
+    r",\s+(?:Version\s+\d+|\d+(?:st|nd|rd|th)?\s+Edition|[A-Z][a-z]+\s+(?:Edition|Cloth|Cover|Print))\s*$",
+    re.I,
+)
+
+
+def _strip_ol_edition_suffix(title: str) -> str:
+    """Remove OL edition suffixes that are not part of the canonical book title."""
+    return _OL_EDITION_SUFFIX.sub("", title).strip()
+
+
+def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibraryTitle | None":
+    """Try Open Library *before* heuristic scoring.
+
+    Strategy:
+    1. Build title candidates from ID3 title, album, sortalbum, then fs_title.
+    2. Build author hints from albumartist, artist (stripped of narrator
+       prefixes), composer, then fs_author.
+    3. Try each title candidate with OL (up to 3 author hints per candidate).
+    4. On a confident match (score < 0.5) with both title + author resolved,
+       set book.title / book.artist / book.albumartist from OL.
+
+    Returns the winning OpenLibraryTitle on success, None otherwise.
+    """
+    from src.lib.config import cfg
+    from src.lib.ol_lookup import OpenLibraryTitle
+
+    if not cfg.OPEN_LIBRARY_USER_AGENT:
+        return None
+
+    def _clean(v: str) -> str:
+        return _READ_BY_PATTERN.sub("", (v or "").strip()).strip()
+
+    # Title candidates in priority order: ID3 title → album → sortalbum → fs
+    title_cands: list[str] = []
+    for v in [tag1.title, tag1.album, tag1.sortalbum, book.fs_title]:
+        cleaned = (v or "").strip()
+        if cleaned and cleaned not in title_cands:
+            title_cands.append(cleaned)
+
+    if not title_cands:
+        return None
+
+    # Author hints: albumartist first (most reliable), then artist, composer, fs
+    author_hints: list[str] = []
+    for v in [tag1.albumartist, tag1.composer, tag1.artist, tag1.album, book.fs_author]:
+        cleaned = _clean(v)
+        if cleaned and cleaned not in author_hints:
+            author_hints.append(cleaned)
+
+    best_ol: "OpenLibraryTitle | None" = None
+    best_score = 0.0
+
+    for title_cand in title_cands:
+        # Try with each author hint, then without
+        for author_hint in (author_hints[:3] or [None]):
+            # Use module-level open_library_lookup_title so tests can patch it
+            ol = open_library_lookup_title(title_cand, author=author_hint, method="similarity")
+            if ol and ol.has_match:
+                score = ol.score(fallback=0.0)
+                if score > best_score:
+                    best_score = score
+                    best_ol = ol
+            if best_score >= 0.9:
+                break
+        if best_score >= 0.9:
+            break
+
+    # Only trust OL when both title and author are resolved — a partial result
+    # (title only) would cause us to skip heuristic author detection and leave
+    # book.artist empty.
+    if best_ol is None or best_score < 0.5 or not best_ol.title or not best_ol.author:
+        return None
+
+    book.title = _strip_ol_edition_suffix(best_ol.title)
+    book.album = book.title
+    book.sortalbum = strip_leading_articles(book.title)
+    book.artist = best_ol.author
+    book.albumartist = best_ol.author
+
+    return best_ol
+
+
+def _narrator_from_remaining_tags(book: "Audiobook") -> str:
+    """Post-OL narrator detection: once the author is known, scan ID3 fields for
+    the narrator.  Handles cases the heuristic scorer misses, e.g. the artist
+    field carries 'read by Jenny Sterlin' with no albumartist present.
+    """
+    author_lower = (book.artist or "").lower()
+
+    for raw in [book.id3_artist, book.id3_composer]:
+        if not raw:
+            continue
+        stripped = _READ_BY_PATTERN.sub("", raw).strip()
+        # Accept if the prefix was present OR the field doesn't match the author
+        is_explicit_narrator = stripped != raw  # "read by …" or "narrated by …"
+        is_not_author = author_lower and stripped.lower() != author_lower
+        if is_explicit_narrator or is_not_author:
+            return stripped
+
+    return ""
+
+
 def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     from src.lib.id3_tags import Id3Tags
@@ -672,19 +797,64 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             setattr(book, f"id3_{tag}", value)
 
     book.id3_year = get_year_from_date(book.id3_date)
-    # Note: only works for mp3 files, will always return None for m4b files
-    book.has_id3_cover = bool(extract_cover_art(book.sample_audio1))
+    # Detect embedded cover art via ffprobe stream inspection — much faster than
+    # extracting bytes with ffmpeg.  For m4b/m4a files the cover image is interleaved
+    # with audio data inside the mdat chunk, so ffmpeg must scan the entire file to
+    # extract it (O(filesize)), whereas ffprobe only reads the moov atom header.
+    _probe = ffprobe_file(book.sample_audio1) or {}
+    book.has_id3_cover = any(
+        s.get("codec_name") in ("mjpeg", "png") and s.get("disposition", {}).get("attached_pic")
+        for s in _probe.get("streams", [])
+    )
+
+    # ── OL-first extraction ────────────────────────────────────────────────────
+    # When OL is configured, ask it directly before heuristic scoring.
+    # OL knows the canonical title/author, so a confident match avoids
+    # misassigning fields (e.g. album="Laurie R. King", title="The God of
+    # the Hive" → OL confirms title and author rather than guessing).
+    ol_match = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
+    ol_resolved = ol_match is not None
 
     id3_score = MetadataScore(book, sample_audio2_tags)  # type: ignore
 
     t3 = time.time()
-    book.title = id3_score.determine_title(fallback=book.fs_title)
-    book.album = book.title
-    book.sortalbum = strip_leading_articles(book.title)
 
-    book.artist = id3_score.determine_author(fallback=book.fs_author)
-    book.narrator = id3_score.determine_narrator(fallback=book.fs_narrator)
-    book.albumartist = id3_score.determine_albumartist(fallback=book.fs_author)
+    if not ol_resolved:
+        book.title = id3_score.determine_title(fallback=book.fs_title)
+        book.album = book.title
+        book.sortalbum = strip_leading_articles(book.title)
+        book.artist = id3_score.determine_author(fallback=book.fs_author)
+        book.albumartist = id3_score.determine_albumartist(fallback=book.fs_author)
+
+    # Narrator: OL rarely stores narrator info, so always use the heuristic.
+    # When OL resolved the author, try the targeted post-OL helper first —
+    # it handles explicit "read by …" prefixes that the scorer's _ar_but_no_aar
+    # branch misses (it only awards points when there's a slash in the artist).
+    if ol_resolved:
+        book.narrator = _narrator_from_remaining_tags(book) or id3_score.determine_narrator(
+            fallback=book.fs_narrator
+        )
+    else:
+        book.narrator = id3_score.determine_narrator(fallback=book.fs_narrator)
+
+    # Guard: author == narrator is almost never correct.  Clear it to avoid
+    # a person appearing in both roles.
+    if book.narrator and book.narrator.lower() == (book.artist or "").lower():
+        book.narrator = ""
+
+    # Strip "Author - " prefix from the title when the title tag was set to the full
+    # filesystem name (e.g. "Jeffery Deaver - The Cold Moon 2006" → "The Cold Moon 2006").
+    # Many rippers embed the folder/filename verbatim as the title tag.  Only strip when
+    # the author appears at the very start followed by a dash separator so we don't
+    # accidentally truncate legitimate subtitles like "Cat's Cradle - A Novel".
+    if not ol_resolved and book.title and book.artist:
+        _author_prefix = re.compile(r"^" + re.escape(book.artist) + r"\s*[-–—]\s*", re.I)
+        if _m := _author_prefix.match(book.title):
+            _remainder = book.title[_m.end():].strip()
+            if _remainder:
+                book.title = _remainder
+                book.album = book.title
+                book.sortalbum = strip_leading_articles(book.title)
 
     t4 = time.time()
 
@@ -703,7 +873,9 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             book.id3_comment = f"Read by {book.narrator} // {book.id3_comment}"
         book.composer = book.narrator
 
-    book.date = id3_score.determine_date(book.fs_year)
+    # Use OL first-publish year when available; fall back to ID3 / filesystem.
+    ol_year = ol_match.date if ol_match else ""
+    book.date = ol_year or id3_score.determine_date(book.fs_year)
     if book.date:
         li(f"Date: {book.date}")
     # extract 4 digits from date
@@ -714,6 +886,23 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     li(f"Duration: {book.duration('inbox', 'human')}")
     if not book.has_id3_cover:
         li(f"No cover art")
+
+    # ── Open Library match summary ─────────────────────────────────────────────
+    if console:
+        from src.lib.config import cfg
+        if cfg.OPEN_LIBRARY_USER_AGENT:
+            print()
+            if ol_match:
+                ol_details = [f"Title: {ol_match.title}", f"Author: {ol_match.author}"]
+                if ol_match.narrator:
+                    ol_details.append(f"Narrator: {ol_match.narrator}")
+                if ol_year:
+                    ol_details.append(f"First published: {ol_year}")
+                smart_print("Matched book on openlibrary.org:")
+                for detail in ol_details:
+                    li(detail)
+            else:
+                smart_print("Could not find a good match on openlibrary.org")
 
     t5 = time.time()
 

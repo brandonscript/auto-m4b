@@ -92,14 +92,16 @@ class test_happy_paths:
         assert the_crusades_through_arab_eyes__flat_mp3.converted_dir.exists()
 
     @pytest.mark.parametrize(
-        "starting_loop, max_loops, match_filter, watching_count, checking_count, banner_count",
+        "starting_loop, max_loops, match_filter, watching_count, banner_count",
         [
-            (0, 1, "--none--", 1, 0, 1),
-            (0, 1, "tiny", 1, 0, 1),
-            (2, 1, "--none--", 0, 1, 1),
-            (2, 1, "tiny", 0, 1, 1),
-            (0, 3, "tiny", 1, 2, 3),
-            (2, 3, "tiny", 0, 3, 3),
+            # Banner and "Watching for" only ever appear on loop 1 (loop_counter == 1).
+            # Subsequent loops process silently — no "Checking for" header any more.
+            (0, 1, "--none--", 1, 1),
+            (0, 1, "tiny", 1, 1),
+            (2, 1, "--none--", 0, 0),  # starting at loop 2 → banner never prints
+            (2, 1, "tiny", 0, 0),
+            (0, 3, "tiny", 1, 1),  # only loop 1 prints the banner even across 3 loops
+            (2, 3, "tiny", 0, 0),
         ],
     )
     @pytest.mark.order()
@@ -109,7 +111,6 @@ class test_happy_paths:
         max_loops,
         match_filter,
         watching_count,
-        checking_count,
         banner_count,
         requires_empty_inbox,
         tiny__flat_mp3: Audiobook,
@@ -120,14 +121,6 @@ class test_happy_paths:
         inbox = InboxState()
         inbox.loop_counter = starting_loop
         inbox.banner_printed = bool(inbox.loop_counter > 0)
-        if inbox.loop_counter and max_loops == 1:
-            term.PRINT_LOG = [
-                ("-------------------------  ⌐◒-◒  auto-m4b • 2024-01-01 12:00:00  -------------------------", "\n"),
-                *term.PRINT_LOG,
-            ]
-            # Advance the cursor past the simulated prior-session banner so that
-            # get_stdout() only captures output from the current app() run.
-            testutils._print_log_cursor = len(term.PRINT_LOG)
         for i in range(max_loops):
             is_last_loop = i == max_loops - 1
             # Set match_filter to none until the last loop
@@ -153,7 +146,7 @@ class test_happy_paths:
 
         assert out.count("Starting auto-m4b...") == (1 if starting_loop == 0 else 0)
         assert watching_count == out.count("Watching for books in")
-        assert checking_count == out.count("Checking for books in")
+        assert out.count("Checking for books in") == 0, "Checking header should never appear"
         assert banner_count == out.count("⌐◒-◒")
 
     def test_match_filter_multiple_mp3s(

@@ -327,6 +327,39 @@ class TestScanAndCopy:
         second = WatchFolder.scan_and_copy()
         assert second == []
 
+    def test_marker_file_written_to_source_after_copy(self, watch_dir: Path):
+        book = watch_dir / "MarkedBook"
+        _make_audio_files(book, "ch1.mp3", "ch2.mp3")
+        _backdate(book)
+
+        copied = WatchFolder.scan_and_copy()
+        assert len(copied) == 1
+
+        # Marker file must appear in the SOURCE directory
+        assert (book / ".auto-m4b").exists()
+        # Marker should NOT be in the inbox copy (we write it after copytree)
+        assert not (cfg.inbox_dir / "MarkedBook" / ".auto-m4b").exists()
+
+    def test_marker_prevents_recopy_after_inbox_removed(self, watch_dir: Path):
+        """Even if inbox/converted/archive entries disappear (e.g. user moves the
+        m4b to their library), the marker file in the source dir stops re-copying."""
+        book = watch_dir / "GoneFromInbox"
+        _make_audio_files(book, "ch1.mp3", "ch2.mp3")
+        _backdate(book)
+
+        first = WatchFolder.scan_and_copy()
+        assert len(first) == 1
+
+        # Simulate: user moved the converted m4b, inbox/archive both gone
+        import shutil
+
+        shutil.rmtree(cfg.inbox_dir / "GoneFromInbox", ignore_errors=True)
+
+        # Second call: marker file alone should prevent re-copy
+        second = WatchFolder.scan_and_copy()
+        assert second == []
+        assert not (cfg.inbox_dir / "GoneFromInbox").exists()
+
     def test_no_op_without_watch_dir(self):
         prev = os.environ.pop("WATCH_FOLDER", None)
         try:
