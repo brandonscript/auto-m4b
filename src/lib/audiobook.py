@@ -20,6 +20,7 @@ from src.lib.fs_utils import (
     get_size,
     hash_path_audio_files,
     last_updated_at,
+    safe_filename,
 )
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info, get_year_from_date
@@ -241,7 +242,7 @@ class Audiobook(BaseModel):
             # Prefer title as filename so the output is "The Assassin King.m4b"
             # rather than the inbox folder name (e.g. "Haydon, Elizabeth.m4b")
             # when the folder is named after the author rather than the book.
-            stem = self.title or self.basename
+            stem = safe_filename(self.title or self.basename)
             return self.build_dir / f"{stem}.m4b"
 
     @property
@@ -249,7 +250,7 @@ class Audiobook(BaseModel):
         from src.lib.config import cfg
 
         def _build_filename():
-            b = Path(self.basename)
+            b = Path(safe_filename(self.basename))
             # Keep existing .m4b extension; add it if missing
             filename = b if b.suffix == ".m4b" else b.with_suffix(".m4b")
             return self.converted_dir / filename
@@ -509,7 +510,7 @@ class Audiobook(BaseModel):
     @property
     def final_desc_file(self):
         quality = f"{self.bitrate_friendly} @ {self.samplerate_friendly}".replace("kb/s", "kbps")
-        stem = self.title or self.basename
+        stem = safe_filename(self.title or self.basename)
         return self.converted_dir / f"{stem} [{quality}].txt"
 
     def write_description_txt(self, out_path: Path | None = None):
