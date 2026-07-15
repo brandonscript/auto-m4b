@@ -674,17 +674,32 @@ def print_moving_to_converted(book):
 
 
 def move_converted_book_and_extras(book: Audiobook):
-    from src.lib.fs_utils import mv_dir_contents, mv_file_into_dir, rm_all_empty_dirs, rm_dirs
+    from src.lib.fs_utils import mv_dir_contents, mv_file_into_dir, rm_all_empty_dirs, rm_dirs, safe_filename
 
     print_moving_to_converted(book)
 
-    # Copy other jpg, png, and txt files from mergefolder to output folder
-    mv_dir_contents(
-        book.merge_dir,
-        book.converted_dir,
-        only_file_exts=cfg.OTHER_EXTS,
-        overwrite_mode="overwrite-silent",
-    )
+    # Move jpg, png, txt, etc. from merge folder to output folder, sanitizing
+    # filenames so that characters illegal on SMB/NTFS (e.g. ":") don't slip
+    # through from old inbox artifacts copied into the merge dir.
+    book.converted_dir.mkdir(parents=True, exist_ok=True)
+    for src_file in book.merge_dir.iterdir():
+        if not src_file.is_file():
+            continue
+        if src_file.suffix.lower() not in cfg.OTHER_EXTS:
+            continue
+        safe_name = safe_filename(src_file.name)
+        mv_file_into_dir(
+            src_file,
+            book.converted_dir,
+            new_filename=safe_name,
+            overwrite_mode="overwrite-silent",
+        )
+
+    # Also delete any stale [quality].txt files in the converted dir whose names
+    # still contain unsafe chars (e.g. from a pre-fix conversion run).
+    for f in book.converted_dir.glob("*.txt"):
+        if safe_filename(f.name) != f.name:
+            f.unlink(missing_ok=True)
 
     if book.log_file.is_file():
         # Delete it if it's empty, otherwise move it
