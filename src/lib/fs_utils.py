@@ -1198,3 +1198,34 @@ def filter_depth(
         and (mindepth is None or len(p.relative_to(root).parts) + offset >= mindepth)
         and (maxdepth is None or len(p.relative_to(root).parts) + offset <= maxdepth)
     )
+
+
+# Characters that are illegal in filenames on Windows/NTFS and SMB shares.
+# We replace them with filesystem-safe equivalents so that files written to
+# SMB mounts do not silently create unexpected directories (e.g. ":" → "/").
+_UNSAFE_FILENAME_CHARS: dict[str, str] = {
+    ": ": " - ",   # subtitle separator  "Title: Subtitle" → "Title - Subtitle"
+    ":": " -",     # bare colon          "Vol:1"           → "Vol -1"
+    "/": "-",
+    "\\": "-",
+    "?": "",
+    "*": "",
+    '"': "'",
+    "<": "(",
+    ">": ")",
+    "|": "-",
+}
+
+
+def safe_filename(name: str) -> str:
+    """Replace characters that are illegal on Windows/NTFS/SMB filesystems with
+    safe equivalents, preserving as much of the original title as possible.
+
+    The most common case in audiobook titles is a colon used as a subtitle
+    separator (e.g. "Into the Fire: A LitRPG Adventure"), which is replaced
+    with " - " to produce "Into the Fire - A LitRPG Adventure".
+    """
+    for bad, good in _UNSAFE_FILENAME_CHARS.items():
+        name = name.replace(bad, good)
+    # Collapse any runs of spaces introduced by the replacements
+    return " ".join(name.split())

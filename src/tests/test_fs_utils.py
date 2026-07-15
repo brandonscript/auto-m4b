@@ -488,3 +488,30 @@ class test_get_similarity:
         from src.lib.compare import get_similarity
 
         assert get_similarity(strings) == pytest.approx(expected, rel=0.01)
+
+
+class test_safe_filename:
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            # Subtitle colon → " - "
+            (
+                "Into the Fire: A LitRPG Fantasy Cooking Adventure (Morcster Chef, Book 2)",
+                "Into the Fire - A LitRPG Fantasy Cooking Adventure (Morcster Chef, Book 2)",
+            ),
+            # Bare colon (no trailing space)
+            ("Vol:1", "Vol -1"),
+            # Already clean — must be unchanged
+            ("The Tower Treasure", "The Tower Treasure"),
+            # Slash → hyphen
+            ("AC/DC Greatest Hits", "AC-DC Greatest Hits"),
+            # Multiple unsafe chars
+            ("Title: Book <1> |Series|", 'Title - Book (1) -Series-'),
+            # Extra spaces collapsed
+            ("Title:  Subtitle", "Title - Subtitle"),
+        ],
+    )
+    def test_safe_filename_replaces_unsafe_chars(self, name: str, expected: str):
+        from src.lib.fs_utils import safe_filename
+
+        assert safe_filename(name) == expected
