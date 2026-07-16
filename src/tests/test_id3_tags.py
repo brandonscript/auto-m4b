@@ -1002,3 +1002,58 @@ def test_verify_tags_applies_ol_with_perfect_similarity_score(
     assert result_tags.get("artist") == corrected_author, (
         f"OL perfect-score correction must apply: expected '{corrected_author}', got '{result_tags.get('artist')}'"
     )
+
+
+def test_album_tag_used_as_title_when_title_has_part_number(
+    book_with_partno_track_titles: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """When individual track title tags carry part numbers (e.g. 'War and Peace,
+    Part 1' / 'War and Peace, Part 5') but the album tag carries the clean book
+    title ('War and Peace'), the metadata extraction must prefer the album tag
+    for book.title.
+
+    Regression: _ol_early_extraction tried the raw part-titled track first and
+    OL matched it ('War and Peace Part 1'), locking in the wrong title.  The
+    determine_title() scorer also failed to penalise the individual titles
+    because the *common* prefix between title1 and title2 ('War and Peace')
+    doesn't contain a part number — only the individual titles do.
+    """
+    book = book_with_partno_track_titles
+
+    mock_id3_tags(
+        (
+            book.sample_audio1,
+            {
+                "title": "War and Peace, Part 1",
+                "album": "War and Peace",
+                "artist": "Leo Tolstoy",
+                "albumartist": "Leo Tolstoy",
+                "tracknumber": "1/5",
+            },
+        ),
+        (
+            book.sample_audio2,
+            {
+                "title": "War and Peace, Part 5",
+                "album": "War and Peace",
+                "artist": "Leo Tolstoy",
+                "albumartist": "Leo Tolstoy",
+                "tracknumber": "5/5",
+            },
+        ),
+    )
+
+    book.extract_path_info()
+    book.extract_metadata()
+
+    # The whole-book title must come from the album tag, not the part-tagged track title
+    assert book.title == "War and Peace", (
+        f"Expected title 'War and Peace' (from album tag), got '{book.title}'"
+    )
+    assert "Part" not in (book.title or ""), (
+        f"Title must not contain 'Part'; got '{book.title}'"
+    )
+    assert book.author == "Leo Tolstoy", (
+        f"Expected author 'Leo Tolstoy', got '{book.author}'"
+    )
