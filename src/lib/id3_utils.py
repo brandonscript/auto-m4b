@@ -701,9 +701,25 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     def _clean(v: str) -> str:
         return _READ_BY_PATTERN.sub("", (v or "").strip()).strip()
 
-    # Title candidates in priority order: ID3 title → album → sortalbum → fs
+    # Title candidates in priority order.
+    # Default: ID3 title → album → sortalbum → fs_title.
+    # Exception: when the raw title tag contains a part/disc number but the
+    # album tag does NOT (e.g. title="War and Peace, Part 1", album="War and
+    # Peace"), promote album to the front so OL looks up the whole-book title
+    # rather than a specific part edition.
+    from src.lib.parsers import contains_partno_or_ch
+
+    raw_title = (tag1.title or "").strip()
+    raw_album = (tag1.album or "").strip()
+    title_has_partno = bool(raw_title and contains_partno_or_ch(raw_title))
+    album_has_partno = bool(raw_album and contains_partno_or_ch(raw_album))
+    if title_has_partno and not album_has_partno and raw_album:
+        raw_order = [tag1.album, tag1.title, tag1.sortalbum, book.fs_title]
+    else:
+        raw_order = [tag1.title, tag1.album, tag1.sortalbum, book.fs_title]
+
     title_cands: list[str] = []
-    for v in [tag1.title, tag1.album, tag1.sortalbum, book.fs_title]:
+    for v in raw_order:
         cleaned = (v or "").strip()
         if cleaned and cleaned not in title_cands:
             title_cands.append(cleaned)

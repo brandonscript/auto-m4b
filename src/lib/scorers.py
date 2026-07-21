@@ -287,18 +287,31 @@ class MetadataScore:
             )
             common_title_is_title += 4 * self._p._t1_similarity_to_t2
 
+        title1_contains_partno = contains_partno_or_ch(self._p.title1)
+        title2_contains_partno = contains_partno_or_ch(self._p.title2)
+        album1_contains_partno = contains_partno_or_ch(self._p.album1)
+
         if self._p._t_is_partno:
             if self._p._t_is_only_part_no:
                 title_is_title -= self._p._t_partno_score * 100
             else:
-                title1_contains_partno = contains_partno_or_ch(self._p.title1)
-                title2_contains_partno = contains_partno_or_ch(self._p.title2)
                 if title1_contains_partno or title2_contains_partno:
                     common_title_is_title = max(
                         title_is_title,
                         common_title_is_title,
                     )
                     title_is_title -= self._p._t_partno_score * 5
+
+        elif title1_contains_partno or title2_contains_partno:
+            # Individual titles contain part numbers even though the *common*
+            # title doesn't (e.g. title1="War and Peace, Part 1", title2="War
+            # and Peace, Part 5" → common="War and Peace").  Apply the same
+            # penalty and, when the album doesn't also have a part number,
+            # boost the album score as the more reliable book-level title.
+            common_title_is_title = max(title_is_title, common_title_is_title)
+            title_is_title -= self._p._t_partno_score * 5
+            if not album1_contains_partno:
+                album_is_title += self._p._t_partno_score * 3
 
         else:
             title_is_title += self._p._t_partno_score

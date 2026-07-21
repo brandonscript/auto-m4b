@@ -20,7 +20,7 @@ class WatchFolder:
     conversion and copies qualifying directories to the inbox.
 
     A directory qualifies when it contains more than one file whose extension
-    is in AUDIO_EXTS (.mp3, .m4a, .m4b, .wma).  Video files (.mkv, .mp4,
+    is in AUDIO_EXTS (.mp3, .m4a, .m4b, .aac, .wma).  Video files (.mkv, .mp4,
     .mov, .m4v, .avi, …) are intentionally excluded from the count — this
     prevents music albums or video-with-commentary folders from being
     incorrectly treated as audiobooks.

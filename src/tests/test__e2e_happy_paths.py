@@ -73,6 +73,28 @@ class test_happy_paths:
         )
         assert tiny__flat_mp3.converted_dir.exists()
 
+    def test_backup_dir_not_created_when_disabled(self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str]):
+        """When BACKUP=False, check_dirs() must NOT create the backup directory.
+
+        Regression: backup_dir was always included in check_dirs() regardless
+        of the BACKUP setting, causing an empty folder to appear even when the
+        user had backups turned off.
+        """
+        from src.lib.config import cfg
+
+        with testutils.set_backups(False):
+            backup_dir = cfg.backup_dir
+            # Remove the dir if it already exists from a prior run so we get a
+            # clean slate for this assertion.
+            import shutil as _shutil
+            _shutil.rmtree(backup_dir, ignore_errors=True)
+
+            cfg.check_dirs()
+
+            assert not backup_dir.exists(), (
+                f"Backup dir should NOT be created when BACKUP=False, but found: {backup_dir}"
+            )
+
     def test_nonstandard_bitrate_mp3s(
         self,
         bitrate_nonstandard__mp3: Audiobook,

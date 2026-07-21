@@ -1160,6 +1160,12 @@ class test_tree_finding:
                 MOCKED.nested_dir,
                 MOCKED.series_parent_dir,
                 *MOCKED.series_books,
+                # Children of mock_book_container (an unknown/_likely_container at depth 1)
+                # are now recognised as book roots in depth-limited scans too, because
+                # _likely_container parents are treated equivalently to 'container' parents
+                # in determine_if_book_root.
+                MOCKED.container_root_dir / "mock_book_container_series",
+                MOCKED.container_root_dir / "mock_book_d2_it_takes_two",
             ]),
             # fmt: on
         ],
