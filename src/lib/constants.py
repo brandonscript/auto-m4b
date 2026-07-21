@@ -1,4 +1,4 @@
-AUDIO_EXTS = [".mp3", ".m4a", ".m4b", ".wma"]
+AUDIO_EXTS = [".mp3", ".m4a", ".m4b", ".aac", ".wma"]
 OTHER_EXTS = [
     ".jpg",
     ".jpeg",
