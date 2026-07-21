@@ -255,7 +255,9 @@ def convert_book_native(book: "Audiobook") -> int:
         raise FileNotFoundError(f"No audio files found in {merge_dir}")
 
     # ── 2. Determine codec strategy ───────────────────────────────────────────
-    should_copy = book.orig_file_type in ("m4a", "m4b")
+    # .aac (raw ADTS) shares the same codec as .m4a/.m4b — re-mux into MP4
+    # container without re-encoding for a fast, lossless conversion.
+    should_copy = book.orig_file_type in ("m4a", "m4b", "aac")
     codec = detect_aac_codec()
     bitrate: int = book.bitrate_target
     samplerate: int = book.samplerate

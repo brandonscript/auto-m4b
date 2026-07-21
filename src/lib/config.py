@@ -530,15 +530,17 @@ class Config:
 
     @property
     def all_roots(self):
-        return [
+        roots = [
             self.inbox_dir,
             self.converted_dir,
             self.archive_dir,
-            self.backup_dir,
             self.build_dir,
             self.merge_dir,
             self.trash_dir,
         ]
+        if self.BACKUP:
+            roots.append(self.backup_dir)
+        return roots
 
     @cached_property
     def GLOBAL_LOG_FILE(self):
@@ -571,12 +573,14 @@ class Config:
             self.inbox_dir,
             self.converted_dir,
             self.archive_dir,
-            self.backup_dir,
             self.working_dir,
             self.build_dir,
             self.merge_dir,
             self.trash_dir,
         ]
+        # Only create/validate the backup dir when backups are enabled.
+        if self.BACKUP:
+            dirs.append(self.backup_dir)
 
         for d in dirs:
             ensure_dir_exists_and_is_writable(d)

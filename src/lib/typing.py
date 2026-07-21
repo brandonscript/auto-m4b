@@ -17,7 +17,7 @@ import numpy as np
 P = ParamSpec("P")
 R = TypeVar("R")
 
-AudiobookFmt = Literal["m4b", "mp3", "m4a", "wma"]
+AudiobookFmt = Literal["m4b", "mp3", "m4a", "aac", "wma"]
 Operation = Literal["move", "copy"]
 OverwriteMode = Literal["skip", "skip-silent", "overwrite", "overwrite-silent"]
 OVERWRITE_MODES = ["skip", "skip-silent", "overwrite", "overwrite-silent"]

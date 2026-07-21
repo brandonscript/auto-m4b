@@ -906,14 +906,26 @@ class BooksTree(BaseModel):
         # that it is a container mis-scored under a depth-limited scan).
         if self.has_structure("single") and (p := self.parent) and p.not_has_structure("single"):
             if getattr(p, "_likely_container", False):
-                self._is_book_root = False
-                return self._is_book_root
+                # Only block when this 'single' node has NO audio files directly
+                # inside it — that signals it's a deeper container (e.g. a series
+                # dir with book subdirs) that the depth-limited scan couldn't fully
+                # classify.  If audio files ARE present directly (e.g. a single-M4B
+                # book in a publisher folder like "The Great Courses + TTC"), it IS
+                # a book root and should not be suppressed.
+                if not self._files:
+                    self._is_book_root = False
+                    return self._is_book_root
             self._is_book_root = True
             return self._is_book_root
 
-        # Any dir with a containerish parent or at inbox depth 1 is a book root
+        # Any dir with a containerish parent (or _likely_container) or at inbox
+        # depth 1 is a book root.  _likely_container marks "unknown"-structured
+        # directories whose diverse direct-child structures reveal them as containers
+        # (e.g. a publisher folder holding both flat and single book subdirs).
         if self.has_any_structure("flat", "mixed", "nested") and (
-            self.inbox_depth == 1 or (p := self.parent) and p.has_any_structure("container", "series_parent", "multi_parent")
+            self.inbox_depth == 1
+            or (p := self.parent) and p.has_any_structure("container", "series_parent", "multi_parent")
+            or (p := self.parent) and getattr(p, "_likely_container", False)
         ):
             self._is_book_root = True
             return self._is_book_root
