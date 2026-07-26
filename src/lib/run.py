@@ -19,6 +19,7 @@ from src.lib.formatters import (
     truncate_middle,
 )
 from src.lib.converter import convert_book_native
+from src.lib.hooks import run_post_convert_script
 from src.lib.id3_utils import verify_and_update_id3_tags
 from src.lib.inbox_state import InboxItem, InboxState
 from src.lib.logger import log_global_results
@@ -1122,7 +1123,11 @@ def process_book(b: int, item: InboxItem, _series_rerouted: bool = False):
     if not move_converted_book_and_extras(book):
         return b
 
+    # archive may delete/move the inbox path on disk; the Path on `book` remains
+    # usable for env vars passed to the post-convert hook.
     archive_inbox_book(book)
+
+    run_post_convert_script(book)
 
     print_book_done(b, book, elapsedtime)
     rm_dirs([book.build_dir, book.merge_dir], ignore_errors=True, even_if_not_empty=True)
