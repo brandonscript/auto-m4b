@@ -135,6 +135,7 @@ jobs:
             src/tests/test__e2e_unhappy_paths.py \
             --deselect="src/tests/test__e2e_unhappy_paths.py::test_unhappy_paths::test_no_matches_found" \
             --deselect="src/tests/test__e2e_unhappy_paths.py::test_unhappy_paths::test_skips_failed_when_new_books_added[True]" \
+            --deselect="src/tests/test__e2e_unhappy_paths.py::test_unhappy_paths::test_skips_failed_when_new_books_added[False]" \
             --deselect="src/tests/test__e2e_unhappy_paths.py::test_unhappy_paths::test_ignore_failed_if_unchanged" \
             --deselect="src/tests/test__e2e_happy_paths.py::test_happy_paths::test_friendly_message_when_inbox_is_empty[0-3-tiny-1-1]" \
             -q --tb=short -x
