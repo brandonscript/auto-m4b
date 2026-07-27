@@ -143,6 +143,7 @@ transformers = "^4.52.4"
 protobuf = "^6.31.1"
 sentencepiece = "^0.2.0"
 watchdog = ">=4.0"
+titlecase = "^2.4.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"
