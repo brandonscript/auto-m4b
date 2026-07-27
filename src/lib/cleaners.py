@@ -143,6 +143,24 @@ def strip_leading_articles(s: str) -> str:
     return leading_articles_pattern.sub("", s).strip()
 
 
+def title_case_ol_title(s: str) -> str:
+    """Apply Chicago-style Title Case to an Open Library title.
+
+    OL frequently returns titles in sentence case (e.g. ``The sunne in splendour``).
+    Use this only for OL-sourced titles — do not apply to user/ID3 titles when OL
+    is not involved.
+
+    Small words (a, an, the, of, in, …) stay lowercase except at the start (or
+    after a colon), apostrophes are preserved (``Devil's Brood``), and an already
+    title-cased string is left intact.
+    """
+    if not s:
+        return s
+    from titlecase import titlecase
+
+    return titlecase(s)
+
+
 def clean_name_abbreviations(s: str, mode: Literal["periods", "periods_spaces", "strip"] = "periods") -> str:
     """Cleans up name abbreviations, e.g. J.R.R. Tolkien -> J. R. R. Tolkien
     or J. R. R. Tolkien -> J.R.R. Tolkien, and applies periods to standalone capital letters

@@ -1057,3 +1057,131 @@ def test_album_tag_used_as_title_when_title_has_part_number(
     assert book.author == "Leo Tolstoy", (
         f"Expected author 'Leo Tolstoy', got '{book.author}'"
     )
+
+
+def test_ol_early_extraction_title_cases_sentence_case_ol_title(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """OL sentence-case titles must be Title-Cased when assigned to book.title.
+
+    Regression: 'The sunne in splendour' from OL produced sentence-case output
+    filenames (build_file / final_desc_file) and ID3 title tags.
+    """
+    from unittest.mock import PropertyMock, patch
+
+    from src.lib.config import cfg as real_cfg
+    from src.lib.id3_tags import Id3Tags
+    from src.lib.id3_utils import _ol_early_extraction
+
+    book = book_in_author_named_folder
+    # Seed ID3 with sentence case so OL is the authority for the match.
+    mock_id3_tags(
+        (
+            book.sample_audio1,
+            {
+                "title": "The sunne in splendour",
+                "album": "The sunne in splendour",
+                "artist": "Sharon Kay Penman",
+                "albumartist": "Sharon Kay Penman",
+            },
+        ),
+        (
+            book.sample_audio2,
+            {
+                "title": "The sunne in splendour",
+                "album": "The sunne in splendour",
+                "artist": "Sharon Kay Penman",
+                "albumartist": "Sharon Kay Penman",
+            },
+        ),
+    )
+    book.extract_path_info()
+
+    ol_result = _make_ol_result(
+        score=0.95,
+        title="The sunne in splendour",
+        author="Sharon Kay Penman",
+        date="1982",
+    )
+    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
+    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
+        with patch.object(
+            type(real_cfg),
+            "OPEN_LIBRARY_USER_AGENT",
+            new_callable=PropertyMock,
+            return_value="test-agent/1.0",
+        ):
+            result = _ol_early_extraction(book, tag1, tag1)
+
+    assert result is not None
+    assert book.title == "The Sunne in Splendour", (
+        f"Expected Title-Cased OL title, got '{book.title}'"
+    )
+    # build_file / desc file stems are driven by book.title
+    assert book.build_file.stem == "The Sunne in Splendour"
+    assert "The Sunne in Splendour" in book.final_desc_file.name
+
+
+def test_ol_verify_title_cases_sentence_case_into_id3_tags(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """verify_and_update_id3_tags must write Title-Cased OL titles into ID3 tags.
+
+    When book.title is still sentence-cased (e.g. early extraction did not run)
+    and OL returns sentence case, the written tag must still be Title Case.
+    """
+    import shutil
+    from unittest.mock import MagicMock, PropertyMock, patch
+
+    from src.lib.id3_utils import verify_and_update_id3_tags
+
+    book = book_in_author_named_folder
+    author = "Sharon Kay Penman"
+    sentence = "The reckoning"
+    expected = "The Reckoning"
+
+    mock_id3_tags(
+        (book.sample_audio1, {"title": sentence, "album": sentence, "artist": author, "albumartist": author}),
+        (book.sample_audio2, {"title": sentence, "album": sentence, "artist": author, "albumartist": author}),
+    )
+    book.extract_path_info()
+    book.extract_metadata()
+    # Force sentence-case book.title so verify's OL path is the fixer.
+    book.title = sentence
+    book.album = sentence
+
+    book.build_dir.mkdir(parents=True, exist_ok=True)
+    build_mp3 = book.build_dir / f"{sentence}.mp3"
+    shutil.copy(book.sample_audio1, build_mp3)
+    write_id3_tags_mutagen(
+        build_mp3, {"title": sentence, "album": sentence, "artist": author, "albumartist": author}
+    )
+
+    mock_ol_result = MagicMock()
+    mock_ol_result.__bool__ = lambda self: True
+    mock_ol_result.has_match = True
+    mock_ol_result.score = MagicMock(return_value=0.9)
+    mock_ol_result.title = sentence
+    mock_ol_result.author_and_narrator_swapped = False
+    mock_ol_result.author_score = MagicMock(return_value=0.95)
+    mock_ol_result.author = author
+    mock_ol_result.narrator = ""
+    mock_ol_result.date = ""
+
+    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=mock_ol_result):
+        with patch(
+            "src.lib.id3_utils.open_library_lookup_author",
+            return_value=MagicMock(__bool__=lambda self: False),
+        ):
+            with patch.object(type(book), "build_file", new_callable=PropertyMock, return_value=build_mp3):
+                verify_and_update_id3_tags(book, in_dir="build")
+
+    result_tags = extract_id3_tags(build_mp3)
+    assert result_tags.get("title") == expected, (
+        f"Expected ID3 title '{expected}', got '{result_tags.get('title')}'"
+    )
+    assert result_tags.get("album") == expected, (
+        f"Expected ID3 album '{expected}', got '{result_tags.get('album')}'"
+    )
