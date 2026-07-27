@@ -9,6 +9,8 @@ services:
       - /path/to/converted:/data/converted
       - /path/to/archive:/data/archive
       - /path/to/backup:/data/backup
+      # Optional: mount custom post-convert scripts
+      # - /path/to/scripts:/scripts:ro
     environment:
       - INBOX_FOLDER=/data/inbox
       - CONVERTED_FOLDER=/data/converted
@@ -19,3 +21,5 @@ services:
       # - BACKUP=Y
       # - OVERWRITE_EXISTING=N
       # - ON_COMPLETE=archive
+      # - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
+      # - POST_CONVERT_SCRIPT_TIMEOUT=30
