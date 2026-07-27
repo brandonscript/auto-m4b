@@ -748,15 +748,36 @@ def move_converted_book_and_extras(book: Audiobook):
 
 
 def cleanup_series_dir(parent: InboxItem | None):
-    from src.lib.fs_utils import _mv_or_cp_dir_contents, is_ok_to_delete, rm_dir
+    from src.lib.fs_utils import _mv_or_cp_dir_contents, count_audio_files_in_dir, is_ok_to_delete, rm_dir
 
-    if not parent or not parent.is_series_parent:
+    if not parent:
+        return
+
+    # After children are archived, a force-rescan may drop the series_parent
+    # structure (scorer sees no audio children). Still allow cleanup when the
+    # inbox folder remains on disk.
+    if not parent.is_series_parent and not parent.path.is_dir():
         print_debug(f"{parent} is not a series parent, can't move series extras or clean up")
         return
 
+    parent_book = parent.to_audiobook()
+
+    # Refuse to wipe a series parent that still has convertible audio — e.g. books
+    # dropped into the folder after the original matched_ok snapshot was taken.
+    # Skip this gate in test_do_nothing mode: originals are intentionally left in
+    # place, so audio will always remain.
+    if parent_book.inbox_dir.exists() and cfg.ON_COMPLETE != "test_do_nothing":
+        remaining_audio = count_audio_files_in_dir(parent_book.inbox_dir)
+        if remaining_audio > 0:
+            print_notice(
+                f"{pluralize_with_count(remaining_audio, 'audio file')} still in series folder "
+                f"[[{parent.basename}]] — deferring cleanup"
+            )
+            InboxState().scan(force=True)
+            return
+
     print_book_series_header(parent, progress=False, done=True)
 
-    parent_book = parent.to_audiobook()
     verb = "copy" if cfg.ON_COMPLETE == "test_do_nothing" else "move"
     # Move (or copy) series collateral to converted folder.
     # Guard: the inbox dir may already be gone if individual series books were
@@ -1237,12 +1258,97 @@ def process_inbox():
     inbox.start()
 
     b = 0
-    for item in inbox.matched_ok_books.values():
+    # Mutable queue so books dropped into a series folder mid-conversion are
+    # discovered (via force-rescan) and appended before series cleanup runs.
+    queue: list[InboxItem] = list(inbox.matched_ok_books.values())
+    seen: set[str] = set()
+
+    while queue:
+        item = queue.pop(0)
+        if item.key in seen:
+            continue
+        if item.status in ("gone", "processed") or item.is_gone:
+            continue
+        seen.add(item.key)
+
         b = process_book(b, item)
         divider("\n", "\n")
 
-        if item.is_series_book and item.is_last_book_in_series:
-            cleanup_series_dir(item.series_parent)
+        if item.is_series_book:
+            parent = item.series_parent
+            parent_key = (parent.key if parent else None) or item.series_key
+
+            def _unseen_sibling_dirs(p: InboxItem | None, key: str | None) -> list[Path]:
+                """Return on-disk sibling dirs that are not already known to the inbox.
+
+                Excludes dirs already processed (seen), queued, or present in
+                ``_items`` — so normal in-flight siblings do not trigger a
+                force-rescan. Only truly new mid-flight drops do.
+
+                Also treats standalone audio filenames as known by stem, so that
+                ``move_standalone_into_dir`` (which turns ``Book.m4a`` into a
+                ``Book/`` folder) does not look like a brand-new sibling.
+                """
+                if not key or not p or not p.path.is_dir():
+                    return []
+                try:
+                    from src.lib.config import AUDIO_EXTS
+
+                    def _names_for(entry: str) -> set[str]:
+                        names = {entry}
+                        path = Path(entry)
+                        if path.suffix.lower() in AUDIO_EXTS:
+                            names.add(path.stem)
+                        return names
+
+                    known_names: set[str] = set()
+                    for k in seen:
+                        if k == key or k.startswith(key + "/"):
+                            known_names |= _names_for(Path(k).name)
+                    for s in inbox.series_items_for_key(key):
+                        if s.key:
+                            known_names |= _names_for(Path(s.key).name)
+                    for i in queue:
+                        if i.key and (i.key == key or i.key.startswith(key + "/")):
+                            known_names |= _names_for(Path(i.key).name)
+
+                    return [
+                        d
+                        for d in p.path.iterdir()
+                        if d.is_dir()
+                        and not d.name.startswith(".")
+                        and d.name not in known_names
+                    ]
+                except OSError:
+                    return []
+
+            # Only force-rescan when new sibling dirs appear on disk. Blindly
+            # rescanning after every book reclassifies an empty(ish) parent and
+            # can drop the series_parent structure, which then skips cleanup.
+            unseen = _unseen_sibling_dirs(parent, parent_key)
+            if unseen:
+                inbox.scan(force=True)
+                parent = (inbox.get(parent_key) if parent_key else None) or parent
+                if parent_key:
+                    for sibling in inbox.series_items_for_key(parent_key):
+                        if (
+                            sibling.key not in seen
+                            and sibling.status in ("ok", "new", "needs_retry")
+                            and not sibling.is_filtered
+                            and sibling.tree.is_book_root
+                        ):
+                            queue.append(sibling)
+
+            if parent_key:
+                pending = [
+                    s
+                    for s in inbox.series_items_for_key(parent_key)
+                    if not s.is_gone and s.status not in ("gone", "processed")
+                ]
+                # Still-unseen on-disk dirs mean mid-flight drops aren't in
+                # _items yet — defer cleanup so we don't archive them.
+                if not pending and not _unseen_sibling_dirs(parent, parent_key) and parent:
+                    cleanup_series_dir(parent)
 
     # Sweep 1: series parents still in _items whose inbox dir became empty during this
     # run. Catches cases where is_last_book_in_series didn't fire (e.g. dict ordering

@@ -320,6 +320,11 @@ def _mv_or_cp_dir_contents(
     If moving, and the source directory is empty after moving files, it will be removed.
 
     Default overwrite mode is 'skip', which will raise an error if the destination directory already exists, because we shouldn't ever be automatically overwriting an entire directory.
+
+    When ``only_file_exts`` is set and this tree has no matching files, the call
+    returns immediately without creating ``dst_dir`` — this prevents empty
+    destination shells (e.g. series cleanup collateral walks over audio-only
+    book folders).
     """
     from src.lib.config import cfg
 
@@ -329,6 +334,25 @@ def _mv_or_cp_dir_contents(
     rm_empty_src_dir = operation == "move" and not keep_src_dir
 
     overwrite_mode = overwrite_mode or cfg.OVERWRITE_MODE
+
+    ignore = ignore_files or cfg.IGNORE_FILES
+
+    # Skip entirely (no dest mkdir) when a filtered walk would copy nothing.
+    if only_file_exts:
+        has_match = False
+        try:
+            for f in src_dir.rglob("*"):
+                if (
+                    f.is_file()
+                    and f.suffix in only_file_exts
+                    and f.name not in ignore
+                ):
+                    has_match = True
+                    break
+        except OSError:
+            return
+        if not has_match:
+            return
 
     if not check_src_dst(src_dir, "dir", dst_dir, "dir", overwrite_mode):
         raise FileNotFoundError("Source or destination directory does not exist")
@@ -395,7 +419,7 @@ def _mv_or_cp_dir_contents(
         src_rel_path = src_file.relative_to(src_dir)
         if src_file.is_dir():
             # Skip ignored directories entirely (e.g. .AppleDouble, __MACOSX).
-            if src_file.name in (ignore_files or cfg.IGNORE_FILES):
+            if src_file.name in ignore:
                 continue
             _mv_or_cp_dir_contents(
                 operation,

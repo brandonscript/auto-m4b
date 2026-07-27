@@ -1,3 +1,4 @@
+import re
 import shutil
 
 import pytest
@@ -288,3 +289,97 @@ class test_series:
         assert en.BOOK_NEEDS_FLATTENING not in out, (
             "Flatten message should not appear when book is inside an author dir"
         )
+
+    def test_midflight_series_addition_is_picked_up(
+        self,
+        Chanur_Series: list[Audiobook],
+        enable_archiving,
+        capfd: pytest.CaptureFixture[str],
+    ):
+        """Books dropped into a series folder while conversion is in flight must be
+        discovered via the mid-loop rescan, appended to the work queue, and converted
+        — and the Book Series tracker dots must grow to include them.
+
+        Regression for: Dark Tower 1–7 added to King, Stephen mid-run were archived
+        by cleanup_series_dir without ever being converted.
+        """
+        import os
+        import time
+        from unittest.mock import patch
+
+        from src.lib import run as run_module
+        from src.lib.config import cfg
+
+        series_parent = Chanur_Series[0]
+        midflight_name = "06 - Midflight Book"
+        midflight_dir = series_parent.inbox_dir / midflight_name
+        converted_midflight = series_parent.converted_dir / midflight_name
+
+        call_count = {"n": 0}
+        original_process_book = run_module.process_book
+
+        def process_then_inject(b, item, _series_rerouted=False):
+            result = original_process_book(b, item, _series_rerouted=_series_rerouted)
+            call_count["n"] += 1
+            # After the first book finishes, drop a new sibling into the series folder.
+            if call_count["n"] == 1 and not midflight_dir.exists():
+                midflight_dir.mkdir(parents=True, exist_ok=True)
+                src = FIXTURES_ROOT / "basic_with_cover__standalone_mp3.mp3"
+                dest = midflight_dir / "chapter01.mp3"
+                shutil.copy(src, dest)
+                # Age so was_recently_modified does not skip the new book.
+                old = time.time() - (cfg.WAIT_TIME * 3 + 1)
+                os.utime(dest, (old, old))
+                os.utime(midflight_dir, (old, old))
+            return result
+
+        with patch("src.lib.run.process_book", process_then_inject):
+            app(max_loops=1)
+
+        assert not cfg.FATAL_FILE.exists(), "App crashed fatally"
+        assert converted_midflight.exists(), (
+            f"Mid-flight book should have been converted to {converted_midflight}"
+        )
+        m4bs = list(converted_midflight.glob("*.m4b"))
+        assert m4bs, f"Expected an .m4b under {converted_midflight}"
+
+        out = testutils.get_stdout(capfd)
+        # Original Chanur series is 5 books; after mid-flight add the tracker should
+        # show 6 dots at some point (••••••).
+        assert "Book Series" in out
+        assert re.search(r"Book Series[^\n]*••••••", testutils.strip_ansi_codes(out)), (
+            "Series tracker should grow to 6 dots after mid-flight addition"
+        )
+
+    def test_cleanup_series_dir_defers_when_audio_remains(
+        self,
+        Chanur_Series: list[Audiobook],
+        enable_archiving,
+        capfd: pytest.CaptureFixture[str],
+    ):
+        """cleanup_series_dir must not archive/delete a series parent that still
+        contains audio files (e.g. mid-flight drops not yet in the work queue).
+        """
+        from src.lib.config import cfg
+        from src.lib.inbox_state import InboxState
+        from src.lib.run import cleanup_series_dir
+
+        series_parent = Chanur_Series[0]
+        leftover_dir = series_parent.inbox_dir / "99 - Leftover Book"
+        leftover_dir.mkdir(parents=True, exist_ok=True)
+        src = FIXTURES_ROOT / "basic_with_cover__standalone_mp3.mp3"
+        leftover_mp3 = leftover_dir / "leftover.mp3"
+        shutil.copy(src, leftover_mp3)
+
+        inbox = InboxState()
+        inbox.scan(force=True)
+        parent_item = inbox.get(series_parent.key)
+        assert parent_item is not None and parent_item.is_series_parent
+
+        cleanup_series_dir(parent_item)
+
+        assert leftover_mp3.exists(), "Leftover audio must not be archived/deleted"
+        assert series_parent.inbox_dir.exists(), "Series parent must remain when audio is present"
+        out = testutils.get_stdout(capfd)
+        assert "deferring cleanup" in testutils.strip_ansi_codes(out).lower()
+        assert not cfg.FATAL_FILE.exists()

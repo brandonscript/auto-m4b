@@ -10,7 +10,9 @@ from PIL import Image
 from src.lib.audiobook import Audiobook
 from src.lib.books_tree import BooksTree
 from src.lib.compare import calculate_gcs_percentage, find_greatest_common_string
+from src.lib.constants import OTHER_EXTS
 from src.lib.fs_utils import (
+    _mv_or_cp_dir_contents,
     filter_ignored,
     find_cover_art_file,
 )
@@ -515,3 +517,29 @@ class test_safe_filename:
         from src.lib.fs_utils import safe_filename
 
         assert safe_filename(name) == expected
+
+
+def test_mv_or_cp_filtered_does_not_create_empty_dest_dirs(tmp_path: Path):
+    """OTHER_EXTS-only collateral walks must not mkdir empty destination shells
+    for audio-only book subfolders (the Dark Tower empty-converted-dir bug).
+    """
+    src = tmp_path / "series"
+    audio_only = src / "Dark Tower 1"
+    audio_only.mkdir(parents=True)
+    (audio_only / "disk01.mp3").write_bytes(b"fake-mp3")
+    # Collateral that SHOULD be copied lives at the series root.
+    (src / "cover.jpg").write_bytes(b"fake-jpg")
+
+    dst = tmp_path / "converted"
+    _mv_or_cp_dir_contents(
+        "copy",
+        src,
+        dst,
+        only_file_exts=OTHER_EXTS,
+        overwrite_mode="overwrite-silent",
+    )
+
+    assert (dst / "cover.jpg").is_file()
+    assert not (dst / "Dark Tower 1").exists(), (
+        "Audio-only child must not create an empty dest dir during filtered collateral copy"
+    )
