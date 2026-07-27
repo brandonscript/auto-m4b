@@ -252,12 +252,25 @@ class InboxItem:
 
     @property
     def is_last_book_in_series(self):
-        return (
-            self.is_series_book
-            and (parent := self.series_parent)
-            and (series_books := parent.series_books)
-            and series_books[-1] == self
-        )
+        """True when no other series siblings still need processing.
+
+        Unlike a fixed insertion-order check, this stays False while mid-flight
+        additions (or earlier siblings that haven't been converted yet) remain
+        pending — so series cleanup won't archive them prematurely.
+        """
+        if not self.is_series_book:
+            return False
+        parent = self.series_parent
+        if not parent:
+            return False
+        remaining = [
+            b
+            for b in parent.series_books
+            if not b.is_gone and b.status not in ("gone", "processed")
+        ]
+        # After this book is archived it is gone, so remaining==[] means we were last.
+        # If we haven't been marked gone yet, we are last only when we are the sole pending book.
+        return len(remaining) == 0 or (len(remaining) == 1 and remaining[0] == self)
 
     @property
     def series_parent(self):

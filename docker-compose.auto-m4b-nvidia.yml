@@ -13,8 +13,11 @@ services:
     restart: unless-stopped
     volumes:
       - ragnarok-media:/media:rw
+      - /etc/docker/scripts/auto-m4b:/scripts:ro
     networks:
       - bridge
+    env_file:
+      - /etc/docker/scripts/auto-m4b/post-convert-deluge.env
     environment:
       - INBOX_FOLDER=/media/Books/Audiobooks/#auto-m4b/inbox
       - CONVERTED_FOLDER=/media/Books/Audiobooks/#auto-m4b/converted
@@ -33,6 +36,9 @@ services:
       - TZ=America/Vancouver
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+      # Post-convert hook: Deluge finalize (script + secrets via env_file above).
+      - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
+      - POST_CONVERT_SCRIPT_TIMEOUT=30
     deploy:
       resources:
         reservations:

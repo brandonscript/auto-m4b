@@ -352,6 +352,28 @@ class Config:
 
     WAIT_TIME = _WAIT_TIME
 
+    @env_property(
+        typ=str,
+        default="",
+        on_get=lambda v: v if str(v).lower() not in ["none", ""] else None,
+        on_set=lambda v: v if str(v).lower() not in ["none", ""] else None,
+        del_on_none=False,
+    )
+    def _POST_CONVERT_SCRIPT(self):
+        """Path to a Python (.py) or bash (.sh) script to run after each successful conversion.
+        Empty / unset disables the hook.
+        """
+        ...
+
+    POST_CONVERT_SCRIPT = _POST_CONVERT_SCRIPT
+
+    @env_property(typ=int, default=60)
+    def _POST_CONVERT_SCRIPT_TIMEOUT(self):
+        """Seconds before the post-convert script is killed. Default is 60."""
+        ...
+
+    POST_CONVERT_SCRIPT_TIMEOUT = _POST_CONVERT_SCRIPT_TIMEOUT
+
     @property
     def sleeptime_friendly(self):
         """If it can be represented as a whole number, do so as {number}s

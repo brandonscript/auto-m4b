@@ -173,6 +173,8 @@ All options are set via environment variables (`.env` file or shell environment)
 | `USE_FILENAMES_AS_CHAPTERS` | `N` | Set to `Y` to derive chapter titles from filenames instead of ID3 tags |
 | `NO_CATS` | `N` | Set to `Y` to suppress the ASCII cat art between loops |
 | `OPEN_LIBRARY_USER_AGENT` | *(none)* | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup)) |
+| `POST_CONVERT_SCRIPT` | *(none)* | Path to a Python (`.py`) or bash (`.sh`) script to run after each successful conversion (see [Post-conversion scripts](#post-conversion-scripts)) |
+| `POST_CONVERT_SCRIPT_TIMEOUT` | `60` | Seconds before the post-convert script is killed |
 
 ## Open Library setup
 
@@ -211,6 +213,70 @@ Replace both placeholders with real values — do **not** leave the example text
 
 When the variable is unset or left as the placeholder, OL lookups are silently skipped and
 author/narrator are determined from ID3 tags alone.
+
+## Post-conversion scripts
+
+auto-m4b can run a custom script after each successful conversion. Set
+`POST_CONVERT_SCRIPT` to the path of a `.py` or `.sh` file (or any executable).
+The script runs **after** the converted `.m4b` has been moved to `CONVERTED_FOLDER`
+and the inbox source has been archived/deleted per `ON_COMPLETE`.
+
+A failing or timed-out script only logs a warning — it never aborts the
+conversion cycle or prevents the next book from being processed. Script
+stdout/stderr (and failure details) are written to a dedicated
+`auto-m4b.<title>.post-convert.log` next to the converted `.m4b` (not the
+`[quality].txt` description file), and non-zero exits also print those details
+to the console warning so they aren't swallowed when `DEBUG` is off.
+
+### Environment variables passed to the script
+
+| Variable | Description |
+|---|---|
+| `AUTO_M4B_INBOX_PATH` | Original inbox path for the book (may no longer exist on disk if archived/deleted) |
+| `AUTO_M4B_CONVERTED_PATH` | Full path to the finished `.m4b` file |
+| `AUTO_M4B_CONVERTED_DIR` | Directory containing the converted output |
+| `AUTO_M4B_TITLE` | Book title (from ID3 / Open Library / filename heuristics) |
+| `AUTO_M4B_AUTHOR` | Book author |
+| `AUTO_M4B_KEY` | Inbox-relative key (folder name / nested path) |
+| `AUTO_M4B_WATCH_SOURCE` | Reconstructed path under `WATCH_FOLDER` (`WATCH_FOLDER`/`AUTO_M4B_KEY`), or empty if `WATCH_FOLDER` is unset |
+
+### Python example
+
+```python
+#!/usr/bin/env python3
+import os
+
+title = os.environ["AUTO_M4B_TITLE"]
+author = os.environ["AUTO_M4B_AUTHOR"]
+converted = os.environ["AUTO_M4B_CONVERTED_PATH"]
+print(f"Converted '{title}' by {author} → {converted}")
+```
+
+### Bash example
+
+```bash
+#!/usr/bin/env bash
+echo "Converted '${AUTO_M4B_TITLE}' by ${AUTO_M4B_AUTHOR} → ${AUTO_M4B_CONVERTED_PATH}"
+```
+
+### Docker setup
+
+Mount a scripts directory into the container and point `POST_CONVERT_SCRIPT` at it:
+
+```yaml
+volumes:
+  - /path/to/scripts:/scripts:ro
+environment:
+  - POST_CONVERT_SCRIPT=/scripts/my-hook.py
+  - POST_CONVERT_SCRIPT_TIMEOUT=30
+```
+
+### Site-specific hooks (e.g. Deluge)
+
+Deluge finalize (relabel + `move_storage` after converting a book copied from
+`WATCH_FOLDER`) is intentionally **not** shipped in this repo — mount your own
+script via `POST_CONVERT_SCRIPT`. A site-specific example for phantom-docker
+lives at `/etc/docker/scripts/auto-m4b/post-convert-deluge.py`.
 
 ## Development
 

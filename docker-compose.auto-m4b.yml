@@ -20,6 +20,7 @@ services:
     restart: unless-stopped
     volumes:
       - ragnarok-media:/media:rw
+      - /etc/docker/scripts/auto-m4b:/scripts:ro
     networks:
       - bridge
     environment:
@@ -40,3 +41,10 @@ services:
       # Optional: set to a downloads folder to automatically copy new audiobooks
       # into the inbox. Only directories with more than one audio file are copied.
       - WATCH_FOLDER=/media/Downloads/books
+      # Optional: run a Python/bash script after each successful conversion.
+      # Site-specific Deluge finalize lives in /etc/docker/scripts/auto-m4b/
+      # - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
+      # - POST_CONVERT_SCRIPT_TIMEOUT=30
+      # And load Deluge secrets/paths via:
+      # env_file:
+      #   - /etc/docker/scripts/auto-m4b/post-convert-deluge.env

@@ -411,6 +411,16 @@ class Audiobook(BaseModel):
     def log_file(self) -> Path:
         return (self.active_dir.parent if self.active_dir.is_file() else self.active_dir) / self.log_filename
 
+    @property
+    def post_convert_log_filename(self) -> str:
+        stem = safe_filename(self.title or self.basename)
+        return f"auto-m4b.{stem}.post-convert.log"
+
+    @property
+    def post_convert_log_file(self) -> Path:
+        """Dedicated log for POST_CONVERT_SCRIPT output, next to the converted .m4b."""
+        return self.converted_dir / self.post_convert_log_filename
+
     def write_log(self, *s: str):
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self.log_file.touch(exist_ok=True)
