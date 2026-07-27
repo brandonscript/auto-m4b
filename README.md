@@ -275,10 +275,8 @@ environment:
 
 Deluge finalize (relabel + `move_storage` after converting a book copied from
 `WATCH_FOLDER`) is intentionally **not** shipped in this repo — mount your own
-script via `POST_CONVERT_SCRIPT`. A ready-made example for phantom-docker lives
-at `/etc/docker/scripts/auto-m4b/post-convert-deluge.py` (see the matching
-`post-convert-deluge.env.example` for `DELUGE_WEB_URL`, password, path roots,
-and label names).
+script via `POST_CONVERT_SCRIPT`. A site-specific example for phantom-docker
+lives at `/etc/docker/scripts/auto-m4b/post-convert-deluge.py`.
 
 ## Development
 

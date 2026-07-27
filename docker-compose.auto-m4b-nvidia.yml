@@ -16,6 +16,8 @@ services:
       - /etc/docker/scripts/auto-m4b:/scripts:ro
     networks:
       - bridge
+    env_file:
+      - /etc/docker/scripts/auto-m4b/post-convert-deluge.env
     environment:
       - INBOX_FOLDER=/media/Books/Audiobooks/#auto-m4b/inbox
       - CONVERTED_FOLDER=/media/Books/Audiobooks/#auto-m4b/converted
@@ -34,18 +36,9 @@ services:
       - TZ=America/Vancouver
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-      # Post-convert hook: Deluge finalize (script lives in phantom-docker, not auto-m4b).
+      # Post-convert hook: Deluge finalize (script + secrets via env_file above).
       - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
       - POST_CONVERT_SCRIPT_TIMEOUT=30
-      - DELUGE_WEB_URL=http://deluge:8112
-      # Set to your Deluge Web UI password:
-      - DELUGE_WEB_PASSWORD=
-      - LOCAL_MEDIA_ROOT=/media
-      - DELUGE_MEDIA_ROOT=/media
-      - DOWNLOADS_BOOKS_ROOT=/media/Downloads/books
-      - BOOKS_SEEDING_DELUGE=/media/Downloads/.books-seeding
-      - DELUGE_BOOKS_LABEL=books
-      - DELUGE_SEEDING_LABEL=books-seeding
     deploy:
       resources:
         reservations:

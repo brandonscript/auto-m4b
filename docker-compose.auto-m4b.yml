@@ -45,11 +45,6 @@ services:
       # Site-specific Deluge finalize lives in /etc/docker/scripts/auto-m4b/
       # - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
       # - POST_CONVERT_SCRIPT_TIMEOUT=30
-      # - DELUGE_WEB_URL=http://deluge:8112
-      # - DELUGE_WEB_PASSWORD=
-      # - LOCAL_MEDIA_ROOT=/media
-      # - DELUGE_MEDIA_ROOT=/media
-      # - DOWNLOADS_BOOKS_ROOT=/media/Downloads/books
-      # - BOOKS_SEEDING_DELUGE=/media/Downloads/.books-seeding
-      # - DELUGE_BOOKS_LABEL=books
-      # - DELUGE_SEEDING_LABEL=books-seeding
+      # And load Deluge secrets/paths via:
+      # env_file:
+      #   - /etc/docker/scripts/auto-m4b/post-convert-deluge.env
