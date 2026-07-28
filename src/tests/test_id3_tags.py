@@ -1185,3 +1185,103 @@ def test_ol_verify_title_cases_sentence_case_into_id3_tags(
     assert result_tags.get("album") == expected, (
         f"Expected ID3 album '{expected}', got '{result_tags.get('album')}'"
     )
+
+
+def test_ensure_title_falls_back_to_basename_when_tags_empty(tmp_path):
+    """When ID3 + fs_title are empty, title/album must come from the folder name.
+
+    Regression for Crescent City Fae [Boxed Set]: Books1-3 fix stopped fs_title='3'
+    but left title/album blank → Plex '[Unknown Album]'.
+    """
+    from src.lib.books_tree.books_tree import BooksTree
+    from src.lib.id3_utils import ensure_title_and_album, extract_metadata
+
+    folder = tmp_path / "Crescent City Fae [Boxed Set]"
+    folder.mkdir()
+    # Minimal fake mp3 so sample_audio resolves; tags will be empty/unreadable.
+    mp3 = folder / "Crescent City Fae Complete Boxed Set Books1-3 Part1.mp3"
+    # Copy a real tiny fixture if available, else write a stub and mock tags.
+    from src.tests.helpers.pytest_dumps import FIXTURES_ROOT
+    import shutil
+
+    src = FIXTURES_ROOT / "basic_with_cover__standalone_mp3.mp3"
+    if src.is_file():
+        shutil.copy(src, mp3)
+    else:
+        mp3.write_bytes(b"ID3")
+
+    book = Audiobook(BooksTree(folder))
+    book.extract_path_info()
+    # Simulate the Books1-3 case: no usable fs_title, empty ID3 title/album.
+    book.fs_title = ""
+    book.id3_title = ""
+    book.id3_album = ""
+    book.id3_sortalbum = ""
+    book.title = ""
+    book.album = ""
+
+    ensure_title_and_album(book)
+
+    assert book.title == "Crescent City Fae [Boxed Set]"
+    assert book.album == "Crescent City Fae [Boxed Set]"
+    assert book.sortalbum
+
+
+def test_extract_metadata_never_leaves_title_blank(
+    tiny__flat_mp3: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """extract_metadata must set a non-empty title even with blank source tags."""
+    book = tiny__flat_mp3
+    mock_id3_tags(
+        (book.sample_audio1, {"title": "", "album": "", "artist": "Some Author", "albumartist": "Some Author"}),
+        (book.sample_audio2, {"title": "", "album": "", "artist": "Some Author", "albumartist": "Some Author"}),
+    )
+    book.extract_path_info()
+    # Force empty fs_title so basename fallback is what saves us.
+    book.fs_title = ""
+    book.extract_metadata()
+
+    assert (book.title or "").strip(), "title must not be blank after extract_metadata"
+    assert (book.album or "").strip(), "album must not be blank after extract_metadata"
+    # Should fall back to inbox folder basename when tags + fs_title are empty.
+    assert book.title == book.basename or len(book.title) >= 3
+
+
+def test_verify_fills_empty_title_album_on_converted_file(
+    tiny__flat_mp3: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    """verify_and_update_id3_tags must write Title/Album when the m4b has them blank."""
+    import shutil
+    from unittest.mock import PropertyMock, patch
+
+    from src.lib.id3_utils import verify_and_update_id3_tags, write_id3_tags_mutagen
+
+    book = tiny__flat_mp3
+    mock_id3_tags(
+        (book.sample_audio1, {"title": "", "album": "", "artist": "Franklin W. Dixon", "albumartist": "Franklin W. Dixon"}),
+        (book.sample_audio2, {"title": "", "album": "", "artist": "Franklin W. Dixon", "albumartist": "Franklin W. Dixon"}),
+    )
+    book.extract_path_info()
+    book.fs_title = ""
+    book.extract_metadata()
+    assert book.title  # ensure_title_and_album filled it
+
+    book.build_dir.mkdir(parents=True, exist_ok=True)
+    build_mp3 = book.build_dir / f"{book.basename}.mp3"
+    shutil.copy(book.sample_audio1, build_mp3)
+    # Write a file with empty title/album (the bug state).
+    write_id3_tags_mutagen(
+        build_mp3,
+        {"title": "", "album": "", "artist": "Franklin W. Dixon", "albumartist": "Franklin W. Dixon"},
+    )
+
+    with patch.object(type(book), "build_file", new_callable=PropertyMock, return_value=build_mp3):
+        verify_and_update_id3_tags(book, in_dir="build")
+
+    result = extract_id3_tags(build_mp3)
+    assert (result.get("title") or "").strip(), f"Title still blank: {result}"
+    assert (result.get("album") or "").strip(), f"Album still blank: {result}"
+    assert result.get("title") == book.title
+    assert result.get("album") == book.album
