@@ -62,6 +62,43 @@ class test_happy_paths:
         )
         assert blackmail_bibingka__flat_m4b.converted_dir.exists()
 
+    def test_multipart_m4b_merges_even_if_structure_claims_single(
+        self,
+        blackmail_bibingka__flat_m4b: Audiobook,
+        capfd: CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Multi-part m4b must merge when the tree is wrongly scored as single.
+
+        Regression: Angel of Darkness (3 part .m4bs) was moved to converted via
+        process_already_m4b because structure said single/standalone with no
+        filesystem audio-count gate.
+        """
+        from src.lib.books_tree.books_tree import BooksTree
+
+        original = BooksTree.has_any_structure
+
+        def claim_single(self, *structs):
+            if set(structs) & {"single", "standalone_file"}:
+                return True
+            return original(self, *structs)
+
+        monkeypatch.setattr(BooksTree, "has_any_structure", claim_single)
+
+        app(max_loops=1)
+        out = testutils.get_stdout(capfd)
+        assert "already been converted" not in out, (
+            "Multi-part m4b must not take process_already_m4b when disk has >1 audio file"
+        )
+        assert testutils.assert_processed_output(
+            out,
+            blackmail_bibingka__flat_m4b,
+            loops=[testutils.check_output(found_books_eq=1, converted_eq=1)],
+        )
+        assert blackmail_bibingka__flat_m4b.converted_dir.exists()
+        m4bs = list(blackmail_bibingka__flat_m4b.converted_dir.glob("*.m4b"))
+        assert len(m4bs) == 1, f"Expected one merged m4b, got {m4bs}"
+
     def test_backup_book_mp3(self, tiny__flat_mp3: Audiobook, capfd: CaptureFixture[str], enable_backups):
         app(max_loops=1)
         out = testutils.get_stdout(capfd)

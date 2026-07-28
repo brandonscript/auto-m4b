@@ -1266,3 +1266,25 @@ def safe_filename(name: str) -> str:
         name = name.replace(bad, good)
     # Collapse any runs of spaces introduced by the replacements
     return " ".join(name.split())
+
+
+def ensure_audio_ext(name: str, ext: str = ".m4b") -> str:
+    """Ensure *name* ends with an audio extension without using ``Path.with_suffix``.
+
+    ``Path.with_suffix`` / ``Path.stem`` treat the first ``.`` in titles like
+    ``Dr. Laszlo…`` or ``3. Some Title`` as a file suffix, truncating to
+    ``Dr.m4b`` / ``3.m4b``.  This helper only strips a known audio extension
+    when the name *endswith* that extension (case-insensitive).
+    """
+    from src.lib.constants import AUDIO_EXTS
+    from src.lib.formatters import ensure_dot
+
+    safe = safe_filename(name)
+    lower = safe.lower()
+    target = ensure_dot(ext).lower()
+    for audio_ext in AUDIO_EXTS:
+        if lower.endswith(audio_ext):
+            return safe[: -len(audio_ext)] + ensure_dot(ext)
+    if lower.endswith(target):
+        return safe
+    return safe + ensure_dot(ext)

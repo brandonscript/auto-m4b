@@ -519,6 +519,38 @@ class test_safe_filename:
         assert safe_filename(name) == expected
 
 
+class test_ensure_audio_ext:
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            # Title dots must NOT truncate (Path.with_suffix footgun)
+            (
+                "Dr. Laszlo Kreizler 02 - The Angel of Darkness (1997)",
+                "Dr. Laszlo Kreizler 02 - The Angel of Darkness (1997).m4b",
+            ),
+            ("3. Some Title", "3. Some Title.m4b"),
+            ("Dispenza, Dr. Joe", "Dispenza, Dr. Joe.m4b"),
+            # Already has .m4b — keep as-is (after safe_filename)
+            ("The Alienist.m4b", "The Alienist.m4b"),
+            ("The Alienist.M4B", "The Alienist.m4b"),
+            # Other audio ext → replace with .m4b
+            ("Book Title.mp3", "Book Title.m4b"),
+            ("Book Title.m4a", "Book Title.m4b"),
+            # Colon sanitized then extended
+            ("Into the Fire: A LitRPG Adventure", "Into the Fire - A LitRPG Adventure.m4b"),
+        ],
+    )
+    def test_ensure_audio_ext(self, name: str, expected: str):
+        from src.lib.fs_utils import ensure_audio_ext
+
+        assert ensure_audio_ext(name) == expected
+
+    def test_ensure_audio_ext_custom_ext(self):
+        from src.lib.fs_utils import ensure_audio_ext
+
+        assert ensure_audio_ext("Dr. Who", ".mp3") == "Dr. Who.mp3"
+
+
 def test_mv_or_cp_filtered_does_not_create_empty_dest_dirs(tmp_path: Path):
     """OTHER_EXTS-only collateral walks must not mkdir empty destination shells
     for audio-only book subfolders (the Dark Tower empty-converted-dir bug).

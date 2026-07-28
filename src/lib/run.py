@@ -109,11 +109,14 @@ def process_already_m4b(book: Audiobook, item: InboxItem):
         if unique_target.exists():
             smart_print("(A file with the same name already exists, this one will be renamed to prevent data loss)")
 
+            from src.lib.fs_utils import ensure_audio_ext
+
             i = 0
-            unique_target = (target_dir / f"{folder_name} (copy)").with_suffix(ext)
+            # ensure_audio_ext — Path.with_suffix truncates titles like "Dr. Laszlo…"
+            unique_target = target_dir / ensure_audio_ext(f"{folder_name} (copy)", ext)
             while unique_target.exists():
                 i += 1
-                unique_target = (target_dir / f"{folder_name} (copy {i})").with_suffix(ext)
+                unique_target = target_dir / ensure_audio_ext(f"{folder_name} (copy {i})", ext)
 
         mv_file_into_dir(item.path, target_dir, new_filename=unique_target.name)
 
@@ -1086,9 +1089,21 @@ def process_book(b: int, item: InboxItem, _series_rerouted: bool = False):
 
     if book.tree.has_any_structure("single", "standalone_file"):
         if book.orig_file_type == "m4b":
-            b += process_already_m4b(book, item)
-            if item.is_gone:
-                return b
+            # Only passthrough a true single-file m4b. Multi-part m4b folders
+            # (Part 1/2/3) must merge even if the tree was mis-scored as single
+            # or the cached file count is stale vs the filesystem.
+            from src.lib.fs_utils import count_audio_files_in_dir
+
+            audio_on_disk = (
+                1
+                if book.tree.is_file()
+                else count_audio_files_in_dir(book.inbox_dir, only_file_exts=cfg.AUDIO_EXTS)
+            )
+            if audio_on_disk <= 1:
+                b += process_already_m4b(book, item)
+                if item.is_gone:
+                    return b
+            # else: fall through to normal merge/passthrough
         elif book.tree.is_file():
             book, item = move_standalone_into_dir(book, item)
 
