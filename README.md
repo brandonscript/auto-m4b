@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="auto-m4b" width="280">
+</p>
+
 # auto-m4b
 
 A Python-native audiobook converter that watches a folder for new audiobooks and automatically converts multi-file MP3/M4A collections into a single, chapterized `.m4b`.
