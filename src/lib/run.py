@@ -378,8 +378,13 @@ def ok_to_overwrite(book: Audiobook):
 
     # Identical re-drop: archive still has the same audio fingerprint as the inbox.
     if book.archive_dir.exists() and audio_fingerprints_match(book.inbox_dir, book.archive_dir):
+        try:
+            fp = book.hash("inbox")[:6]
+        except Exception:
+            fp = "?"
         print_notice(
-            f"Found an identical copy of this book in {tint_path(cfg.archive_dir)}; skipping reconvert"
+            f"Found an identical copy of this book in {tint_path(cfg.archive_dir)} "
+            f"(fingerprint {fp}); skipping reconvert"
         )
         print_notice("Skipping this book because OVERWRITE_EXISTING is not enabled")
         InboxState().set_processed(book)
@@ -598,6 +603,10 @@ def print_book_info(book: "Audiobook"):
     num_files = 1 if book.tree.has_structure("standalone_file") else book.num_files("inbox")
     print_list_item(f"Audio files: {num_files}")
     print_list_item(f"Total size: {book.size('inbox', 'human')}")
+    try:
+        print_list_item(f"Fingerprint: {book.hash('inbox')[:6]}")
+    except Exception:
+        pass
     if book.cover_art_file:
         print_list_item(f"Cover art: {book.cover_art_file.name}")
 
