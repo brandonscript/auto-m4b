@@ -187,3 +187,14 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Hub overview can render README images, but only with absolute URLs.
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: brandonscript/auto-m4b
+          short-description: ${{ github.event.repository.description }}
+          readme-filepath: ./README.md
+          enable-url-completion: true
