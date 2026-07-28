@@ -160,6 +160,31 @@ class InboxState(Hasher):
     def is_empty(self):
         return not bool(self._items)
 
+    def _should_reset_processed_item(self, item: InboxItem) -> bool:
+        """True when a processed inbox book is eligible for reconvert.
+
+        Converted output gone AND archive missing or fingerprint differs → reset.
+        Converted still present, or archive is an identical re-drop → keep processed.
+        """
+        from src.lib.fs_utils import audio_fingerprints_match
+
+        book = item.to_audiobook()
+        if book.converted_file.is_file():
+            try:
+                if book.size("converted", "bytes") > 0:
+                    return False
+            except Exception:
+                return False
+        if not book.archive_dir.exists():
+            return True
+        return not audio_fingerprints_match(book.inbox_dir, book.archive_dir)
+
+    def _any_processed_eligible_for_reset(self) -> bool:
+        return any(
+            item.status == "processed" and self._should_reset_processed_item(item)
+            for item in self._items.values()
+        )
+
     def scan(
         self,
         recheck_failed: bool = False,
@@ -204,9 +229,11 @@ class InboxState(Hasher):
                 # replaced with properly scanned nodes, preventing requires_scan errors.
                 existing.tree = v.tree
                 if existing.status == "processed":
-                    # Item was processed but left on disk (e.g. ON_COMPLETE=test_do_nothing).
-                    # Keep the "processed" status so it won't be re-converted.
-                    pass
+                    # Keep "processed" while converted output still exists, or while the
+                    # archive still has an identical audio fingerprint (identical re-drop).
+                    # If converted is gone and archive is missing/different, allow reconvert.
+                    if self._should_reset_processed_item(existing):
+                        existing.status = "new"
                 elif existing.status == "gone":
                     # Item reappeared (e.g. renamed away then back) — treat as new.
                     existing.status = "new"
@@ -528,6 +555,21 @@ class InboxState(Hasher):
         needs_scan = self.changed_since_last_run_ended or self.changed_since_last_run_started
         hash_changed = False
         self.inbox_hash_changed = False
+
+        # Break the idle deadlock: after an empty startup scan, curr_hash stays at the
+        # empty-inbox value and scan() never runs because needs_scan was only derived
+        # from that stale cache.  Recompute a live hash when we have no ok books yet
+        # (or when a previously-skipped book may now be eligible to reconvert).
+        if not needs_scan and (not self.matched_ok_books or self._any_processed_eligible_for_reset()):
+            live_hash = self.next_hash
+            if live_hash != self.curr_hash or (
+                self.last_run_end_hash and live_hash != self.last_run_end_hash
+            ):
+                needs_scan = True
+            elif self._any_processed_eligible_for_reset():
+                # Inbox hash unchanged, but converted output was removed for a
+                # processed book — force a scan so status can reset to "new".
+                needs_scan = True
 
         print_debug(
             f"[inbox_needs_processing] needs_scan={needs_scan}, waited={waited_count}, "

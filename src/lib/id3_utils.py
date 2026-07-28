@@ -15,7 +15,7 @@ from src.lib.ffprobe_utils import ffprobe_file
 from src.lib.formatters import strip_leading_the
 from src.lib.ol_lookup import open_library_lookup_author, open_library_lookup_title
 from src.lib.books_tree import BooksTree
-from src.lib.cleaners import strip_leading_articles
+from src.lib.cleaners import strip_leading_articles, title_case_ol_title
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim
 from src.lib.parsers import (
@@ -297,14 +297,21 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
         if bool(ol_title):
             if ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
-                new_title = _strip_ol_edition_suffix(NotNone(ol_title).title)
-                # OL stores many titles in sentence case (e.g. "The assassin king").
-                # Normalise: if OL title and book.title are the same words (ignoring case),
-                # prefer book.title's casing — it was derived from properly-cased source data.
+                new_title = _normalize_ol_title(NotNone(ol_title).title)
+                # If book.title already matches the words, prefer it only when it
+                # is at least as "Title-Cased" as the normalized OL title (more/equal
+                # capitals). That keeps intentional casing like brand names while
+                # still upgrading sentence-cased book.title values from OL.
                 if book.title and new_title.lower() == book.title.lower():
-                    new_title = strip_leading_the(book.title) if id3_tag == "sortalbum" else book.title
-                # Guard: if the tag already holds the correct value, skip the update.
-                if new_title.lower() == (tag_value or "").lower():
+                    book_caps = sum(1 for c in book.title if c.isupper())
+                    new_caps = sum(1 for c in new_title if c.isupper())
+                    if book_caps >= new_caps:
+                        new_title = (
+                            strip_leading_the(book.title) if id3_tag == "sortalbum" else book.title
+                        )
+                # Skip only when the tag already has the exact desired value
+                # (including casing). Sentence-case tags must still be upgraded.
+                if new_title == (tag_value or ""):
                     return
                 title_needs_updating = True
                 updates.append(lambda: _print_needs_updating(orop, tag_value, new_title))
@@ -528,6 +535,44 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: Literal[False] = F
 def extract_cover_art(file: "BooksTree | Path", save_to_file: Literal[True], filename: str = "cover") -> Path: ...
 
 
+def _extract_cover_art_mutagen(path: Path) -> tuple[bytes, Literal["jpg", "png"]] | None:
+    """Pull embedded cover bytes via mutagen (MP4 ``covr`` / MP3 ``APIC``).
+
+    Some Apple/Audible-style m4b files expose PNG attached-pic streams to ffprobe
+    that ffmpeg cannot demux (empty output). Mutagen still reads the ``covr`` atom.
+    """
+    suffix = path.suffix.lower()
+    try:
+        if suffix in {".m4b", ".m4a", ".mp4"}:
+            from mutagen.mp4 import MP4, MP4Cover
+
+            covers = ((MP4(path).tags or {}).get("covr")) or []
+            if not covers:
+                return None
+            cover = covers[0]
+            data = bytes(cover)
+            if not data:
+                return None
+            if getattr(cover, "imageformat", None) == MP4Cover.FORMAT_PNG:
+                return data, "png"
+            return data, "jpg"
+
+        if suffix == ".mp3":
+            from mutagen.id3 import ID3
+
+            apics = ID3(path).getall("APIC")
+            if not apics:
+                return None
+            data = bytes(apics[0].data)
+            if not data:
+                return None
+            mime = (getattr(apics[0], "mime", None) or "").lower()
+            return data, "png" if "png" in mime else "jpg"
+    except Exception:
+        return None
+    return None
+
+
 def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, filename: str = "cover") -> bytes | Path:
     from src.lib.config import cfg
 
@@ -535,12 +580,21 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
 
     out_file = path.parent / filename
 
+    def _finish(data: bytes, ext: Literal["jpg", "png"]) -> bytes | Path:
+        if save_to_file:
+            dest = out_file.with_suffix(f".{ext}")
+            dest.write_bytes(data)
+            return dest
+        return data
+
+    # 1. Prefer ffmpeg stream demux when attached_pic streams are present.
     try:
         if ffresult := ffprobe_file(path):
             # find a stream that is jpg or png and has a disposition of attached_pic
             for stream in ffresult.get("streams", []):
                 if stream.get("codec_name") in ["mjpeg", "png"] and stream.get("disposition", {}).get("attached_pic"):
                     content_type = stream.get("codec_name")
+                    ext: Literal["jpg", "png"] = "png" if content_type == "png" else "jpg"
                     common_steps = [
                         "ffmpeg",
                         "-hide_banner",
@@ -554,16 +608,13 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                         "copy",
                     ]
                     if save_to_file:
-                        ext = "png" if content_type == "png" else "jpg"
-                        out_file = out_file.with_suffix(f".{ext}")
-                        subprocess.check_output(
-                            [
-                                *common_steps,
-                                out_file,
-                            ]
-                        )
-                        return out_file
-                    return subprocess.check_output(
+                        dest = out_file.with_suffix(f".{ext}")
+                        subprocess.check_output([*common_steps, dest])
+                        if dest.is_file() and dest.stat().st_size > 0:
+                            return dest
+                        # ffmpeg reported success but wrote nothing usable — try mutagen
+                        continue
+                    data = subprocess.check_output(
                         [
                             *common_steps,
                             "-f",
@@ -573,9 +624,16 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                             "-",
                         ]
                     )
+                    if data:
+                        return data
     except (KeyError, subprocess.CalledProcessError, OSError):
         if cfg.DEBUG:
             print_debug(f"Could not extract cover art from {file}'s streams")
+
+    # 2. Mutagen fallback for covr/APIC atoms ffmpeg cannot demux.
+    if mutagen_cover := _extract_cover_art_mutagen(path):
+        return _finish(*mutagen_cover)
+
     return out_file.with_suffix(".jpg") if save_to_file else b""
 
 
@@ -679,6 +737,15 @@ def _strip_ol_edition_suffix(title: str) -> str:
     return _OL_EDITION_SUFFIX.sub("", title).strip()
 
 
+def _normalize_ol_title(title: str) -> str:
+    """Strip OL edition suffixes and Title-Case the result.
+
+    OL often returns sentence case; this is the single choke point used wherever
+    an OL title is assigned to ``book.title`` or written into ID3 tags.
+    """
+    return title_case_ol_title(_strip_ol_edition_suffix(title))
+
+
 def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibraryTitle | None":
     """Try Open Library *before* heuristic scoring.
 
@@ -758,7 +825,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     if best_ol is None or best_score < 0.5 or not best_ol.title or not best_ol.author:
         return None
 
-    book.title = _strip_ol_edition_suffix(best_ol.title)
+    book.title = _normalize_ol_title(best_ol.title)
     book.album = book.title
     book.sortalbum = strip_leading_articles(book.title)
     book.artist = best_ol.author
@@ -817,11 +884,12 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # extracting bytes with ffmpeg.  For m4b/m4a files the cover image is interleaved
     # with audio data inside the mdat chunk, so ffmpeg must scan the entire file to
     # extract it (O(filesize)), whereas ffprobe only reads the moov atom header.
+    # Fall back to mutagen when streams are missing/unreadable but covr/APIC exists.
     _probe = ffprobe_file(book.sample_audio1) or {}
     book.has_id3_cover = any(
         s.get("codec_name") in ("mjpeg", "png") and s.get("disposition", {}).get("attached_pic")
         for s in _probe.get("streams", [])
-    )
+    ) or bool(_extract_cover_art_mutagen(book.sample_audio1))
 
     # ── OL-first extraction ────────────────────────────────────────────────────
     # When OL is configured, ask it directly before heuristic scoring.
