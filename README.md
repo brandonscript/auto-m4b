@@ -163,6 +163,7 @@ All options are set via environment variables (`.env` file or shell environment)
 | `SLEEP_TIME` | `10` | Seconds between inbox scans |
 | `WAIT_TIME` | `5` | Seconds to wait after a folder is modified before processing |
 | `CPU_CORES` | all cores | Number of parallel ffmpeg jobs |
+| `MAX_BITRATE` | `0` | Max output bitrate in kbps; `0`/unset keeps the source rate. Sources above the cap are re-encoded (m4b passthrough/stream-copy is skipped) |
 | `MAX_CHAPTER_LENGTH` | `15,30` | Min/max chapter length in minutes |
 | `AUDIO_EXTS` | mp3,m4a,m4b,… | Comma-separated list of audio extensions to process |
 | `MATCH_FILTER` | *(none)* | Regex — only process books whose name matches |

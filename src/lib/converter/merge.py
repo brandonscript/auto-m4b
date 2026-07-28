@@ -228,6 +228,17 @@ def _collect_audio_files(directory: Path) -> list[Path]:
     return natural_sort_files(files)
 
 
+def should_stream_copy(book: "Audiobook") -> bool:
+    """True when source can be remuxed without re-encoding.
+
+    m4a/m4b/aac normally stream-copy, but MAX_BITRATE forces a re-encode when
+    the source bitrate exceeds the cap.
+    """
+    if book.orig_file_type not in ("m4a", "m4b", "aac"):
+        return False
+    return not book.bitrate_exceeds_max
+
+
 def convert_book_native(book: "Audiobook") -> int:
     """Native Python implementation of ``m4b-tool merge``.
 
@@ -257,9 +268,19 @@ def convert_book_native(book: "Audiobook") -> int:
     # ── 2. Determine codec strategy ───────────────────────────────────────────
     # .aac (raw ADTS) shares the same codec as .m4a/.m4b — re-mux into MP4
     # container without re-encoding for a fast, lossless conversion.
-    should_copy = book.orig_file_type in ("m4a", "m4b", "aac")
+    # When MAX_BITRATE is set and the source is above the cap, force re-encode.
+    from src.lib.ffmpeg_utils import get_bitrate_py
+    from src.lib.term import print_notice
+
+    uncapped_target = get_bitrate_py(book.sample_audio1)[0]
+    bitrate: int = book.bitrate_target  # already capped via MAX_BITRATE
+    should_copy = should_stream_copy(book)
+    if cfg.max_bitrate_bps and uncapped_target > cfg.max_bitrate_bps:
+        print_notice(
+            f"Capping bitrate to {bitrate // 1000} kb/s "
+            f"(source ~{uncapped_target // 1000} kb/s)"
+        )
     codec = detect_aac_codec()
-    bitrate: int = book.bitrate_target
     samplerate: int = book.samplerate
 
     # ── 3. Per-file convert to temp MP4 (parallel) ────────────────────────────

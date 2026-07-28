@@ -338,6 +338,27 @@ class Config:
 
     CPU_CORES = _CPU_CORES
 
+    @env_property(typ=int, default=0)
+    def _MAX_BITRATE(self):
+        """Max output bitrate in kbps. 0 / unset = no limit.
+
+        When set, source audio above this rate is downconverted. m4a/m4b/aac
+        stream-copy and already-m4b passthrough are disabled for those books
+        so the cap is actually applied.
+        """
+        ...
+
+    MAX_BITRATE = _MAX_BITRATE
+
+    @property
+    def max_bitrate_bps(self) -> int | None:
+        """Capped bitrate in bps snapped to a standard AAC rate, or None if unlimited."""
+        if not self.MAX_BITRATE or self.MAX_BITRATE <= 0:
+            return None
+        from src.lib.formatters import get_nearest_standard_bitrate
+
+        return get_nearest_standard_bitrate(int(self.MAX_BITRATE) * 1000)
+
     @env_property(typ=float, default=DEFAULT_SLEEP_TIME)
     def _SLEEP_TIME(self):
         """Time to sleep between loops, in seconds. Default is 10s."""
