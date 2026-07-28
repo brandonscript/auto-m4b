@@ -172,6 +172,11 @@ scores only (which can be wrong for music-convention-tagged files).
 
 ## Docker build workflow
 
+**Site-specific compose files are not in this repo.** On Phantom they live in
+`/etc/docker/auto-m4b-host/` and are symlinked as `docker-compose.auto-m4b.yml` /
+`docker-compose.auto-m4b-nvidia.yml` inside the clone. Public consumers should copy
+`docker-compose.template.yml`. Do not commit personal compose files here.
+
 The Dockerfile is split into two layers to keep dev rebuilds fast:
 
 - **`Dockerfile.base`** — all heavy dependencies: ffmpeg, Poetry packages, spaCy model, NLTK corpora. Produces `auto-m4b-base:latest`. Only needs rebuilding when `pyproject.toml`, `poetry.lock`, or system deps change.
