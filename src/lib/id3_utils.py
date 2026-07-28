@@ -162,8 +162,17 @@ def write_id3_tags_mutagen(
     from src.lib.id3_tags import Id3Tags
 
     path = file.path if isinstance(file, BooksTree) else file
-    if path.suffix in [".m4b", ".m4a"]:
-        write_m4b_tags(path, tags, cover=cover)
+    if path.suffix.lower() in [".m4b", ".m4a"]:
+        try:
+            write_m4b_tags(path, tags, cover=cover)
+        except Exception as e:
+            # Some inbox/fixture files are MP3/ADTS content with an .m4b extension
+            # (common with incomplete remuxes). Fall back to the MP3 writer so we
+            # can still fill Title/Album instead of fatally crashing.
+            if "not a MP4" not in str(e) and e.__class__.__name__ != "MP4StreamInfoError":
+                raise
+            print_debug(f"write_m4b_tags failed ({e}); falling back to mp3 tag writer for {path.name}")
+            write_mp3_tags(path, tags, cover=cover)
     else:
         write_mp3_tags(path, tags, cover=cover)
     # Delete from tags cache
@@ -251,6 +260,10 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
             raise FileNotFoundError(f"Cannot verify id3 tags, {m4b_to_check} does not exist")
 
     smart_print("\nVerifying id3 tags...", end="")
+
+    # Guarantee title/album before comparing — convert can leave them blank when
+    # source tags + fs parse both fail (e.g. boxed-set folders with Books1-3 names).
+    ensure_title_and_album(book)
 
     book_to_check = Audiobook(m4b_to_check).extract_metadata()
 
@@ -750,7 +763,8 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     """Try Open Library *before* heuristic scoring.
 
     Strategy:
-    1. Build title candidates from ID3 title, album, sortalbum, then fs_title.
+    1. Build title candidates from ID3 title, album, sortalbum, fs_title, then
+       folder/file basename.
     2. Build author hints from albumartist, artist (stripped of narrator
        prefixes), composer, then fs_author.
     3. Try each title candidate with OL (up to 3 author hints per candidate).
@@ -769,7 +783,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
         return _READ_BY_PATTERN.sub("", (v or "").strip()).strip()
 
     # Title candidates in priority order.
-    # Default: ID3 title → album → sortalbum → fs_title.
+    # Default: ID3 title → album → sortalbum → fs_title → folder basename.
     # Exception: when the raw title tag contains a part/disc number but the
     # album tag does NOT (e.g. title="War and Peace, Part 1", album="War and
     # Peace"), promote album to the front so OL looks up the whole-book title
@@ -780,10 +794,16 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     raw_album = (tag1.album or "").strip()
     title_has_partno = bool(raw_title and contains_partno_or_ch(raw_title))
     album_has_partno = bool(raw_album and contains_partno_or_ch(raw_album))
+    basename = book.basename
+    try:
+        if book.path.is_file():
+            basename = Path(basename).stem
+    except OSError:
+        pass
     if title_has_partno and not album_has_partno and raw_album:
-        raw_order = [tag1.album, tag1.title, tag1.sortalbum, book.fs_title]
+        raw_order = [tag1.album, tag1.title, tag1.sortalbum, book.fs_title, basename]
     else:
-        raw_order = [tag1.title, tag1.album, tag1.sortalbum, book.fs_title]
+        raw_order = [tag1.title, tag1.album, tag1.sortalbum, book.fs_title, basename]
 
     title_cands: list[str] = []
     for v in raw_order:
@@ -852,6 +872,68 @@ def _narrator_from_remaining_tags(book: "Audiobook") -> str:
             return stripped
 
     return ""
+
+
+def _usable_title_candidate(value: str | None) -> str:
+    """Return a stripped title usable for ID3/Plex, or '' if empty/garbage."""
+    from src.lib.audiobook import Audiobook
+
+    t = (value or "").strip()
+    if not t:
+        return ""
+    if Audiobook._is_garbage_output_title(t):
+        return ""
+    return t
+
+
+def _fallback_title_from_book(book: "Audiobook") -> str:
+    """Pick *something* when title/album would otherwise be blank.
+
+    Order (OL already tried earlier in extract_metadata):
+      1. Source ID3 title / album / sortalbum
+      2. Filesystem-parsed title (``fs_title``)
+      3. Inbox folder / file basename (e.g. ``Crescent City Fae [Boxed Set]``)
+      4. Hardcoded last resort so Plex never shows ``[Unknown Album]``
+    """
+    for cand in (
+        getattr(book, "id3_title", None),
+        getattr(book, "id3_album", None),
+        getattr(book, "id3_sortalbum", None),
+        getattr(book, "fs_title", None),
+    ):
+        if u := _usable_title_candidate(cand):
+            return u
+
+    base = book.basename or ""
+    try:
+        if book.path.is_file():
+            base = Path(base).stem
+    except OSError:
+        pass
+
+    if u := _usable_title_candidate(base):
+        return u
+
+    # Even digit-only / tiny names beat an empty tag for Plex.
+    return (base or "Unknown Audiobook").strip() or "Unknown Audiobook"
+
+
+def ensure_title_and_album(book: "Audiobook") -> None:
+    """Guarantee non-empty ``title`` / ``album`` / ``sortalbum`` for players like Plex.
+
+    Never leaves Title/Album blank when any reasonable candidate exists (source
+    tags, filesystem parse, or folder/file name).
+    """
+    from src.lib.audiobook import Audiobook
+
+    title = (book.title or "").strip()
+    if not title or Audiobook._is_garbage_output_title(title):
+        book.title = _fallback_title_from_book(book)
+
+    if not (book.album or "").strip():
+        book.album = book.title
+    if not (book.sortalbum or "").strip():
+        book.sortalbum = strip_leading_articles(book.title)
 
 
 def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
@@ -939,6 +1021,10 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
                 book.title = _remainder
                 book.album = book.title
                 book.sortalbum = strip_leading_articles(book.title)
+
+    # Never leave Title/Album blank — Plex shows "[Unknown Album]" otherwise.
+    # Falls back through ID3 → fs_title → folder/file basename.
+    ensure_title_and_album(book)
 
     t4 = time.time()
 
