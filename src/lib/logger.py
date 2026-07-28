@@ -16,6 +16,7 @@ LOG_HEADERS = [
     "Date",
     "Result",
     "Original Folder",
+    "Hash",
     "Bitrate",
     "Sample Rate",
     "Type",
@@ -24,12 +25,29 @@ LOG_HEADERS = [
     "Duration",
     "Time",
 ]
-LOG_JUSTIFY = ["l", "l", "l", "r", "r", "r", "r", "r", "r", "r"]
+LOG_JUSTIFY = ["l", "l", "l", "l", "r", "r", "r", "r", "r", "r", "r"]
 log_pattern = re.compile(
     r"(?P<date>^\d.*?)\s*(?P<result>SUCCESS|FAILED|UNKNOWN)\s*(?P<book_name>.+?(?=\d{1,3} kb/s|\d{2}\.\d kHz))\s*(?P<bitrate>~?\d+ kb/s)?\s*(?P<samplerate>[\d.]+ kHz)?\s*(?P<file_type>\.\w+)?\s*(?P<num_files>\d+ files?)?\s*(?P<size>[\d.]+\s*[bBkKMGi]+)?\s*(?P<duration>[\dhms:-]*)?\s*(?P<elapsed>\S+)?"
 )
 # TEST:
 # 2023-10-22 18:37:58-0700   FAILED    The Law of Attraction by Esther and Jerry Hicks    129 kb/s      44.1 kHz   .wma    85 files   336M         -
+
+
+def _normalize_log_row(cells: list[str]) -> list[str]:
+    """Ensure a log row has the current column count.
+
+    Pre-Hash rows (10 cols) get an empty Hash inserted after Original Folder.
+    """
+    num_cols = len(LOG_HEADERS)
+    if len(cells) == num_cols:
+        return cells
+    if len(cells) == num_cols - 1:
+        # Legacy row without Hash — insert blank after book name (index 2).
+        return cells[:3] + [""] + cells[3:]
+    if len(cells) < num_cols:
+        cells = cells + [""] * (num_cols - len(cells))
+        return cells
+    raise ValueError(f"Row has too many columns for log: {cells}")
 
 
 def log_global_results(
@@ -60,64 +78,53 @@ def log_global_results(
                 continue
             cells = re.sub(r"\s{2,}", "\t", line).strip().split("\t")
 
-            if len(cells) == 10:
+            if len(cells) in (10, 11):
                 if not cells[1].lower() in ["success", "failed"]:
                     cells[1] = "UNKNOWN"
-                log_data.append(cells)
+                log_data.append(_normalize_log_row(cells))
             else:
                 # book name probably got goofed, we need to regex it out
                 parsed = log_pattern.search(line.strip())
                 if parsed:
                     log_data.append(
-                        [
-                            re_group(parsed, "date", default=""),
-                            re_group(parsed, "result", default=""),
-                            re_group(parsed, "book_name", default="").strip(),
-                            re_group(parsed, "bitrate", default=""),
-                            re_group(parsed, "samplerate", default=""),
-                            re_group(parsed, "file_type", default=""),
-                            re_group(parsed, "num_files", default=""),
-                            re_group(parsed, "size", default=""),
-                            re_group(parsed, "duration", default="-"),
-                            re_group(parsed, "elapsed", default="-"),
-                        ]
+                        _normalize_log_row(
+                            [
+                                re_group(parsed, "date", default=""),
+                                re_group(parsed, "result", default=""),
+                                re_group(parsed, "book_name", default="").strip(),
+                                re_group(parsed, "bitrate", default=""),
+                                re_group(parsed, "samplerate", default=""),
+                                re_group(parsed, "file_type", default=""),
+                                re_group(parsed, "num_files", default=""),
+                                re_group(parsed, "size", default=""),
+                                re_group(parsed, "duration", default="-"),
+                                re_group(parsed, "elapsed", default="-"),
+                            ]
+                        )
                     )
                 else:
                     raise ValueError(f"Couldn't parse log row: '{line}'\nin file: {log_file}")
 
-    num_cols = len(LOG_HEADERS)
-
-    # ensure all rows in log_data have 10 columns
-    for row in log_data:
-        if len(row) < num_cols:
-            row.extend([""] * (num_cols - len(row)))
-        elif len(row) > num_cols:
-            raise ValueError(f"Row has too many columns for log: {row}")
+    # ensure all rows in log_data have the expected column count
+    for i, row in enumerate(log_data):
+        log_data[i] = _normalize_log_row(row)
 
     # remove 2+ spaces from book_name
     book_name = " ".join(book.basename.split())
 
-    # pad result with spaces to 9 characters
-    # result = f"{result:<10}"
-
-    # # strip all chars from elapsed that are not number or :
-    # human_elapsed = "".join(c for c in str(human_elapsed) if c.isdigit() or c == ":")
-
-    # Read the current auto-m4b.log file and replace all double spaces with |
-    # with open(log_file, "r") as f:
-    #     log = f.read().replace("  ", "\t")
-
-    # Remove each line from log if it starts with ^Date\s+
-    # log = "\n".join(line for line in log.splitlines() if not line.startswith("Date "))
-
-    # Remove blank lines from end of log file
-    # log = log.rstrip("\n")
+    # Short audio fingerprint (filename+size) so identical vs different drops
+    # of the same folder name can be distinguished in the global log.
+    try:
+        book_hash = book.hash("inbox")[:6]
+    except Exception:
+        book_hash = ""
 
     log_data.append(
         [
             log_date(),
             result.upper(),
             book_name,
+            book_hash,
             book.bitrate_friendly,
             book.samplerate_friendly,
             f".{(book.orig_file_type or "N/A").replace('.', '')}",
