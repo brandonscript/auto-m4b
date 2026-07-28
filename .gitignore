@@ -2,7 +2,10 @@
 .gitbak
 *.gitbak
 docker-compose.yml
+# Phantom/site-specific compose — live in /etc/docker/auto-m4b-host/ and are
+# symlinked here. Keep only docker-compose.template.yml in this public repo.
 docker-compose.auto-m4b.yml
+docker-compose.auto-m4b-nvidia.yml
 **/__pycache__
 .env
 .env.local*
