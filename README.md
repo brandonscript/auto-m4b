@@ -1,5 +1,5 @@
-<p align="center">
-  <img src="assets/logo.png" alt="auto-m4b" width="280">
+<p align="left">
+  <img src="assets/logo.png" alt="auto-m4b" width="240">
 </p>
 
 # auto-m4b
@@ -69,7 +69,7 @@ services:
       - CONVERTED_FOLDER=/data/converted
       - ARCHIVE_FOLDER=/data/archive
       - BACKUP_FOLDER=/data/backup
-      - TZ=America/Vancouver  # your timezone
+      - TZ=America/Vancouver # your timezone
 ```
 
 ```bash
@@ -157,29 +157,29 @@ Converted books land in `CONVERTED_FOLDER`. If `BACKUP=Y` (default), source file
 
 All options are set via environment variables (`.env` file or shell environment).
 
-| Variable | Default | Description |
-|---|---|---|
-| `INBOX_FOLDER` | *(required)* | Folder to watch for new audiobooks |
-| `CONVERTED_FOLDER` | *(required)* | Output folder for finished `.m4b` files |
-| `ARCHIVE_FOLDER` | *(required)* | Folder where processed source books are moved |
-| `BACKUP_FOLDER` | *(required)* | Folder for pre-conversion backups |
-| `WORKING_FOLDER` | system temp | Scratch space for merge/build steps |
-| `SLEEP_TIME` | `10` | Seconds between inbox scans |
-| `WAIT_TIME` | `5` | Seconds to wait after a folder is modified before processing |
-| `CPU_CORES` | all cores | Number of parallel ffmpeg jobs |
-| `MAX_BITRATE` | `0` | Max output bitrate in kbps; `0`/unset keeps the source rate. Sources above the cap are re-encoded (m4b passthrough/stream-copy is skipped) |
-| `MAX_CHAPTER_LENGTH` | `15,30` | Min/max chapter length in minutes |
-| `AUDIO_EXTS` | mp3,m4a,m4b,… | Comma-separated list of audio extensions to process |
-| `MATCH_FILTER` | *(none)* | Regex — only process books whose name matches |
-| `ON_COMPLETE` | `archive` | What to do with source files after conversion: `archive`, `delete`, or `nothing` |
-| `OVERWRITE_EXISTING` | `N` | Set to `Y` to re-convert books that already exist in `CONVERTED_FOLDER` |
-| `BACKUP` | `Y` | Set to `N` to skip backing up source files |
-| `CRASH_PROTECTION` | `Y` | Set to `N` to disable skipping books that previously failed |
-| `USE_FILENAMES_AS_CHAPTERS` | `N` | Set to `Y` to derive chapter titles from filenames instead of ID3 tags |
-| `NO_CATS` | `N` | Set to `Y` to suppress the ASCII cat art between loops |
-| `OPEN_LIBRARY_USER_AGENT` | *(none)* | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup)) |
-| `POST_CONVERT_SCRIPT` | *(none)* | Path to a Python (`.py`) or bash (`.sh`) script to run after each successful conversion (see [Post-conversion scripts](#post-conversion-scripts)) |
-| `POST_CONVERT_SCRIPT_TIMEOUT` | `60` | Seconds before the post-convert script is killed |
+| Variable                      | Default       | Description                                                                                                                                       |
+| ----------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INBOX_FOLDER`                | _(required)_  | Folder to watch for new audiobooks                                                                                                                |
+| `CONVERTED_FOLDER`            | _(required)_  | Output folder for finished `.m4b` files                                                                                                           |
+| `ARCHIVE_FOLDER`              | _(required)_  | Folder where processed source books are moved                                                                                                     |
+| `BACKUP_FOLDER`               | _(required)_  | Folder for pre-conversion backups                                                                                                                 |
+| `WORKING_FOLDER`              | system temp   | Scratch space for merge/build steps                                                                                                               |
+| `SLEEP_TIME`                  | `10`          | Seconds between inbox scans                                                                                                                       |
+| `WAIT_TIME`                   | `5`           | Seconds to wait after a folder is modified before processing                                                                                      |
+| `CPU_CORES`                   | all cores     | Number of parallel ffmpeg jobs                                                                                                                    |
+| `MAX_BITRATE`                 | `0`           | Max output bitrate in kbps; `0`/unset keeps the source rate. Sources above the cap are re-encoded (m4b passthrough/stream-copy is skipped)        |
+| `MAX_CHAPTER_LENGTH`          | `15,30`       | Min/max chapter length in minutes                                                                                                                 |
+| `AUDIO_EXTS`                  | mp3,m4a,m4b,… | Comma-separated list of audio extensions to process                                                                                               |
+| `MATCH_FILTER`                | _(none)_      | Regex — only process books whose name matches                                                                                                     |
+| `ON_COMPLETE`                 | `archive`     | What to do with source files after conversion: `archive`, `delete`, or `nothing`                                                                  |
+| `OVERWRITE_EXISTING`          | `N`           | Set to `Y` to re-convert books that already exist in `CONVERTED_FOLDER`                                                                           |
+| `BACKUP`                      | `Y`           | Set to `N` to skip backing up source files                                                                                                        |
+| `CRASH_PROTECTION`            | `Y`           | Set to `N` to disable skipping books that previously failed                                                                                       |
+| `USE_FILENAMES_AS_CHAPTERS`   | `N`           | Set to `Y` to derive chapter titles from filenames instead of ID3 tags                                                                            |
+| `NO_CATS`                     | `N`           | Set to `Y` to suppress the ASCII cat art between loops                                                                                            |
+| `OPEN_LIBRARY_USER_AGENT`     | _(none)_      | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup))           |
+| `POST_CONVERT_SCRIPT`         | _(none)_      | Path to a Python (`.py`) or bash (`.sh`) script to run after each successful conversion (see [Post-conversion scripts](#post-conversion-scripts)) |
+| `POST_CONVERT_SCRIPT_TIMEOUT` | `60`          | Seconds before the post-convert script is killed                                                                                                  |
 
 ## Open Library setup
 
@@ -193,10 +193,10 @@ tag the output `.m4b` with the narrator as the author and vice versa.
 
 Many torrent-sourced audiobook rips follow music tagging conventions:
 
-| ID3 field | Music meaning | Audiobook meaning | auto-m4b output |
-|---|---|---|---|
-| `artist` | performer | **narrator** | should become `composer` |
-| `composer` | creator | **author** | should become `artist` / `albumartist` |
+| ID3 field  | Music meaning | Audiobook meaning | auto-m4b output                        |
+| ---------- | ------------- | ----------------- | -------------------------------------- |
+| `artist`   | performer     | **narrator**      | should become `composer`               |
+| `composer` | creator       | **author**        | should become `artist` / `albumartist` |
 
 auto-m4b's local scoring heuristics handle the majority of cases, but when the tags are ambiguous
 (e.g. only `artist` and `composer` are set, no `albumartist`) OL is the only reliable way to
@@ -211,6 +211,7 @@ OPEN_LIBRARY_USER_AGENT=MyApp/1.0 (you@example.com)
 ```
 
 Per [OL's API policy](https://openlibrary.org/developers/api), the string must include:
+
 - A short name and version for your application (`MyApp/1.0`)
 - A contact email in parentheses (`you@example.com`)
 
@@ -235,15 +236,15 @@ to the console warning so they aren't swallowed when `DEBUG` is off.
 
 ### Environment variables passed to the script
 
-| Variable | Description |
-|---|---|
-| `AUTO_M4B_INBOX_PATH` | Original inbox path for the book (may no longer exist on disk if archived/deleted) |
-| `AUTO_M4B_CONVERTED_PATH` | Full path to the finished `.m4b` file |
-| `AUTO_M4B_CONVERTED_DIR` | Directory containing the converted output |
-| `AUTO_M4B_TITLE` | Book title (from ID3 / Open Library / filename heuristics) |
-| `AUTO_M4B_AUTHOR` | Book author |
-| `AUTO_M4B_KEY` | Inbox-relative key (folder name / nested path) |
-| `AUTO_M4B_WATCH_SOURCE` | Reconstructed path under `WATCH_FOLDER` (`WATCH_FOLDER`/`AUTO_M4B_KEY`), or empty if `WATCH_FOLDER` is unset |
+| Variable                  | Description                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `AUTO_M4B_INBOX_PATH`     | Original inbox path for the book (may no longer exist on disk if archived/deleted)                           |
+| `AUTO_M4B_CONVERTED_PATH` | Full path to the finished `.m4b` file                                                                        |
+| `AUTO_M4B_CONVERTED_DIR`  | Directory containing the converted output                                                                    |
+| `AUTO_M4B_TITLE`          | Book title (from ID3 / Open Library / filename heuristics)                                                   |
+| `AUTO_M4B_AUTHOR`         | Book author                                                                                                  |
+| `AUTO_M4B_KEY`            | Inbox-relative key (folder name / nested path)                                                               |
+| `AUTO_M4B_WATCH_SOURCE`   | Reconstructed path under `WATCH_FOLDER` (`WATCH_FOLDER`/`AUTO_M4B_KEY`), or empty if `WATCH_FOLDER` is unset |
 
 ### Python example
 
