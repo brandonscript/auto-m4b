@@ -360,23 +360,35 @@ def backup_ok(book: Audiobook):
 
 
 def ok_to_overwrite(book: Audiobook):
+    from src.lib.fs_utils import audio_fingerprints_match
     from src.lib.term import print_notice, print_warning
 
-    if book.converted_file.is_file():
-        if cfg.OVERWRITE_MODE == "skip":
-            if book.archive_dir.exists():
-                print_notice(
-                    f"Found a copy of this book in {tint_path(cfg.archive_dir)}, it has probably already been converted"
-                )
-                print_notice("Skipping this book because OVERWRITE_EXISTING is not enabled")
-                InboxState().set_processed(book)
-                return False
-            elif book.size("converted", "bytes") > 0:
-                print_notice(f"Output file already exists and OVERWRITE_EXISTING is not enabled, skipping this book")
-                InboxState().set_processed(book)
-                return False
-        else:
-            print_warning("Warning: Output file already exists, it and any other {{.m4b}} files will be overwritten")
+    if cfg.OVERWRITE_MODE != "skip":
+        if book.converted_file.is_file():
+            print_warning(
+                "Warning: Output file already exists, it and any other {{.m4b}} files will be overwritten"
+            )
+        return True
+
+    # Loop prevention: skip while converted output is still present.
+    if book.converted_file.is_file() and book.size("converted", "bytes") > 0:
+        print_notice("Output file already exists and OVERWRITE_EXISTING is not enabled, skipping this book")
+        InboxState().set_processed(book)
+        return False
+
+    # Identical re-drop: archive still has the same audio fingerprint as the inbox.
+    if book.archive_dir.exists() and audio_fingerprints_match(book.inbox_dir, book.archive_dir):
+        try:
+            fp = book.hash("inbox")[:6]
+        except Exception:
+            fp = "?"
+        print_notice(
+            f"Found an identical copy of this book in {tint_path(cfg.archive_dir)} "
+            f"(fingerprint {fp}); skipping reconvert"
+        )
+        print_notice("Skipping this book because OVERWRITE_EXISTING is not enabled")
+        InboxState().set_processed(book)
+        return False
 
     return True
 
@@ -591,6 +603,10 @@ def print_book_info(book: "Audiobook"):
     num_files = 1 if book.tree.has_structure("standalone_file") else book.num_files("inbox")
     print_list_item(f"Audio files: {num_files}")
     print_list_item(f"Total size: {book.size('inbox', 'human')}")
+    try:
+        print_list_item(f"Fingerprint: {book.hash('inbox')[:6]}")
+    except Exception:
+        pass
     if book.cover_art_file:
         print_list_item(f"Cover art: {book.cover_art_file.name}")
 

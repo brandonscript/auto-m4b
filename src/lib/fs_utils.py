@@ -929,8 +929,8 @@ def find_cover_art_file(path: Path) -> Path | None:
     supported_image_exts = [".jpg", ".jpeg", ".png"]
     all_images_in_dir = [f for f in path.rglob("*") if f.suffix in supported_image_exts]
 
-    # if any of the images match *cover* or *folder*, return it
-    img = next((i for i in all_images_in_dir if i.name.lower() in ["cover", "folder"]), None)
+    # Prefer files named cover/folder (match stem so cover.png / folder.jpg work)
+    img = next((i for i in all_images_in_dir if i.stem.lower() in ["cover", "folder"]), None)
 
     # otherwise, find the biggest image
     if not img and all_images_in_dir:
@@ -1115,6 +1115,19 @@ def hash_path_audio_files(path: Path, *, debug: bool = False) -> str:
     """Makes a hash of the path's audio files' filenames and file sizes in an array, sorted by filename
     then hashes the array"""
     return hash_path(path, only_file_exts=AUDIO_EXTS, debug=debug)
+
+
+def audio_fingerprints_match(path_a: Path, path_b: Path) -> bool:
+    """True when both paths exist and share the same audio filename+size fingerprint.
+
+    Used to decide whether an inbox book is an identical re-drop of an archived copy
+    (skip) vs a legitimate reconvert with different contents (allow).
+    """
+    if not path_a.exists() or not path_b.exists():
+        return False
+    a = hash_path_audio_files(path_a)
+    b = hash_path_audio_files(path_b)
+    return bool(a) and bool(b) and a == b
 
 
 def hash_entire_inbox():

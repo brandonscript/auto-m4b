@@ -12,6 +12,7 @@ FIRST_LINE = (
     r"2023-10-21 22:37:37-0700\s{2,}"
     r"SUCCESS\s{2,}"
     r"Stephen Hawking - A Brief History of Time\s{2,}"
+    r"(?:[a-f0-9]{6}\s{2,})?"  # Hash column (empty for legacy fixture rows)
     r"67 kb/s\s{2,}"
     r"44.1 kHz\s{2,}"
     r"\.mp3\s{2,}"
@@ -25,6 +26,7 @@ LAST_LINE_MATCH_TOWER = (
     r"^.*?[+-]\d{4}\s{2,}"
     r"SUCCESS\s{2,}"
     r"tower_treasure__flat_mp3\s{2,}"
+    r"[a-f0-9]{6}\s{2,}"
     r"64 kb/s\s{2,}"
     r"22 kHz\s{2,}"
     r"\.mp3\s{2,}"
@@ -38,6 +40,7 @@ LAST_LINE_MATCH_CONSPIRACY = (
     r"^.*?[+-]\d{4}\s{2,}"
     r"SUCCESS\s{2,}"
     r"The Great Courses - Conspiracies & Conspiracy Theories What We Should\s{2,}"
+    r"[a-f0-9]{6}\s{2,}"
     r"128 kb/s\s{2,}"
     r"44.1 kHz\s{2,}"
     r"\.mp3\s{2,}"
@@ -57,20 +60,40 @@ def check(test_log: Path, expect_last_lines: list[str]):
         first_line = lines[2] if blank_line else lines[1]
         last_lines = lines[-len(expect_last_lines) :]
 
-        assert list(map(str.strip, header_line.split())) == [
-            "Date",
-            "Result",
-            "Original",
-            "Folder",
-            "Bitrate",
-            "Sample",
-            "Rate",
-            "Type",
-            "Files",
-            "Size",
-            "Duration",
-            "Time",
-        ]
+        header_tokens = list(map(str.strip, header_line.split()))
+        assert header_tokens in (
+            # Current format (with Hash)
+            [
+                "Date",
+                "Result",
+                "Original",
+                "Folder",
+                "Hash",
+                "Bitrate",
+                "Sample",
+                "Rate",
+                "Type",
+                "Files",
+                "Size",
+                "Duration",
+                "Time",
+            ],
+            # Legacy fixture format (pre-Hash)
+            [
+                "Date",
+                "Result",
+                "Original",
+                "Folder",
+                "Bitrate",
+                "Sample",
+                "Rate",
+                "Type",
+                "Files",
+                "Size",
+                "Duration",
+                "Time",
+            ],
+        )
 
         assert re.match(FIRST_LINE, first_line)
 
@@ -88,7 +111,7 @@ def check_ground_truth(test_log: Path):
     check(
         test_log,
         [
-            r"2023-11-09 22:49:46-0800\s{2,}SUCCESS\s{2,}Say What You Mean A Mindful Approach to Nonviolent Communication by Or\s{2,}64 kb/s      44.1 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}\d+M\s{2,}11h:00m:11s\s{2,}01:40"
+            r"2023-11-09 22:49:46-0800\s{2,}SUCCESS\s{2,}Say What You Mean A Mindful Approach to Nonviolent Communication by Or\s{2,}(?:[a-f0-9]{6}\s{2,})?64 kb/s      44.1 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}\d+M\s{2,}11h:00m:11s\s{2,}01:40"
         ],
     )
 
@@ -134,7 +157,7 @@ def test_repeat_failed_writes_to_log(tower_treasure__flat_mp3: Audiobook, global
     check(
         global_test_log,
         [
-            r"^.*?[+-]\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-"
+            r"^.*?[+-]\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}[a-f0-9]{6}\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-"
         ],
     )
 
@@ -145,7 +168,7 @@ def test_repeat_failed_writes_to_log(tower_treasure__flat_mp3: Audiobook, global
     check(
         global_test_log,
         [
-            r"^.*?[+-]\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-\s{2,}-",
+            r"^.*?[+-]\d{4}\s{2,}FAILED\s{2,}tower_treasure__flat_mp3\s{2,}[a-f0-9]{6}\s{2,}64 kb/s\s{2,}22 kHz\s{2,}\.mp3\s{2,}\d+ files?\s{2,}[\d.]+ GB\s{2,}-\s{2,}-",
             LAST_LINE_MATCH_TOWER,
         ],
     )
@@ -180,7 +203,7 @@ def test_log_supports_vbr_mp3s(bitrate_vbr__mp3: Audiobook, global_test_log: Pat
     check(
         global_test_log,
         [
-            r"^.*?[+-]\d{4}  SUCCESS  bitrate_vbr__mp3 \s* ~46 kb/s       22 kHz   .mp3 \s* \d+ files?  11 MB \s* 0h:33m:07s  02:43",
+            r"^.*?[+-]\d{4}  SUCCESS  bitrate_vbr__mp3 \s* [a-f0-9]{6} \s* ~46 kb/s       22 kHz   .mp3 \s* \d+ files?  11 MB \s* 0h:33m:07s  02:43",
         ],
     )
 

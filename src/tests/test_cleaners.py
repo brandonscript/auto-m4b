@@ -239,3 +239,29 @@ def test_strip_roman_numerals_from_list(
 def test_romans_strip(test_case, expected):
 
     assert romans.strip(test_case) == expected
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("the sunne in splendour", "The Sunne in Splendour"),
+        ("The sunne in splendour", "The Sunne in Splendour"),
+        ("the reckoning", "The Reckoning"),
+        ("devil's brood", "Devil's Brood"),
+        ("a brief history of time", "A Brief History of Time"),
+        ("falls the shadow", "Falls the Shadow"),
+        ("War and Peace", "War and Peace"),  # already title-cased
+        ("", ""),
+    ],
+)
+def test_title_case_ol_title(raw: str, expected: str):
+    from src.lib.cleaners import title_case_ol_title
+
+    assert title_case_ol_title(raw) == expected
+
+
+def test_normalize_ol_title_strips_edition_and_title_cases():
+    from src.lib.id3_utils import _normalize_ol_title
+
+    assert _normalize_ol_title("the sunne in splendour, Version 3") == "The Sunne in Splendour"
+    assert _normalize_ol_title("the assassin king") == "The Assassin King"
