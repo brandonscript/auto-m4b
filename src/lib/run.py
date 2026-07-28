@@ -1109,11 +1109,12 @@ def process_book(b: int, item: InboxItem, _series_rerouted: bool = False):
                 if book.tree.is_file()
                 else count_audio_files_in_dir(book.inbox_dir, only_file_exts=cfg.AUDIO_EXTS)
             )
-            if audio_on_disk <= 1:
+            # Also convert (don't passthrough) when MAX_BITRATE requires a downconvert.
+            if audio_on_disk <= 1 and not book.bitrate_exceeds_max:
                 b += process_already_m4b(book, item)
                 if item.is_gone:
                     return b
-            # else: fall through to normal merge/passthrough
+            # else: fall through to normal merge/passthrough / re-encode
         elif book.tree.is_file():
             book, item = move_standalone_into_dir(book, item)
 

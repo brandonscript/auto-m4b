@@ -428,7 +428,26 @@ class Audiobook(BaseModel):
 
     @property
     def bitrate_target(self):
-        return get_bitrate_py(self.sample_audio1)[0]
+        """Nearest standard bitrate for encoding (bps), capped by MAX_BITRATE if set."""
+        from src.lib.config import cfg
+
+        target = get_bitrate_py(self.sample_audio1)[0]
+        if (cap := cfg.max_bitrate_bps) and target > cap:
+            return cap
+        return target
+
+    @property
+    def bitrate_exceeds_max(self) -> bool:
+        """True when MAX_BITRATE is set and the source bitrate is above the cap."""
+        from src.lib.config import cfg
+
+        if not (cap := cfg.max_bitrate_bps):
+            return False
+        try:
+            source = get_bitrate_py(self.sample_audio1)[0]
+        except Exception:
+            return False
+        return source > cap
 
     @property
     def samplerate(self):
