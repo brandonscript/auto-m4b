@@ -101,22 +101,32 @@ def process_already_m4b(book: Audiobook, item: InboxItem):
     if book.tree.has_structure("standalone_file"):
         ext = ensure_dot(book.orig_file_type)
         target_dir = book.converted_dir  # correctly includes series prefix when applicable
-        folder_name = target_dir.name
 
-        unique_target = book.converted_file
         target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Keep the original filename on passthrough — do not rename to folder/title.
+        from src.lib.fs_utils import ensure_audio_ext
+
+        unique_target = target_dir / ensure_audio_ext(item.path.name, ext)
 
         if unique_target.exists():
             smart_print("(A file with the same name already exists, this one will be renamed to prevent data loss)")
 
-            from src.lib.fs_utils import ensure_audio_ext
+            # Strip audio ext for copy suffix without Path.stem (truncates at dots)
+            from src.lib.constants import AUDIO_EXTS
+
+            base = item.path.name
+            lower = base.lower()
+            for audio_ext in AUDIO_EXTS:
+                if lower.endswith(audio_ext):
+                    base = base[: -len(audio_ext)]
+                    break
 
             i = 0
-            # ensure_audio_ext — Path.with_suffix truncates titles like "Dr. Laszlo…"
-            unique_target = target_dir / ensure_audio_ext(f"{folder_name} (copy)", ext)
+            unique_target = target_dir / ensure_audio_ext(f"{base} (copy)", ext)
             while unique_target.exists():
                 i += 1
-                unique_target = target_dir / ensure_audio_ext(f"{folder_name} (copy {i})", ext)
+                unique_target = target_dir / ensure_audio_ext(f"{base} (copy {i})", ext)
 
         mv_file_into_dir(item.path, target_dir, new_filename=unique_target.name)
 

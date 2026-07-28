@@ -17,6 +17,7 @@ from src.lib.fs_utils import (
     count_audio_files_in_dir,
     cp_file_into_dir,
     ensure_audio_ext,
+    find_audio_files_in_dir,
     find_cover_art_file,
     get_size,
     hash_path_audio_files,
@@ -240,19 +241,50 @@ class Audiobook(BaseModel):
         try:
             return find_first_audio_file(self.build_dir, ext="m4b")
         except FileNotFoundError:
-            # Prefer title as filename so the output is "The Assassin King.m4b"
-            # rather than the inbox folder name (e.g. "Haydon, Elizabeth.m4b")
-            # when the folder is named after the author rather than the book.
-            stem = safe_filename(self.title or self.basename)
-            return self.build_dir / f"{stem}.m4b"
+            return self.build_dir / f"{self.output_filename_stem}.m4b"
+
+    @property
+    def output_filename_stem(self) -> str:
+        """Stem for the converted .m4b (and companion .txt) filename.
+
+        - Single-file m4b/m4a/aac passthrough: keep the original source filename
+          so we don't silently rename e.g. "Witching for Hope Premonition Pointe,
+          Book 2.m4b" → "Witching for Hope.m4b".
+        - Otherwise prefer a usable book title; reject garbage like "3" (from
+          mis-parsed "Books1-3") and fall back to the inbox folder basename.
+        """
+        if self.orig_file_type in ("m4a", "m4b", "aac"):
+            src_dir = self.merge_dir if self.merge_dir.exists() else self.inbox_dir
+            if src_dir.exists() and src_dir.is_dir():
+                audio = find_audio_files_in_dir(src_dir)
+                if len(audio) == 1:
+                    # Keep original stem; ensure_audio_ext only normalizes extension later
+                    return safe_filename(audio[0].stem)
+
+        title = (self.title or "").strip()
+        if title and not self._is_garbage_output_title(title):
+            return safe_filename(title)
+        return safe_filename(self.basename)
+
+    @staticmethod
+    def _is_garbage_output_title(title: str) -> bool:
+        """True for titles that must not become the output filename."""
+        t = title.strip()
+        if len(t) < 3:
+            return True
+        if t.isdigit():
+            return True
+        return False
 
     @property
     def converted_file(self) -> Path:
         from src.lib.config import cfg
 
         def _build_filename():
-            # Do not use Path.with_suffix — titles like "Dr. Laszlo…" truncate to "Dr.m4b".
-            return self.converted_dir / ensure_audio_ext(self.basename, ".m4b")
+            # Prefer the same stem as build_file so expected path matches output.
+            # Fall back to folder basename when title/passthrough stem isn't ready.
+            stem = self.output_filename_stem
+            return self.converted_dir / ensure_audio_ext(stem, ".m4b")
 
         def _find_m4b_matching_basename():
             # Only search the immediate directory (non-recursive) to avoid
@@ -412,7 +444,7 @@ class Audiobook(BaseModel):
 
     @property
     def post_convert_log_filename(self) -> str:
-        stem = safe_filename(self.title or self.basename)
+        stem = self.output_filename_stem
         return f"auto-m4b.{stem}.post-convert.log"
 
     @property
@@ -519,7 +551,7 @@ class Audiobook(BaseModel):
     @property
     def final_desc_file(self):
         quality = f"{self.bitrate_friendly} @ {self.samplerate_friendly}".replace("kb/s", "kbps")
-        stem = safe_filename(self.title or self.basename)
+        stem = self.output_filename_stem
         return self.converted_dir / f"{stem} [{quality}].txt"
 
     def write_description_txt(self, out_path: Path | None = None):
