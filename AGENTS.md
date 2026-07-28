@@ -108,6 +108,23 @@ git push origin dev
 
 Do not leave passing changes uncommitted on the local branch. The container runs off whatever is checked out at `/etc/docker/auto-m4b/`, but the canonical source of truth is `origin/dev`.
 
+**C. Auto-rebuild the live container when the real inbox is empty.**
+
+After finishing auto-m4b code changes (tests green, committed/pushed as appropriate), check the **real** production inbox. If it has no books waiting **and** the `auto-m4b` container is currently running, rebuild it automatically so Phantom picks up the new code:
+
+```bash
+INBOX="/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox"
+# Count non-junk entries (ignore .DS_Store / hidden files)
+ls -A "$INBOX" 2>/dev/null | grep -v '^\.' | grep -v '^\.DS_Store$' || true
+
+# If empty and container is up:
+docker ps --format '{{.Names}}' | grep -qx auto-m4b && dr rebuild auto-m4b:nvidia
+```
+
+- **Do rebuild** when the inbox has no convertible book folders/files (empty or only junk like `.DS_Store`).
+- **Do not rebuild** if books are still in the inbox — that would interrupt an in-flight conversion. Tell the user the changes are ready and they should rebuild once the inbox drains (or ask them to confirm).
+- Prefer `dr rebuild auto-m4b:nvidia` (Phantom’s GPU variant). Both variants share `container_name: auto-m4b`.
+
 ### Branching strategy
 
 The author uses a `dev` branch for small, ongoing feature work and incremental fixes. Most day-to-day development lands in `dev` first and is released to `main` from there.
