@@ -929,8 +929,8 @@ def find_cover_art_file(path: Path) -> Path | None:
     supported_image_exts = [".jpg", ".jpeg", ".png"]
     all_images_in_dir = [f for f in path.rglob("*") if f.suffix in supported_image_exts]
 
-    # if any of the images match *cover* or *folder*, return it
-    img = next((i for i in all_images_in_dir if i.name.lower() in ["cover", "folder"]), None)
+    # Prefer files named cover/folder (match stem so cover.png / folder.jpg work)
+    img = next((i for i in all_images_in_dir if i.stem.lower() in ["cover", "folder"]), None)
 
     # otherwise, find the biggest image
     if not img and all_images_in_dir:

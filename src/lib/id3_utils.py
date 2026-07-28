@@ -535,6 +535,44 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: Literal[False] = F
 def extract_cover_art(file: "BooksTree | Path", save_to_file: Literal[True], filename: str = "cover") -> Path: ...
 
 
+def _extract_cover_art_mutagen(path: Path) -> tuple[bytes, Literal["jpg", "png"]] | None:
+    """Pull embedded cover bytes via mutagen (MP4 ``covr`` / MP3 ``APIC``).
+
+    Some Apple/Audible-style m4b files expose PNG attached-pic streams to ffprobe
+    that ffmpeg cannot demux (empty output). Mutagen still reads the ``covr`` atom.
+    """
+    suffix = path.suffix.lower()
+    try:
+        if suffix in {".m4b", ".m4a", ".mp4"}:
+            from mutagen.mp4 import MP4, MP4Cover
+
+            covers = ((MP4(path).tags or {}).get("covr")) or []
+            if not covers:
+                return None
+            cover = covers[0]
+            data = bytes(cover)
+            if not data:
+                return None
+            if getattr(cover, "imageformat", None) == MP4Cover.FORMAT_PNG:
+                return data, "png"
+            return data, "jpg"
+
+        if suffix == ".mp3":
+            from mutagen.id3 import ID3
+
+            apics = ID3(path).getall("APIC")
+            if not apics:
+                return None
+            data = bytes(apics[0].data)
+            if not data:
+                return None
+            mime = (getattr(apics[0], "mime", None) or "").lower()
+            return data, "png" if "png" in mime else "jpg"
+    except Exception:
+        return None
+    return None
+
+
 def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, filename: str = "cover") -> bytes | Path:
     from src.lib.config import cfg
 
@@ -542,12 +580,21 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
 
     out_file = path.parent / filename
 
+    def _finish(data: bytes, ext: Literal["jpg", "png"]) -> bytes | Path:
+        if save_to_file:
+            dest = out_file.with_suffix(f".{ext}")
+            dest.write_bytes(data)
+            return dest
+        return data
+
+    # 1. Prefer ffmpeg stream demux when attached_pic streams are present.
     try:
         if ffresult := ffprobe_file(path):
             # find a stream that is jpg or png and has a disposition of attached_pic
             for stream in ffresult.get("streams", []):
                 if stream.get("codec_name") in ["mjpeg", "png"] and stream.get("disposition", {}).get("attached_pic"):
                     content_type = stream.get("codec_name")
+                    ext: Literal["jpg", "png"] = "png" if content_type == "png" else "jpg"
                     common_steps = [
                         "ffmpeg",
                         "-hide_banner",
@@ -561,16 +608,13 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                         "copy",
                     ]
                     if save_to_file:
-                        ext = "png" if content_type == "png" else "jpg"
-                        out_file = out_file.with_suffix(f".{ext}")
-                        subprocess.check_output(
-                            [
-                                *common_steps,
-                                out_file,
-                            ]
-                        )
-                        return out_file
-                    return subprocess.check_output(
+                        dest = out_file.with_suffix(f".{ext}")
+                        subprocess.check_output([*common_steps, dest])
+                        if dest.is_file() and dest.stat().st_size > 0:
+                            return dest
+                        # ffmpeg reported success but wrote nothing usable — try mutagen
+                        continue
+                    data = subprocess.check_output(
                         [
                             *common_steps,
                             "-f",
@@ -580,9 +624,16 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                             "-",
                         ]
                     )
+                    if data:
+                        return data
     except (KeyError, subprocess.CalledProcessError, OSError):
         if cfg.DEBUG:
             print_debug(f"Could not extract cover art from {file}'s streams")
+
+    # 2. Mutagen fallback for covr/APIC atoms ffmpeg cannot demux.
+    if mutagen_cover := _extract_cover_art_mutagen(path):
+        return _finish(*mutagen_cover)
+
     return out_file.with_suffix(".jpg") if save_to_file else b""
 
 
@@ -833,11 +884,12 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # extracting bytes with ffmpeg.  For m4b/m4a files the cover image is interleaved
     # with audio data inside the mdat chunk, so ffmpeg must scan the entire file to
     # extract it (O(filesize)), whereas ffprobe only reads the moov atom header.
+    # Fall back to mutagen when streams are missing/unreadable but covr/APIC exists.
     _probe = ffprobe_file(book.sample_audio1) or {}
     book.has_id3_cover = any(
         s.get("codec_name") in ("mjpeg", "png") and s.get("disposition", {}).get("attached_pic")
         for s in _probe.get("streams", [])
-    )
+    ) or bool(_extract_cover_art_mutagen(book.sample_audio1))
 
     # ── OL-first extraction ────────────────────────────────────────────────────
     # When OL is configured, ask it directly before heuristic scoring.

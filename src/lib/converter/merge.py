@@ -349,17 +349,20 @@ def convert_book_native(book: "Audiobook") -> int:
     if cover and not cover.is_file():
         cover = None
 
-    if cover is None and book.has_id3_cover:
+    if cover is None:
         # No standalone cover file → extract embedded cover from the first source
-        # file in merge_dir.  Using src_files[0] (a known local copy) avoids the
-        # active-dir ambiguity of book.sample_audio1 at this point in the flow.
+        # file in merge_dir (ffmpeg streams, with mutagen covr/APIC fallback).
+        # Using src_files[0] avoids active-dir ambiguity of book.sample_audio1.
         from src.lib.id3_utils import extract_cover_art as _extract_cover
+
         _src = src_files[0] if src_files else None
         if _src:
             try:
                 cover_bytes = _extract_cover(_src, save_to_file=False)
                 if cover_bytes:
-                    cover = tmp_dir / "cover.jpg"
+                    # Preserve format so ffmpeg can probe the image correctly.
+                    ext = "png" if cover_bytes.startswith(b"\x89PNG\r\n\x1a\n") else "jpg"
+                    cover = tmp_dir / f"cover.{ext}"
                     cover.write_bytes(cover_bytes)
             except Exception:
                 cover = None
