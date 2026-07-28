@@ -1117,6 +1117,19 @@ def hash_path_audio_files(path: Path, *, debug: bool = False) -> str:
     return hash_path(path, only_file_exts=AUDIO_EXTS, debug=debug)
 
 
+def audio_fingerprints_match(path_a: Path, path_b: Path) -> bool:
+    """True when both paths exist and share the same audio filename+size fingerprint.
+
+    Used to decide whether an inbox book is an identical re-drop of an archived copy
+    (skip) vs a legitimate reconvert with different contents (allow).
+    """
+    if not path_a.exists() or not path_b.exists():
+        return False
+    a = hash_path_audio_files(path_a)
+    b = hash_path_audio_files(path_b)
+    return bool(a) and bool(b) and a == b
+
+
 def hash_entire_inbox():
     from src.lib.config import cfg
 
