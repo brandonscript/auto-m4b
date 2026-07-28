@@ -74,6 +74,49 @@ def test_extract_path_info(expected, prop, indirect_fixture):
     assert getattr(extract_path_info(indirect_fixture), prop) == expected
 
 
+def test_book_title_pattern_ignores_numeric_ranges():
+    """Hyphens in 'Books1-3' must not be treated as 'Series - Title' separators.
+
+    Regression: Crescent City Fae Complete Boxed Set Books1-3 → fs_title '3' → 3.m4b.
+    """
+    from src.lib.misc import re_group
+    from src.lib.patterns import book_title_pattern
+
+    assert re_group(book_title_pattern.search("Crescent City Fae Complete Boxed Set Books1-3"), "book_title") in (
+        None,
+        "",
+    )
+    assert (
+        re_group(
+            book_title_pattern.search("Premonition Pointe 02 - Witching for Hope (2020)"),
+            "book_title",
+        )
+        == "Witching for Hope"
+    )
+
+
+def test_extract_path_info_books_range_not_title_three():
+    """extract_path_info must not set fs_title to '3' for Books1-3 PartN filenames."""
+    import shutil
+
+    from src.lib.books_tree.books_tree import BooksTree
+    from src.tests.helpers.pytest_dumps import TEST_DIRS
+
+    folder = TEST_DIRS.inbox / "Crescent City Fae [Boxed Set]"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        for i in (1, 2, 3):
+            (folder / f"Crescent City Fae Complete Boxed Set Books1-3 Part{i}.mp3").write_bytes(b"x")
+
+        book = Audiobook(BooksTree(folder))
+        extract_path_info(book)
+        assert book.fs_title != "3"
+        # Prefer folder name or a substantial title extracted from the common filename
+        assert len(book.fs_title) >= 3 or book.fs_title == ""
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def test_bitrate_vbr(bitrate_vbr__mp3: Audiobook):
 
     vbr_file = bitrate_vbr__mp3.sample_audio1

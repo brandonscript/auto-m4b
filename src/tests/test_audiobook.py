@@ -71,3 +71,29 @@ class test_safe_filename_in_audiobook_paths:
             "Dr. Laszlo Kreizler 02 - The Angel of Darkness (1997).m4b"
         )
         assert book.converted_file.name != "Dr.m4b"
+
+    def test_single_m4b_passthrough_keeps_original_filename(self, tmp_path):
+        """Single-file m4b passthrough must not rename to the ID3/OL title."""
+        from src.lib.books_tree.books_tree import BooksTree
+
+        folder = tmp_path / "Premonition Pointe 02 - Witching for Hope (2020)"
+        folder.mkdir()
+        original = "Witching for Hope Premonition Pointe, Book 2.m4b"
+        (folder / original).write_bytes(b"x")
+        book = Audiobook(BooksTree(folder))
+        book.title = "Witching for Hope"  # shorter OL/ID3 title
+        assert book.build_file.name == original
+        assert book.output_filename_stem == "Witching for Hope Premonition Pointe, Book 2"
+
+    def test_garbage_numeric_title_falls_back_to_basename(self, tmp_path):
+        """Reject fs_title like '3' (from Books1-3) as an output filename."""
+        from src.lib.books_tree.books_tree import BooksTree
+
+        folder = tmp_path / "Crescent City Fae [Boxed Set]"
+        folder.mkdir()
+        (folder / "a.mp3").write_bytes(b"x")
+        (folder / "b.mp3").write_bytes(b"x")
+        book = Audiobook(BooksTree(folder))
+        book.title = "3"
+        assert book.output_filename_stem == "Crescent City Fae [Boxed Set]"
+        assert book.build_file.name == "Crescent City Fae [Boxed Set].m4b"

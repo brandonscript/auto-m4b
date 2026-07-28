@@ -33,7 +33,9 @@ graphic_audio_pattern = re.compile(r"graphic\s*audio", re.I)
 lastname_firstname_pattern = re.compile(r"^(?P<lastname>.*?), (?P<firstname>.*)$", re.I)
 firstname_lastname_pattern = re.compile(r"^(?P<firstname>.*?).*\s(?P<lastname>\S+)$", re.I)
 
-book_title_pattern = re.compile(r"(?<=[-_–—])[\W\s]*(?P<book_title>[\w\s]+?)\s*(?=\d{4}|\(|\[|$)", re.I)
+# Require whitespace around the dash so numeric ranges like "Books1-3" are not
+# treated as "Series - Title" separators (that bug produced fs_title="3").
+book_title_pattern = re.compile(r"(?<=\s[-_–—]\s)[\W\s]*(?P<book_title>[\w\s]+?)\s*(?=\d{4}|\(|\[|$)", re.I)
 # partno_or_ch_match_pattern = re.compile(rf",?{_div}(?:part|ch(?:\.|apter))?{_div}\W*(?P<num1>\d+)(?:$|{_div}(?:of|-){_div}(?P<num2>\d+)\W*$)", re.I)
 roman_numeral_pattern = re.compile(rf"({_roman_numeral})", re.I)
 basic_part_or_ch_pattern = re.compile(r"(?:(?<=\W)|^)part|chapter|ch\.|pt\.", re.I)
