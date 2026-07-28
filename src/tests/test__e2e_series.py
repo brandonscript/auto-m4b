@@ -383,3 +383,51 @@ class test_series:
         out = testutils.get_stdout(capfd)
         assert "deferring cleanup" in testutils.strip_ansi_codes(out).lower()
         assert not cfg.FATAL_FILE.exists()
+
+    def test_author_dir_cleaned_up_after_last_book(
+        self,
+        tower_treasure__author_dir_mp3: Audiobook,
+        enable_archiving,
+    ):
+        """Author container dirs must be removed once their last book is archived.
+
+        Regression for: inbox/Author Name/ left behind as an empty (or .DS_Store-only)
+        shell after all nested books finished converting.
+        """
+        from src.lib.config import cfg
+
+        testutils.set_match_filter("^(Dixon)")
+        author_inbox_dir = TEST_DIRS.inbox / "Dixon, Franklin W."
+        assert author_inbox_dir.is_dir()
+
+        app(max_loops=1)
+
+        assert not cfg.FATAL_FILE.exists(), "App crashed fatally"
+        assert not author_inbox_dir.exists(), (
+            f"Author inbox dir should be cleaned up after last book archived: {author_inbox_dir}"
+        )
+
+    def test_unrelated_empty_inbox_dir_is_left_alone(
+        self,
+        tower_treasure__author_dir_mp3: Audiobook,
+        enable_archiving,
+    ):
+        """Empty dirs that were never converted must not be swept away."""
+        from src.lib.config import cfg
+
+        stray = TEST_DIRS.inbox / "Accidentally Empty Folder"
+        stray.mkdir()
+        (stray / ".DS_Store").write_bytes(b"x")
+
+        # Make mtime old enough to pass was_recently_modified.
+        import os
+        import time
+
+        old = time.time() - 3600
+        os.utime(stray, (old, old))
+
+        testutils.set_match_filter("^(Dixon)")
+        app(max_loops=1)
+
+        assert stray.exists(), "Unrelated empty inbox dir must be left alone"
+        assert not cfg.FATAL_FILE.exists()

@@ -286,13 +286,105 @@ def rm_dir(dir_path: Path, ignore_errors: bool = False, even_if_not_empty: bool 
     shutil.rmtree(dir_path, ignore_errors=True)
 
 
+def remove_ignored_junk(dir_path: Path) -> None:
+    """Delete ignore-list junk (.DS_Store, AppleDouble, etc.) directly under dir_path."""
+    if not dir_path.is_dir():
+        return
+    from src.lib.config import cfg
+
+    try:
+        children = list(dir_path.iterdir())
+    except OSError:
+        return
+
+    for child in children:
+        if not any(fnmatch.filter([child.name], pat) for pat in cfg.IGNORE_FILES):
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def dir_is_effectively_empty(dir_path: Path) -> bool:
+    """True when dir has no non-ignored files or subdirs (junk-only counts as empty)."""
+    if not dir_path.is_dir():
+        return True
+    try:
+        return not any(filter_ignored(dir_path.iterdir()))
+    except OSError:
+        return False
+
+
 def rm_all_empty_dirs(dir_path: Path):
-    """Recursively remove all empty directories under dir_path (deepest first)."""
+    """Recursively remove all empty directories under dir_path (deepest first).
+
+    Strips ignore-list junk before the emptiness check so leftover ``.DS_Store``
+    files do not permanently block cleanup on SMB/macOS shares.
+    """
     # Sort descending by path depth so children are removed before parents,
     # allowing a now-empty parent to also be pruned in the same pass.
-    for current_dir in sorted(dir_path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if current_dir.is_dir() and not any(current_dir.iterdir()) and is_ok_to_delete(current_dir):
-            rm_dir(current_dir, ignore_errors=True)
+    try:
+        candidates = sorted(dir_path.rglob("*"), key=lambda p: len(p.parts), reverse=True)
+    except OSError:
+        return
+    for current_dir in candidates:
+        if not current_dir.is_dir():
+            continue
+        remove_ignored_junk(current_dir)
+        if dir_is_effectively_empty(current_dir) and is_ok_to_delete(current_dir):
+            rm_dir(current_dir, ignore_errors=True, even_if_not_empty=True)
+
+
+def prune_empty_ancestors(path: Path, stop_at: Path) -> None:
+    """Remove ``path`` and empty parents up to (but not including) ``stop_at``.
+
+    Intended for post-archive cleanup: after a book is converted/archived, walk
+    up through series/author/container shells and delete them when they no
+    longer contain audio or other real content.
+
+    Stops at the first ancestor that still has convertible audio or non-junk
+    files. Never touches ``stop_at`` itself, and never deletes dirs outside it.
+    """
+    try:
+        stop = stop_at.resolve()
+    except OSError:
+        return
+
+    current = path
+    # If the leaf was already removed, start at its parent.
+    if not current.exists():
+        current = current.parent
+
+    while True:
+        try:
+            resolved = current.resolve()
+        except OSError:
+            break
+
+        if resolved == stop or stop not in resolved.parents:
+            break
+        if not current.is_dir():
+            break
+        if count_audio_files_in_dir(current) > 0:
+            break
+
+        remove_ignored_junk(current)
+        rm_all_empty_dirs(current)
+        remove_ignored_junk(current)
+
+        if not dir_is_effectively_empty(current):
+            break
+
+        parent = current.parent
+        rm_dir(current, ignore_errors=True, even_if_not_empty=True)
+        if current.exists():
+            # SMB or permissions prevented deletion — don't keep walking.
+            break
+        current = parent
 
 
 def _mv_or_cp_dir_contents(

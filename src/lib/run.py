@@ -92,11 +92,19 @@ def move_standalone_into_dir(book: Audiobook, item: InboxItem):
 def process_already_m4b(book: Audiobook, item: InboxItem):
 
     from src.lib.formatters import ensure_dot
-    from src.lib.fs_utils import find_adjacent_files_with_same_basename, mv_dir_contents, mv_file_into_dir
+    from src.lib.fs_utils import (
+        find_adjacent_files_with_same_basename,
+        mv_dir_contents,
+        mv_file_into_dir,
+        prune_empty_ancestors,
+        rm_dir,
+    )
 
     print_book_info(book)
     smart_print(f"\n{en.BOOK_ALREADY_CONVERTED}\n")
     print_moving_to_converted(book)
+
+    inbox_leaf = book.inbox_dir
 
     if book.tree.has_structure("standalone_file"):
         ext = ensure_dot(book.orig_file_type)
@@ -133,8 +141,14 @@ def process_already_m4b(book: Audiobook, item: InboxItem):
         for f in find_adjacent_files_with_same_basename(item.path):
             mv_file_into_dir(f, target_dir)
 
+        # Standalone files leave their parent folder; prune if that folder is now empty.
+        prune_empty_ancestors(item.path.parent, stop_at=cfg.inbox_dir)
+
     elif book.tree.has_structure("single"):
         mv_dir_contents(book.inbox_dir, book.converted_dir, overwrite_mode="overwrite-silent")
+        if book.inbox_dir.exists():
+            rm_dir(book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
+        prune_empty_ancestors(inbox_leaf, stop_at=cfg.inbox_dir)
 
     book.set_active_dir("converted")
     verify_and_update_id3_tags(book, in_dir="converted")
@@ -777,7 +791,15 @@ def move_converted_book_and_extras(book: Audiobook):
 
 
 def cleanup_series_dir(parent: InboxItem | None):
-    from src.lib.fs_utils import _mv_or_cp_dir_contents, count_audio_files_in_dir, is_ok_to_delete, rm_dir
+    from src.lib.fs_utils import (
+        _mv_or_cp_dir_contents,
+        count_audio_files_in_dir,
+        is_ok_to_delete,
+        prune_empty_ancestors,
+        remove_ignored_junk,
+        rm_all_empty_dirs,
+        rm_dir,
+    )
 
     if not parent:
         return
@@ -785,8 +807,8 @@ def cleanup_series_dir(parent: InboxItem | None):
     # After children are archived, a force-rescan may drop the series_parent
     # structure (scorer sees no audio children). Still allow cleanup when the
     # inbox folder remains on disk.
-    if not parent.is_series_parent and not parent.path.is_dir():
-        print_debug(f"{parent} is not a series parent, can't move series extras or clean up")
+    if not (parent.is_series_parent or parent.path.is_dir()):
+        print_debug(f"{parent} is not a series parent and path is gone, can't move series extras or clean up")
         return
 
     parent_book = parent.to_audiobook()
@@ -796,6 +818,10 @@ def cleanup_series_dir(parent: InboxItem | None):
     # Skip this gate in test_do_nothing mode: originals are intentionally left in
     # place, so audio will always remain.
     if parent_book.inbox_dir.exists() and cfg.ON_COMPLETE != "test_do_nothing":
+        # Empty book shells / .DS_Store left by SMB can look "present" — prune
+        # junk and empty children before counting remaining audio.
+        remove_ignored_junk(parent_book.inbox_dir)
+        rm_all_empty_dirs(parent_book.inbox_dir)
         remaining_audio = count_audio_files_in_dir(parent_book.inbox_dir)
         if remaining_audio > 0:
             print_notice(
@@ -843,11 +869,13 @@ def cleanup_series_dir(parent: InboxItem | None):
                 if parent_book.inbox_dir.exists():
                     # Cross-partition: fell back to copy, leaving source intact.
                     # Remove it now so the series folder isn't reprocessed.
+                    remove_ignored_junk(parent_book.inbox_dir)
                     rm_dir(parent_book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
 
             elif cfg.ON_COMPLETE == "delete":
                 can_del = is_ok_to_delete(parent_book.inbox_dir)
                 if can_del or cfg.BACKUP:
+                    remove_ignored_junk(parent_book.inbox_dir)
                     rm_dir(
                         parent_book.inbox_dir,
                         ignore_errors=True,
@@ -859,12 +887,24 @@ def cleanup_series_dir(parent: InboxItem | None):
                     )
                     return
             InboxState().set_gone(parent_book)
+
+        # If the series parent itself couldn't be removed (SMB shell), or this
+        # was nested under an author/container dir, prune empty ancestors.
+        prune_empty_ancestors(parent_book.inbox_dir, stop_at=cfg.inbox_dir)
         print_mint(" ✓")
 
 
 def archive_inbox_book(book: Audiobook):
-    from src.lib.fs_utils import is_ok_to_delete, mv_dir_contents, rm_dir
+    from src.lib.fs_utils import (
+        is_ok_to_delete,
+        mv_dir_contents,
+        prune_empty_ancestors,
+        remove_ignored_junk,
+        rm_dir,
+    )
     from src.lib.term import print_notice, print_warning
+
+    inbox_leaf = book.inbox_dir
 
     if cfg.ON_COMPLETE == "test_do_nothing":
         print_notice("Test mode: The original folder will not be moved or deleted")
@@ -873,6 +913,8 @@ def archive_inbox_book(book: Audiobook):
         if not book.inbox_dir.exists():
             print_notice(en.BOOK_INBOX_MOVED_AFTER_CONVERSION)
             InboxState().set_gone(book)
+            # Still prune empty author/series shells left behind.
+            prune_empty_ancestors(inbox_leaf, stop_at=cfg.inbox_dir)
             return
 
         if cfg.ON_COMPLETE == "archive":
@@ -884,8 +926,9 @@ def archive_inbox_book(book: Audiobook):
             )
 
             if book.inbox_dir.exists():
-                # Cross-partition: mv_dir_contents fell back to copy, leaving source
-                # intact. Remove it now so the book isn't reprocessed on the next loop.
+                # Cross-partition / SMB: content moved but shell (often + .DS_Store)
+                # remains. Strip junk then force-remove.
+                remove_ignored_junk(book.inbox_dir)
                 rm_dir(book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
 
             if book.inbox_dir.exists():
@@ -893,12 +936,15 @@ def archive_inbox_book(book: Audiobook):
                     f"Warning: {tint_warning(book)} is still in the inbox folder, it should have been archived"
                 )
                 print_orange("     To prevent this book from being converted again, move it out of the inbox folder")
+                # Still try to clean empty siblings/ancestors from earlier books.
+                prune_empty_ancestors(inbox_leaf, stop_at=cfg.inbox_dir)
                 return
 
         elif cfg.ON_COMPLETE == "delete":
             smart_print("\nDeleting original from inbox...", end="")
             can_del = is_ok_to_delete(book.inbox_dir)
             if can_del or cfg.BACKUP:
+                remove_ignored_junk(book.inbox_dir)
                 rm_dir(book.inbox_dir, ignore_errors=True, even_if_not_empty=True)
             elif not can_del and not cfg.BACKUP:
                 print_notice(
@@ -907,6 +953,9 @@ def archive_inbox_book(book: Audiobook):
                 return
 
         InboxState().set_gone(book)
+        # After the last book in an author/series/container folder is archived,
+        # remove empty parent shells (ignoring .DS_Store junk).
+        prune_empty_ancestors(inbox_leaf, stop_at=cfg.inbox_dir)
         print_mint(" ✓")
 
 
@@ -1240,25 +1289,57 @@ def process_inbox():
         print_banner()
 
     def _sweep_empty_inbox_dirs():
-        """Remove empty leftover dirs from the inbox (e.g. series parent dirs whose
-        children were all archived in a previous run). Safe because:
-        - first prunes any empty sub-directories recursively (shell folders left
-          behind after individual books were archived)
-        - only then removes the top-level dir if it is now also empty
+        """Remove empty leftover dirs from the inbox that correlate to converted
+        or archived books (e.g. series/author parents whose children were all
+        archived). Safe because:
+        - first prunes nested empty shells and ignore-list junk (.DS_Store)
+        - only removes the top-level dir if it is then effectively empty
         - skips dirs modified within WAIT_TIME seconds (actively receiving files)
-        - skips dirs that are currently tracked as books in _items"""
-        from src.lib.fs_utils import rm_all_empty_dirs, rm_dir, was_recently_modified
+        - skips dirs with remaining audio
+        - skips dirs that do NOT appear under converted/ or archive/ — so a
+          mistaken empty folder the user dropped into the inbox is left alone
+        """
+        from src.lib.fs_utils import (
+            count_audio_files_in_dir,
+            dir_is_effectively_empty,
+            remove_ignored_junk,
+            rm_all_empty_dirs,
+            rm_dir,
+            was_recently_modified,
+        )
 
         for subdir in sorted(cfg.inbox_dir.iterdir()):
-            if not subdir.is_dir() or was_recently_modified(subdir) or inbox.get(subdir):
+            if not subdir.is_dir() or was_recently_modified(subdir):
                 continue
-            # First remove any nested empty dirs (e.g. individual book folders
-            # whose audio was already archived, leaving an empty shell).
+            if count_audio_files_in_dir(subdir) > 0:
+                continue
+
+            # Only clean up dirs that correlate to something we converted/archived.
+            # An empty folder with no matching converted/archive sibling is left alone.
+            correlated = (cfg.converted_dir / subdir.name).exists() or (
+                cfg.archive_dir / subdir.name
+            ).exists()
+            if not correlated:
+                tracked = inbox.get(subdir)
+                if not (
+                    tracked
+                    and (
+                        tracked.is_series_parent
+                        or tracked.tree.has_any_structure("container", "multi_parent")
+                    )
+                ):
+                    continue
+
+            remove_ignored_junk(subdir)
             rm_all_empty_dirs(subdir)
-            # Now remove the top-level dir if it is itself empty.
-            if not any(subdir.iterdir()):
+            remove_ignored_junk(subdir)
+            if dir_is_effectively_empty(subdir):
                 print_debug(f"Removing empty leftover inbox dir: {subdir.name}")
-                rm_dir(subdir, ignore_errors=True)
+                rm_dir(subdir, ignore_errors=True, even_if_not_empty=True)
+                if not subdir.exists():
+                    gone = inbox.get(subdir)
+                    if gone:
+                        InboxState().set_gone(gone)
 
     print_debug(f"[process_inbox] loop={inbox.loop_counter}, checking audio_files_found...")
     if not audio_files_found():
@@ -1275,10 +1356,10 @@ def process_inbox():
         not inbox.inbox_needs_processing()
         and inbox.loop_counter > 1
     ):
-        # Nothing changed since the last run — skip this idle loop entirely.
-        # Do NOT print a banner here; a banner without a matching CATS footer
-        # would violate assert_not_ends_with_banner in tests and looks wrong in
-        # production when the app is just polling for new books.
+        # Nothing changed since the last run — skip book processing, but still
+        # sweep empty converted/archived leftovers (e.g. .DS_Store-only shells
+        # left behind after the previous convert pass).
+        _sweep_empty_inbox_dirs()
         return
     # Only print the banner when something actually changed in the inbox (new
     # books added/removed) or on the very first processing loop. Re-processing
@@ -1392,16 +1473,30 @@ def process_inbox():
                 if not pending and not _unseen_sibling_dirs(parent, parent_key) and parent:
                     cleanup_series_dir(parent)
 
-    # Sweep 1: series parents still in _items whose inbox dir became empty during this
-    # run. Catches cases where is_last_book_in_series didn't fire (e.g. dict ordering
-    # placed the "last" child first and it converted before the others).
+    # Sweep 1: series/container parents still in _items whose inbox dir became
+    # empty (ignoring .DS_Store / empty book shells) during this run.
+    from src.lib.fs_utils import (
+        count_audio_files_in_dir as _count_audio,
+        dir_is_effectively_empty,
+        remove_ignored_junk,
+        rm_all_empty_dirs,
+    )
+
     for parent_item in list(inbox._items.values()):
-        if (
-            parent_item.is_series_parent
-            and parent_item.status not in ("gone", "processed")
-            and parent_item.path.is_dir()
-            and not any(parent_item.path.iterdir())
-        ):
+        if parent_item.status in ("gone", "processed") or parent_item.is_gone:
+            continue
+        if not parent_item.path.is_dir():
+            continue
+        is_parentish = parent_item.is_series_parent or parent_item.tree.has_any_structure(
+            "container", "multi_parent"
+        )
+        if not is_parentish:
+            continue
+        remove_ignored_junk(parent_item.path)
+        rm_all_empty_dirs(parent_item.path)
+        if _count_audio(parent_item.path) > 0:
+            continue
+        if dir_is_effectively_empty(parent_item.path):
             cleanup_series_dir(parent_item)
 
     # Sweep 2: empty inbox subdirs not in _items — container-restart scenario.
