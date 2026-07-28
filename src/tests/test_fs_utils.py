@@ -575,3 +575,48 @@ def test_mv_or_cp_filtered_does_not_create_empty_dest_dirs(tmp_path: Path):
     assert not (dst / "Dark Tower 1").exists(), (
         "Audio-only child must not create an empty dest dir during filtered collateral copy"
     )
+
+
+class TestPruneEmptyAncestors:
+    def test_removes_empty_book_and_author_shells(self, tmp_path: Path):
+        from src.lib.fs_utils import prune_empty_ancestors
+
+        inbox = tmp_path / "inbox"
+        author = inbox / "Chase, Deanna"
+        book = author / "Premonition Pointe 01"
+        book.mkdir(parents=True)
+        (author / ".DS_Store").write_bytes(b"junk")
+        (book / ".DS_Store").write_bytes(b"junk")
+
+        prune_empty_ancestors(book, stop_at=inbox)
+
+        assert not book.exists()
+        assert not author.exists()
+        assert inbox.exists()
+
+    def test_stops_when_sibling_audio_remains(self, tmp_path: Path):
+        from src.lib.fs_utils import prune_empty_ancestors
+
+        inbox = tmp_path / "inbox"
+        author = inbox / "Chase, Deanna"
+        done = author / "Book 1"
+        pending = author / "Book 2"
+        done.mkdir(parents=True)
+        pending.mkdir(parents=True)
+        (pending / "chapter.mp3").write_bytes(b"audio")
+
+        prune_empty_ancestors(done, stop_at=inbox)
+
+        assert not done.exists()
+        assert author.exists()
+        assert (pending / "chapter.mp3").exists()
+
+    def test_dir_is_effectively_empty_ignores_ds_store(self, tmp_path: Path):
+        from src.lib.fs_utils import dir_is_effectively_empty
+
+        d = tmp_path / "author"
+        d.mkdir()
+        (d / ".DS_Store").write_bytes(b"x")
+        assert dir_is_effectively_empty(d) is True
+        (d / "note.txt").write_text("keep")
+        assert dir_is_effectively_empty(d) is False
