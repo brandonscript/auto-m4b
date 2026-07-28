@@ -16,6 +16,7 @@ from src.lib.formatters import human_bitrate, to_audiobook_fmt
 from src.lib.fs_utils import (
     count_audio_files_in_dir,
     cp_file_into_dir,
+    ensure_audio_ext,
     find_cover_art_file,
     get_size,
     hash_path_audio_files,
@@ -250,10 +251,8 @@ class Audiobook(BaseModel):
         from src.lib.config import cfg
 
         def _build_filename():
-            b = Path(safe_filename(self.basename))
-            # Keep existing .m4b extension; add it if missing
-            filename = b if b.suffix == ".m4b" else b.with_suffix(".m4b")
-            return self.converted_dir / filename
+            # Do not use Path.with_suffix — titles like "Dr. Laszlo…" truncate to "Dr.m4b".
+            return self.converted_dir / ensure_audio_ext(self.basename, ".m4b")
 
         def _find_m4b_matching_basename():
             # Only search the immediate directory (non-recursive) to avoid

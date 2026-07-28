@@ -58,3 +58,16 @@ class test_safe_filename_in_audiobook_paths:
         name = book_with_colon_title.final_desc_file.name
         assert ":" not in name
         assert name.startswith("Into the Fire - A LitRPG Fantasy Cooking Adventure (Morcster Chef, Book 2) [")
+
+    def test_converted_file_preserves_dr_prefix(self, house_on_the_cliff__flat_mp3: Audiobook, tmp_path):
+        """Path.with_suffix must not truncate 'Dr. Laszlo…' to 'Dr.m4b'."""
+        from src.lib.books_tree.books_tree import BooksTree
+
+        folder = tmp_path / "Dr. Laszlo Kreizler 02 - The Angel of Darkness (1997)"
+        folder.mkdir()
+        (folder / "part1.mp3").write_bytes(b"x")
+        book = Audiobook(BooksTree(folder))
+        assert book.converted_file.name == (
+            "Dr. Laszlo Kreizler 02 - The Angel of Darkness (1997).m4b"
+        )
+        assert book.converted_file.name != "Dr.m4b"
