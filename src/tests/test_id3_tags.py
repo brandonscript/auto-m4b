@@ -1271,11 +1271,14 @@ def test_verify_fills_empty_title_album_on_converted_file(
     book.build_dir.mkdir(parents=True, exist_ok=True)
     build_mp3 = book.build_dir / f"{book.basename}.mp3"
     shutil.copy(book.sample_audio1, build_mp3)
-    # Write a file with empty title/album (the bug state).
-    write_id3_tags_mutagen(
+    # Bypass sanitize and write a truly blank Title/Album (the bug state on disk).
+    from src.lib.id3_utils import write_mp3_tags
+
+    write_mp3_tags(
         build_mp3,
         {"title": "", "album": "", "artist": "Franklin W. Dixon", "albumartist": "Franklin W. Dixon"},
     )
+    assert not (extract_id3_tags(build_mp3).get("title") or "").strip()
 
     with patch.object(type(book), "build_file", new_callable=PropertyMock, return_value=build_mp3):
         verify_and_update_id3_tags(book, in_dir="build")
@@ -1285,3 +1288,35 @@ def test_verify_fills_empty_title_album_on_converted_file(
     assert (result.get("album") or "").strip(), f"Album still blank: {result}"
     assert result.get("title") == book.title
     assert result.get("album") == book.album
+
+
+def test_sanitize_tags_for_write_never_leaves_title_blank():
+    """write_id3_tags_mutagen's sanitize gate fills blank Title/Album from stem."""
+    from src.lib.id3_utils import _sanitize_tags_for_write
+
+    out = _sanitize_tags_for_write(
+        {"title": "", "album": "", "artist": ""},
+        fallback_stem="Crescent City Fae [Boxed Set]",
+    )
+    assert out["title"] == "Crescent City Fae [Boxed Set]"
+    assert out["album"] == "Crescent City Fae [Boxed Set]"
+    assert out["sortalbum"]
+    # Author may stay blank when title came from the filename.
+    assert out.get("artist", "") == ""
+
+
+def test_write_id3_tags_fills_blank_title_from_filename(tmp_path):
+    """Even a blank tags dict must produce a non-empty Title on disk."""
+    import shutil
+
+    from src.lib.id3_utils import write_id3_tags_mutagen
+    from src.tests.helpers.pytest_dumps import FIXTURES_ROOT
+
+    src = FIXTURES_ROOT / "basic_with_cover__standalone_mp3.mp3"
+    dst = tmp_path / "My Fancy Book.mp3"
+    shutil.copy(src, dst)
+
+    write_id3_tags_mutagen(dst, {"title": "", "album": "", "artist": ""})
+    result = extract_id3_tags(dst)
+    assert result.get("title") == "My Fancy Book"
+    assert result.get("album") == "My Fancy Book"

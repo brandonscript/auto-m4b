@@ -329,6 +329,10 @@ def convert_book_native(book: "Audiobook") -> int:
         chapters = dedupe_names(chapters)
 
     # ── 6. Write ffmetadata ───────────────────────────────────────────────────
+    # Never embed blank Title/Album — Plex shows "[Unknown Album]" otherwise.
+    from src.lib.id3_utils import ensure_title_and_album
+
+    ensure_title_and_album(book)
     meta_path = tmp_dir / "metadata.txt"
     write_ffmetadata(
         meta_path,
