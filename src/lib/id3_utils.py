@@ -104,6 +104,32 @@ def _tags_from_dict(tags: Id3TagDictWithDnumTnum) -> TagSet:
     return TagSet(title, artist, album, sortalbum, albumartist, composer, date, track_num, comment)
 
 
+def _sanitize_tags_for_write(
+    tags: Id3TagDictWithDnumTnum,
+    *,
+    fallback_stem: str,
+) -> Id3TagDictWithDnumTnum:
+    """Final gate before writing tags: Title/Album must never be blank.
+
+    Prefer existing tag values; otherwise use ``fallback_stem`` (usually the
+    output filename stem). Artist/albumartist may remain blank — e.g. when the
+    title came only from the filename.
+    """
+    out: dict = dict(tags)
+    title = str(out.get("title") or "").strip()
+    album = str(out.get("album") or "").strip()
+    stem = (fallback_stem or "").strip() or "Unknown Audiobook"
+
+    if not title:
+        title = stem
+        out["title"] = title
+    if not album:
+        out["album"] = title
+    if not str(out.get("sortalbum") or "").strip():
+        out["sortalbum"] = strip_leading_articles(str(out["album"]))
+    return cast(Id3TagDictWithDnumTnum, out)
+
+
 def write_m4b_tags(
     file: Path,
     tags: Id3TagDictWithDnumTnum,
@@ -162,6 +188,8 @@ def write_id3_tags_mutagen(
     from src.lib.id3_tags import Id3Tags
 
     path = file.path if isinstance(file, BooksTree) else file
+    # Absolute last line of defense: never write blank Title/Album to disk.
+    tags = _sanitize_tags_for_write(tags, fallback_stem=path.stem)
     if path.suffix.lower() in [".m4b", ".m4a"]:
         try:
             write_m4b_tags(path, tags, cover=cover)
@@ -492,6 +520,24 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     if (cover := book.cover_art_file) and cover.exists() and not book_to_check.has_id3_cover:
         cover_needs_updating = True
         updates.append(lambda: _print_needs_updating("Cover art", None, cover.name))
+
+    # Final pass: never leave Title/Album blank on disk, even if no other field
+    # needed updating. Author may remain blank when title came from the filename.
+    ensure_title_and_album(book)
+    new_tags["title"] = book.title
+    new_tags["album"] = book.album or book.title
+    new_tags["sortalbum"] = book.sortalbum or strip_leading_articles(book.title)
+    if not (book_to_check.id3_title or "").strip() or not (book_to_check.id3_album or "").strip():
+        # Force a write; _check_title usually already queued notices when book.title
+        # was known, so only add a notice if somehow nothing was queued yet.
+        title_needs_updating = True
+        if not updates:
+            if not (book_to_check.id3_title or "").strip():
+                updates.append(lambda: _print_needs_updating("Title", None, book.title))
+            if not (book_to_check.id3_album or "").strip():
+                updates.append(
+                    lambda: _print_needs_updating("Album (title)", None, book.album or book.title)
+                )
 
     needs_update = any(
         (
