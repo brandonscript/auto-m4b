@@ -2,11 +2,14 @@
 
 Usage examples::
 
-    poetry run python -m src.fix_metadata --dry-run \\
+    poetry run python -m src.fix_metadata \\
       "/media/.../#plex/Le Guin, Ursula K." --recursive
 
     poetry run python -m src.fix_metadata --apply \\
       "/media/.../#plex/French, Tana/The Searcher (2020)"
+
+    poetry run python -m src.fix_metadata -i --recursive \\
+      "/media/.../#plex/Le Guin, Ursula K."
 
     poetry run python -m src.fix_metadata --apply --ignore "*.bak" PATH
 """
@@ -431,6 +434,54 @@ Size: {size}
     out_path.write_text(content, encoding="utf-8")
 
 
+def print_plan(plan: FixPlan, *, label: str = "dry-run") -> None:
+    """Print a human-readable summary of the planned fix."""
+    smart_print(f"[{label}] {plan.book_dir.name}")
+    for r in plan.reasons:
+        smart_print(f"  - {r}")
+    if plan.needs_tag_write:
+        smart_print(
+            f"  tags: title={plan.desired_title!r} author={plan.desired_author!r} "
+            f"date={plan.desired_date!r} narrator={plan.desired_narrator!r}"
+        )
+    if plan.rename_m4b_to:
+        smart_print(f"  rename: {plan.m4b.name} → {plan.rename_m4b_to.name}")
+    if plan.rename_desc_to:
+        smart_print(
+            f"  rename desc: {plan.desc_txt.name if plan.desc_txt else '?'} → {plan.rename_desc_to.name}"
+        )
+    elif plan.desc_txt:
+        smart_print(f"  rewrite desc: {plan.desc_txt.name}")
+
+
+def parse_apply_prompt(raw: str) -> str:
+    """Normalize an interactive prompt response to y/n/a/q (default n)."""
+    s = (raw or "").strip().lower()
+    if not s:
+        return "n"
+    if s in ("y", "yes"):
+        return "y"
+    if s in ("a", "all"):
+        return "a"
+    if s in ("q", "quit"):
+        return "q"
+    if s in ("n", "no", "s", "skip"):
+        return "n"
+    # First letter fallback
+    if s[0] in ("y", "a", "q", "n"):
+        return s[0]
+    return "n"
+
+
+def prompt_apply(plan: FixPlan) -> str:
+    """Ask whether to apply *plan*. Returns ``y``, ``n``, ``a`` (all), or ``q`` (quit)."""
+    try:
+        raw = input("  Apply this fix? [y/N/a=all/q=quit] ").strip()
+    except EOFError:
+        return "n"
+    return parse_apply_prompt(raw)
+
+
 def apply_fix(plan: FixPlan, *, dry_run: bool = True) -> None:
     tags = {
         "title": plan.desired_title,
@@ -442,20 +493,7 @@ def apply_fix(plan: FixPlan, *, dry_run: bool = True) -> None:
     }
 
     if dry_run:
-        smart_print(f"[dry-run] {plan.book_dir.name}")
-        for r in plan.reasons:
-            smart_print(f"  - {r}")
-        if plan.needs_tag_write:
-            smart_print(
-                f"  tags: title={plan.desired_title!r} author={plan.desired_author!r} "
-                f"date={plan.desired_date!r} narrator={plan.desired_narrator!r}"
-            )
-        if plan.rename_m4b_to:
-            smart_print(f"  rename: {plan.m4b.name} → {plan.rename_m4b_to.name}")
-        if plan.rename_desc_to:
-            smart_print(f"  rename desc: {plan.desc_txt.name if plan.desc_txt else '?'} → {plan.rename_desc_to.name}")
-        elif plan.desc_txt:
-            smart_print(f"  rewrite desc: {plan.desc_txt.name}")
+        print_plan(plan, label="dry-run")
         return
 
     target = plan.m4b
@@ -557,10 +595,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Write tags / rename files (default is dry-run only)",
     )
+    parser.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="Show each planned fix and prompt before applying (implies write; default answer is skip)",
+    )
     parser.add_argument("--debug", action="store_true", help="Verbose debug")
 
     args = parser.parse_args(argv)
-    dry_run = not args.apply
+    interactive = bool(args.interactive)
+    # -i assumes apply-with-prompt; bare --apply writes without asking.
+    dry_run = not (args.apply or interactive)
 
     book_dirs = iter_book_dirs(args.paths, recursive=args.recursive)
     if not book_dirs:
@@ -575,14 +621,44 @@ def main(argv: list[str] | None = None) -> int:
         elif args.debug:
             print_debug(f"ok / no changes: {d.name}")
 
-    smart_print(f"{'Dry-run' if dry_run else 'Applying'}: {len(plans)} book(s) need fixes ({len(book_dirs)} scanned)")
+    if interactive:
+        mode_label = "Interactive"
+    elif dry_run:
+        mode_label = "Dry-run"
+    else:
+        mode_label = "Applying"
+    smart_print(f"{mode_label}: {len(plans)} book(s) need fixes ({len(book_dirs)} scanned)")
+
+    apply_rest = False
+    applied = 0
+    skipped = 0
     for plan in plans:
-        if not dry_run:
-            smart_print(f"fixing {plan.book_dir.name}")
-        apply_fix(plan, dry_run=dry_run)
+        if dry_run:
+            apply_fix(plan, dry_run=True)
+            continue
+
+        if interactive and not apply_rest:
+            print_plan(plan, label="propose")
+            choice = prompt_apply(plan)
+            if choice == "q":
+                smart_print("Quit — remaining books left unchanged.")
+                break
+            if choice == "n":
+                smart_print("  skipped")
+                skipped += 1
+                continue
+            if choice == "a":
+                apply_rest = True
+                smart_print("  applying this and all remaining…")
+
+        smart_print(f"fixing {plan.book_dir.name}")
+        apply_fix(plan, dry_run=False)
+        applied += 1
 
     if dry_run and plans:
-        smart_print("\nRe-run with --apply to write changes.")
+        smart_print("\nRe-run with --apply to write changes, or -i to confirm each fix.")
+    elif interactive:
+        smart_print(f"\nDone — applied {applied}, skipped {skipped}.")
     return 0
 
 
