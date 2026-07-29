@@ -358,6 +358,12 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
                 updates.append(lambda: _print_needs_updating(orop, tag_value, new_title))
                 new_tags[id3_tag] = new_title
                 new_tags["sortalbum"] = strip_leading_the(new_title)
+                # Keep book.* in sync so the final ensure_title_and_album pass
+                # does not clobber Title-Cased OL values with sentence-cased book.title.
+                if id3_tag in ("title", "album"):
+                    book.title = new_title
+                    book.album = new_title
+                    book.sortalbum = strip_leading_the(new_title)
         elif book.title:
             # Strip edition suffixes even when OL isn't configured —
             # source tags sometimes embed LibriVox/archive.org edition info
@@ -369,6 +375,10 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
                 updates.append(lambda: _print_needs_updating(orop, tag_value, cleaned_title))
                 new_tags[id3_tag] = cleaned_title
                 new_tags["sortalbum"] = strip_leading_the(cleaned_title)
+                if id3_tag in ("title", "album"):
+                    book.title = cleaned_title
+                    book.album = cleaned_title
+                    book.sortalbum = strip_leading_the(cleaned_title)
 
     def _check_author(prop: str, id3_tag: TagSource):
         nonlocal author_needs_updating, narrator_needs_updating, new_tags
@@ -523,6 +533,12 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
     # Final pass: never leave Title/Album blank on disk, even if no other field
     # needed updating. Author may remain blank when title came from the filename.
+    # Also strip OL/LibriVox edition suffixes so the ensure pass cannot re-inject
+    # ", Version 3" etc. after _check_title cleaned new_tags.
+    if book.title:
+        book.title = _strip_ol_edition_suffix(book.title)
+    if book.album:
+        book.album = _strip_ol_edition_suffix(book.album)
     ensure_title_and_album(book)
     new_tags["title"] = book.title
     new_tags["album"] = book.album or book.title
@@ -805,36 +821,126 @@ def _normalize_ol_title(title: str) -> str:
     return title_case_ol_title(_strip_ol_edition_suffix(title))
 
 
+# Early-extraction acceptance floors (title similarity is 0..1).
+_OL_TITLE_RATIO_MIN = 0.85
+_OL_TITLE_TOKEN_SET_MIN = 0.9
+_OL_AUTHOR_AGREE_MIN = 0.5
+_OL_SOURCE_ANCHOR_MIN = 0.55
+
+_SUBTITLE_STRIP = re.compile(
+    r"\s*:\s*A\s+(?:Novel|Novella|Memoir|Story|Romance|Thriller|Mystery|Fantasy)\s*$",
+    re.I,
+)
+
+
+def _ol_title_variants(title: str) -> list[str]:
+    """Expand a title candidate with common subtitle-stripped variants."""
+    t = (title or "").strip()
+    if not t:
+        return []
+    out = [t]
+    stripped = _SUBTITLE_STRIP.sub("", t).strip()
+    if stripped and stripped not in out:
+        out.append(stripped)
+    return out
+
+
+def _id3_tag_blob(*tags: Any, book: "Audiobook | None" = None) -> str:
+    """Lowercased blob of ID3/path strings for conflict checks."""
+    parts: list[str] = []
+    attrs = (
+        "title",
+        "album",
+        "artist",
+        "albumartist",
+        "composer",
+        "comment",
+        "copyright",
+        "sortalbum",
+        "genre",
+    )
+    for tag in tags:
+        if not tag:
+            continue
+        for attr in attrs:
+            v = getattr(tag, attr, None)
+            if v:
+                parts.append(str(v))
+    if book is not None:
+        for attr in (
+            "fs_author",
+            "fs_title",
+            "fs_narrator",
+            "id3_title",
+            "id3_album",
+            "id3_artist",
+            "id3_albumartist",
+            "id3_composer",
+            "id3_comment",
+        ):
+            v = getattr(book, attr, None)
+            if v:
+                parts.append(str(v))
+    return " ".join(parts).lower()
+
+
+def _name_mentioned_in_blob(name: str, blob: str) -> bool:
+    """True if *name* (or a substantial last-name token) appears in *blob*."""
+    from rapidfuzz import fuzz
+
+    from src.lib.ol_lookup import _title_sim
+
+    n = (name or "").strip()
+    if not n or not blob:
+        return False
+    if n.lower() in blob:
+        return True
+    # Last token often survives "Last, First" / "First Last" forms.
+    tokens = [t for t in re.split(r"[\s,]+", n) if len(t) >= 4]
+    if tokens and tokens[-1].lower() in blob:
+        return True
+    ratio, token = _title_sim(n, blob)
+    return ratio >= 0.5 or token >= 0.6 or fuzz.partial_ratio(n.lower(), blob) >= 70
+
+
+def _ol_title_passes_floor(query: str, ol_title: str) -> bool:
+    from src.lib.ol_lookup import _title_sim
+
+    ratio, token = _title_sim(query, ol_title)
+    return ratio >= _OL_TITLE_RATIO_MIN or token >= _OL_TITLE_TOKEN_SET_MIN
+
+
+def _ol_author_agrees(preferred: str, ol_author: str, author_score: float | None) -> bool:
+    from src.lib.ol_lookup import _title_sim
+
+    if author_score is not None and author_score >= _OL_AUTHOR_AGREE_MIN:
+        return True
+    ratio, token = _title_sim(preferred, ol_author or "")
+    return ratio >= _OL_AUTHOR_AGREE_MIN or token >= _OL_AUTHOR_AGREE_MIN
+
+
 def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibraryTitle | None":
     """Try Open Library *before* heuristic scoring.
 
-    Strategy:
-    1. Build title candidates from ID3 title, album, sortalbum, fs_title, then
-       folder/file basename.
-    2. Build author hints from albumartist, artist (stripped of narrator
-       prefixes), composer, then fs_author.
-    3. Try each title candidate with OL (up to 3 author hints per candidate).
-    4. On a confident match (score < 0.5) with both title + author resolved,
-       set book.title / book.artist / book.albumartist from OL.
-
-    Returns the winning OpenLibraryTitle on success, None otherwise.
+    Author-first strategy:
+    1. Collect person candidates (fs_author first; never album-as-author).
+    2. Optionally validate them via OL author lookup; prefer folder author.
+    3. Search titles with the preferred author (and narrator alternate); never
+       fall back to title-only when a preferred author is known.
+    4. Accept only when title floors, source-title anchor, and author agreement
+       (plus ID3 conflict demotion) all pass.
     """
+    from rapidfuzz import fuzz
+
     from src.lib.config import cfg
-    from src.lib.ol_lookup import OpenLibraryTitle
+    from src.lib.ol_lookup import _title_sim
+    from src.lib.parsers import contains_partno_or_ch
 
     if not cfg.OPEN_LIBRARY_USER_AGENT:
         return None
 
     def _clean(v: str) -> str:
         return _READ_BY_PATTERN.sub("", (v or "").strip()).strip()
-
-    # Title candidates in priority order.
-    # Default: ID3 title → album → sortalbum → fs_title → folder basename.
-    # Exception: when the raw title tag contains a part/disc number but the
-    # album tag does NOT (e.g. title="War and Peace, Part 1", album="War and
-    # Peace"), promote album to the front so OL looks up the whole-book title
-    # rather than a specific part edition.
-    from src.lib.parsers import contains_partno_or_ch
 
     raw_title = (tag1.title or "").strip()
     raw_album = (tag1.album or "").strip()
@@ -846,56 +952,219 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
             basename = Path(basename).stem
     except OSError:
         pass
+
+    # Title candidates: prefer story title over anthology album, except when the
+    # track title is a part number and album is the whole-book name.
     if title_has_partno and not album_has_partno and raw_album:
         raw_order = [tag1.album, tag1.title, tag1.sortalbum, book.fs_title, basename]
     else:
-        raw_order = [tag1.title, tag1.album, tag1.sortalbum, book.fs_title, basename]
+        raw_order = [tag1.title, book.fs_title, tag1.sortalbum, tag1.album, basename]
 
     title_cands: list[str] = []
     for v in raw_order:
-        cleaned = (v or "").strip()
-        if cleaned and cleaned not in title_cands:
-            title_cands.append(cleaned)
+        for variant in _ol_title_variants((v or "").strip()):
+            if variant and variant not in title_cands:
+                title_cands.append(variant)
 
     if not title_cands:
         return None
 
-    # Author hints: albumartist first (most reliable), then artist, composer, fs
-    author_hints: list[str] = []
-    for v in [tag1.albumartist, tag1.composer, tag1.artist, tag1.album, book.fs_author]:
-        cleaned = _clean(v)
-        if cleaned and cleaned not in author_hints:
-            author_hints.append(cleaned)
+    # Source-title anchor: ID3 title or fs_title (not album).
+    source_title = raw_title or (book.fs_title or "").strip()
+
+    # Person candidates — never use album (a title) as an author hint.
+    person_cands: list[str] = []
+    for v in [book.fs_author, tag1.albumartist, tag1.artist, tag1.composer]:
+        cleaned = _clean(v or "")
+        if cleaned and cleaned not in person_cands:
+            person_cands.append(cleaned)
+
+    narrator_cands: list[str] = []
+    for v in [book.fs_narrator, getattr(tag2, "artist", None), getattr(tag2, "composer", None)]:
+        cleaned = _clean(v or "")
+        if cleaned and cleaned not in narrator_cands and cleaned not in person_cands[:1]:
+            narrator_cands.append(cleaned)
+    # Explicit "read by …" on artist/composer of sample 1
+    for v in [tag1.artist, tag1.composer]:
+        raw = (v or "").strip()
+        if raw and _READ_BY_PATTERN.search(raw):
+            cleaned = _clean(raw)
+            if cleaned and cleaned not in narrator_cands:
+                narrator_cands.append(cleaned)
+
+    # Validate people via OL author lookup (best-effort; local names still preferred).
+    validated: dict[str, Any] = {}
+    for name in person_cands[:4]:
+        ol_a = open_library_lookup_author(name, method="similarity")
+        if ol_a and ol_a.has_match and (ol_a.work_count > 0 or (ol_a.score(fallback=0.0) or 0) > 0):
+            validated[name] = ol_a
+
+    preferred_author: str | None = None
+    preferred_canonical: str | None = None
+    # Prefer mirrored folder author when present — strongest prior for #plex layout.
+    if book.fs_author and _clean(book.fs_author):
+        preferred_author = _clean(book.fs_author)
+    elif person_cands:
+        for name in person_cands:
+            if name in validated:
+                preferred_author = name
+                break
+        if not preferred_author:
+            preferred_author = person_cands[0]
+
+    if preferred_author and preferred_author in validated:
+        preferred_canonical = validated[preferred_author].name or preferred_author
+
+    # Optional cover OCR: boost preferred author / reinforce source-title anchor.
+    ocr_text = ""
+    ocr_prefers_source_title = False
+    if getattr(cfg, "COVER_OCR", False):
+        from src.lib.cover_ocr import (
+            extract_cover_ocr_text,
+            ocr_mentions_name,
+            ocr_supports_title,
+        )
+
+        ocr_text = extract_cover_ocr_text(book)
+        if ocr_text:
+            # If folder/ID3 author was weak but cover names a person candidate, prefer it.
+            if not preferred_author:
+                for name in person_cands:
+                    if ocr_mentions_name(ocr_text, name):
+                        preferred_author = name
+                        if name in validated:
+                            preferred_canonical = validated[name].name or name
+                        break
+            if source_title and ocr_supports_title(ocr_text, source_title):
+                if not raw_album or not ocr_supports_title(ocr_text, raw_album):
+                    ocr_prefers_source_title = True
+
+    # Narrator alternate: folder narrator, or another person cand that isn't preferred.
+    narrator_hint: str | None = None
+    for name in narrator_cands + [n for n in person_cands if n != preferred_author]:
+        if name and name != preferred_author:
+            narrator_hint = name
+            break
+
+    tag_blob = _id3_tag_blob(tag1, tag2, book=book)
+    if ocr_text:
+        tag_blob = f"{tag_blob} {ocr_text.lower()}".strip()
 
     best_ol: "OpenLibraryTitle | None" = None
     best_score = 0.0
+    best_query = ""
+
+    # Never title-only when we have a preferred author — that is how Toyne/Storr wins.
+    author_hints: list[str | None]
+    if preferred_author:
+        author_hints = [preferred_author]
+        for name in person_cands:
+            if name != preferred_author and name not in author_hints and name in validated:
+                author_hints.append(name)
+                if len(author_hints) >= 3:
+                    break
+    else:
+        author_hints = [None]
 
     for title_cand in title_cands:
-        # Try with each author hint, then without
-        for author_hint in (author_hints[:3] or [None]):
-            # Use module-level open_library_lookup_title so tests can patch it
-            ol = open_library_lookup_title(title_cand, author=author_hint, method="similarity")
-            if ol and ol.has_match:
-                score = ol.score(fallback=0.0)
-                if score > best_score:
-                    best_score = score
-                    best_ol = ol
+        for author_hint in author_hints:
+            ol = open_library_lookup_title(
+                title_cand,
+                author=author_hint,
+                narrator=narrator_hint if author_hint else None,
+                method="similarity",
+            )
+            if not (ol and ol.has_match and ol.title and ol.author):
+                continue
+
+            score = ol.score(fallback=0.0)
+            if not _ol_title_passes_floor(title_cand, ol.title):
+                continue
+
+            # Source-title anchor: album/anthology searches cannot replace a
+            # dissimilar story title (About A Poem → Best American Spiritual…).
+            if source_title:
+                src_ratio, src_token = _title_sim(source_title, ol.title)
+                album_differs = bool(
+                    raw_album
+                    and fuzz.token_set_ratio(source_title, raw_album) / 100 < _OL_TITLE_RATIO_MIN
+                )
+                searching_album = bool(raw_album and title_cand == raw_album)
+                if album_differs and searching_album:
+                    if src_ratio < _OL_TITLE_RATIO_MIN and src_token < _OL_TITLE_TOKEN_SET_MIN:
+                        continue
+                    # Cover OCR saw the story title but not the anthology album → veto.
+                    if ocr_prefers_source_title:
+                        continue
+                # Soft anchor for any candidate: OL title should not be wildly
+                # unrelated to the known story title when one exists.
+                if src_ratio < _OL_SOURCE_ANCHOR_MIN and src_token < _OL_SOURCE_ANCHOR_MIN:
+                    continue
+
+            ol_author = ol.author or ""
+            ascore = ol.author_score(fallback=None)
+
+            if preferred_author:
+                if not _ol_author_agrees(preferred_author, ol_author, ascore):
+                    # Also try canonical OL name for the preferred local author.
+                    if not (
+                        preferred_canonical
+                        and _ol_author_agrees(preferred_canonical, ol_author, ascore)
+                    ):
+                        continue
+                # ID3/OCR conflict: preferred author is in tags/cover, OL author is not → reject.
+                if _name_mentioned_in_blob(preferred_author, tag_blob) and not _name_mentioned_in_blob(
+                    ol_author, tag_blob
+                ):
+                    # Allow when OL author is just a canonicalization of preferred
+                    # (already agreed above) — only reject if names are clearly different.
+                    if fuzz.token_set_ratio(preferred_author, ol_author) / 100 < _OL_AUTHOR_AGREE_MIN:
+                        continue
+                # Cover explicitly names preferred author but not OL author → veto.
+                if ocr_text:
+                    from src.lib.cover_ocr import ocr_mentions_name as _ocr_name
+
+                    if _ocr_name(ocr_text, preferred_author) and not _ocr_name(ocr_text, ol_author):
+                        if fuzz.token_set_ratio(preferred_author, ol_author) / 100 < _OL_AUTHOR_AGREE_MIN:
+                            continue
+
+            if score > best_score:
+                best_score = score
+                best_ol = ol
+                best_query = title_cand
             if best_score >= 0.9:
                 break
         if best_score >= 0.9:
             break
 
-    # Only trust OL when both title and author are resolved — a partial result
-    # (title only) would cause us to skip heuristic author detection and leave
-    # book.artist empty.
-    if best_ol is None or best_score < 0.5 or not best_ol.title or not best_ol.author:
+    if best_ol is None or not best_ol.title or not best_ol.author:
+        return None
+    if not _ol_title_passes_floor(best_query or best_ol.title, best_ol.title):
         return None
 
+    # Never demote a validated preferred author to narrator on a conflicting hit —
+    # conflicting hits are already rejected above. Apply title + agreed author.
     book.title = _normalize_ol_title(best_ol.title)
     book.album = book.title
     book.sortalbum = strip_leading_articles(book.title)
-    book.artist = best_ol.author
-    book.albumartist = best_ol.author
+
+    if preferred_author and _ol_author_agrees(
+        preferred_canonical or preferred_author, best_ol.author, best_ol.author_score(fallback=None)
+    ):
+        # Prefer OL canonical when it agrees; keeps "Ursula K. Le Guin" tidy.
+        book.artist = best_ol.author
+        book.albumartist = best_ol.author
+        if best_ol.author_and_narrator_swapped and best_ol.narrator:
+            # Genuine swap: preferred was the performer; OL author is correct.
+            # Only set narrator from swap if it isn't the preferred author.
+            if best_ol.narrator.lower() != (preferred_author or "").lower():
+                book.narrator = best_ol.narrator
+    elif preferred_author:
+        book.artist = preferred_canonical or preferred_author
+        book.albumartist = book.artist
+    else:
+        book.artist = best_ol.author
+        book.albumartist = best_ol.author
 
     return best_ol
 
