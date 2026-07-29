@@ -9,6 +9,7 @@ import pytest
 from src.fix_metadata import (
     CliPaths,
     SourceResolutionError,
+    TagSnapshot,
     folder_narrator_hint,
     folder_title_hint,
     iter_book_dirs,
@@ -18,8 +19,10 @@ from src.fix_metadata import (
     resolve_cli_paths,
     resolve_source_dir,
     resolve_target_paths,
+    source_common_title,
     _last_first_to_first_last,
 )
+from src.lib.ol_lookup import parse_ol_ref
 
 
 def test_folder_title_hint_strips_series_narrator_year():
@@ -53,9 +56,21 @@ def test_parse_apply_prompt():
     assert parse_apply_prompt("skip") == "n"
     assert parse_apply_prompt("a") == "a"
     assert parse_apply_prompt("all") == "a"
+    assert parse_apply_prompt("o") == "o"
+    assert parse_apply_prompt("ol") == "o"
     assert parse_apply_prompt("q") == "q"
     assert parse_apply_prompt("quit") == "q"
     assert parse_apply_prompt("maybe") == "n"
+
+
+def test_parse_ol_ref():
+    assert parse_ol_ref("https://openlibrary.org/works/OL45804W") == ("works", "OL45804W")
+    assert parse_ol_ref("/works/OL45804W") == ("works", "OL45804W")
+    assert parse_ol_ref("OL45804W") == ("works", "OL45804W")
+    assert parse_ol_ref("https://openlibrary.org/books/OL123M") == ("books", "OL123M")
+    assert parse_ol_ref("OL123M") == ("books", "OL123M")
+    assert parse_ol_ref("not-a-ref") is None
+    assert parse_ol_ref("") is None
 
 
 def _touch(path: Path, size: int = 10) -> Path:
@@ -216,15 +231,94 @@ def test_plan_fix_uses_archive_source(tmp_path: Path):
     _touch(arch / "orig.mp3", size=80)
 
     cli = CliPaths(converted=converted.resolve(), archive=archive.resolve(), inbox=tmp_path / "inbox")
-    # Wrong author on m4b isn't set (empty tags); folder parent supplies author → needs work for tags.
     plan = plan_fix(
         book,
         cli=cli,
         scope_root=converted / "French, Tana",
         require_source=True,
+        lookup_ol=False,
     )
-    # With empty tags, desired author from parent should create a write plan
     assert plan is not None
     assert plan.desired_author == "Tana French"
     assert plan.source is not None
     assert "source from" in plan.reasons[0]
+
+
+def test_source_common_title_strips_parts(tmp_path: Path, monkeypatch):
+    titles = {
+        "Elizabeth I, Part 1.m4b": "Elizabeth I, Part 1",
+        "Elizabeth I, Part 2.m4b": "Elizabeth I, Part 2",
+        "Elizabeth I, Part 3.m4b": "Elizabeth I, Part 3",
+    }
+    for name in titles:
+        _touch(tmp_path / name)
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        return TagSnapshot(title=titles[path.name], path=path)
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    title, reason = source_common_title(tmp_path)
+    assert title == "Elizabeth I"
+    assert "stripped" in reason
+
+
+def test_source_common_title_from_numbered_filenames(tmp_path: Path, monkeypatch):
+    for name in ("01 - Book Name.mp3", "02 - Book Name.mp3"):
+        _touch(tmp_path / name)
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        return TagSnapshot(path=path)
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    title, reason = source_common_title(tmp_path)
+    assert "Book Name" in title
+    assert reason
+
+
+def test_source_common_title_single_part_still_strips(tmp_path: Path, monkeypatch):
+    _touch(tmp_path / "only.m4b")
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        return TagSnapshot(title="War and Peace, Part 1", path=path)
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    title, _reason = source_common_title(tmp_path)
+    assert title == "War and Peace"
+
+
+def test_plan_fix_prefers_common_title_over_part(tmp_path: Path, monkeypatch):
+    converted = tmp_path / "converted"
+    archive = tmp_path / "archive"
+    book = converted / "George, Margaret" / "Elizabeth I (2011)"
+    arch = archive / "George, Margaret" / "Elizabeth I (2011)"
+    _touch(book / "Elizabeth I.m4b", size=50)
+    part_files = {
+        "Elizabeth I, Part 1.m4b": "Elizabeth I, Part 1",
+        "Elizabeth I, Part 2.m4b": "Elizabeth I, Part 2",
+        "Elizabeth I, Part 3.m4b": "Elizabeth I, Part 3",
+    }
+    for name in part_files:
+        _touch(arch / name, size=80)
+
+    real_from_file = TagSnapshot.from_file
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        if path.name in part_files:
+            return TagSnapshot(title=part_files[path.name], album="Elizabeth I", path=path)
+        if path.name.endswith(".m4b") and "Part" not in path.name:
+            # Converted m4b currently has wrong part title — should be fixed to Elizabeth I
+            return TagSnapshot(title="Elizabeth I, Part 1", artist="Wrong", path=path)
+        return real_from_file(path)
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    cli = CliPaths(converted=converted.resolve(), archive=archive.resolve(), inbox=tmp_path / "inbox")
+    plan = plan_fix(
+        book,
+        cli=cli,
+        scope_root=converted / "George, Margaret",
+        require_source=True,
+        lookup_ol=False,
+    )
+    assert plan is not None
+    assert plan.desired_title == "Elizabeth I"
+    assert plan.desired_author == "Margaret George"

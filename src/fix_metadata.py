@@ -13,6 +13,10 @@ Usage examples::
     # Explicit source tree (nesting must match converted scope)
     poetry run python -m src.fix_metadata -i -s /path/to/originals "George, Margaret"
 
+    # Force Open Library match for a single book
+    poetry run python -m src.fix_metadata --apply --ol OL45804W \\
+      "George, Margaret/Elizabeth I (2011)"
+
     # External abs path (e.g. #plex) — source audio must sit beside the m4b, or pass -s
     poetry run python -m src.fix_metadata --apply \\
       "/media/.../#plex/French, Tana/The Searcher (2020)"
@@ -38,6 +42,8 @@ from typing import Iterable
 from mutagen import File as MutagenFile
 from rapidfuzz import fuzz
 
+from src.lib.cleaners import clean_string, title_case_ol_title
+from src.lib.compare import find_greatest_common_string
 from src.lib.fs_utils import safe_filename
 from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.term import (
@@ -51,6 +57,7 @@ from src.lib.term import (
     print_light_grey,
     print_mint,
     print_orange,
+    print_purple,
     print_red,
     smart_print,
     tint_path,
@@ -142,6 +149,13 @@ class FixPlan:
     rename_m4b_to: Path | None = None
     desc_txt: Path | None = None
     rename_desc_to: Path | None = None
+    # Open Library (display; tags only forced via --ol / interactive o)
+    ol_title: str = ""
+    ol_author: str = ""
+    ol_year: str = ""
+    ol_key: str = ""
+    ol_url: str = ""
+    ol_status: str = ""  # match | none | skipped | forced
 
     @property
     def needs_tag_write(self) -> bool:
@@ -543,12 +557,162 @@ def resolve_source_dir(
     )
 
 
+def _source_audio_files(source_dir: Path, ignore_globs: list[str]) -> list[Path]:
+    """All audio files in *source_dir* (source exts preferred order not required)."""
+    try:
+        files = [p for p in source_dir.iterdir() if p.is_file()]
+    except OSError:
+        return []
+    return sorted(
+        p for p in files if p.suffix.lower() in _AUDIO_EXTS and not _is_ignored(p.name, ignore_globs)
+    )
+
+
+def source_common_title(source_dir: Path, ignore_globs: list[str] | None = None) -> tuple[str, str]:
+    """Derive a book title from multi-file sources via GCS + part/disc strip.
+
+    Returns ``(title, reason)`` where reason is empty if nothing useful found.
+    Mirrors conversion scorers: greatest common string across titles (or filenames),
+    then ``clean_string`` to strip ``Part N`` / ``Disc N`` / orphaned Part.
+    """
+    ignore_globs = ignore_globs or []
+    files = _source_audio_files(source_dir, ignore_globs)
+    if not files:
+        return "", ""
+
+    titles: list[str] = []
+    albums: list[str] = []
+    for f in files:
+        snap = TagSnapshot.from_file(f)
+        if snap.title:
+            titles.append(snap.title)
+        if snap.album:
+            albums.append(snap.album)
+
+    def _clean_gcs(values: list[str]) -> str:
+        if not values:
+            return ""
+        if len(values) == 1:
+            return clean_string(values[0]).strip(" -_,.")
+        gcs = find_greatest_common_string(values)
+        if not gcs:
+            return clean_string(values[0]).strip(" -_,.")
+        # Prefer original casing from the first value that contains the gcs
+        gcs_l = gcs.lower()
+        for v in values:
+            idx = v.lower().find(gcs_l)
+            if idx >= 0:
+                raw = v[idx : idx + len(gcs)]
+                break
+        else:
+            raw = gcs
+        cleaned = clean_string(raw).strip(" -_,.")
+        # Digit-truncated GCS guard (same idea as scorers): if GCS ends in a digit
+        # and is a prefix of the first value, prefer cleaning the first full value.
+        if cleaned and values[0].lower().startswith(cleaned.lower()) and cleaned[-1].isdigit():
+            return clean_string(values[0]).strip(" -_,.")
+        return cleaned
+
+    title = _clean_gcs(titles)
+    if _title_usable(title):
+        reason = "title from common source (stripped parts)" if len(titles) > 1 or (
+            titles and clean_string(titles[0]) != titles[0]
+        ) else ""
+        return title, reason
+
+    album = _clean_gcs(albums)
+    if _title_usable(album):
+        return album, "title from common album (stripped parts)"
+
+    stems = [f.stem for f in files]
+    stem_title = _clean_gcs(stems)
+    if _title_usable(stem_title):
+        return stem_title, "title from common filenames (stripped parts)"
+
+    return "", ""
+
+
+    return "", ""
+
+
 def _source_audio_file(source_dir: Path, ignore_globs: list[str]) -> Path | None:
     """Largest taggable audio in a source dir (prefer non-m4b, else any audio)."""
     pref = _largest_audio(source_dir, ignore_globs, exts=_SOURCE_EXTS)
     if pref:
         return pref
     return _largest_audio(source_dir, ignore_globs, exts=_AUDIO_EXTS)
+
+
+def _attach_open_library(
+    plan: FixPlan,
+    *,
+    ol_ref: str | None = None,
+    apply_ol_tags: bool = False,
+) -> FixPlan:
+    """Lookup or fetch Open Library metadata onto *plan* (mutates and returns it)."""
+    from src.lib.ol_lookup import open_library_fetch_by_ref, open_library_lookup_title
+
+    try:
+        if ol_ref:
+            ol = open_library_fetch_by_ref(
+                ol_ref,
+                original_author=plan.desired_author,
+                original_narrator=plan.desired_narrator or None,
+            )
+            if ol is None:
+                plan.ol_status = "none"
+                plan.reasons.append(f"Open Library fetch failed for {ol_ref!r} (is OPEN_LIBRARY_USER_AGENT set?)")
+                return plan
+            plan.ol_status = "forced"
+        else:
+            ol = open_library_lookup_title(
+                plan.desired_title,
+                author=plan.desired_author,
+                narrator=plan.desired_narrator or None,
+                method="similarity",
+            )
+            if ol is None or not ol.has_match:
+                plan.ol_status = "none" if ol is not None else "skipped"
+                return plan
+            plan.ol_status = "match"
+    except ValueError as e:
+        plan.ol_status = "none"
+        plan.reasons.append(str(e))
+        return plan
+    except Exception:
+        plan.ol_status = "none"
+        return plan
+
+    plan.ol_title = ol.title or ""
+    plan.ol_author = ol.author or ""
+    plan.ol_year = ol.date or ""
+    plan.ol_key = ol.key or ""
+    plan.ol_url = ol.url or ""
+
+    if apply_ol_tags and plan.ol_status == "forced":
+        if plan.ol_title:
+            plan.desired_title = title_case_ol_title(plan.ol_title)
+            plan.desired_album = plan.desired_title
+            plan.desired_stem = safe_filename(plan.desired_title)
+            plan.reasons.append(f"title from Open Library ({plan.ol_key})")
+        if plan.ol_author:
+            plan.desired_author = plan.ol_author
+            plan.reasons.append(f"author from Open Library ({plan.ol_author!r})")
+        if plan.ol_year and not _year(plan.desired_date):
+            plan.desired_date = plan.ol_year
+        # Refresh rename targets
+        rename_to = plan.m4b.with_name(f"{plan.desired_stem}.m4b")
+        plan.rename_m4b_to = rename_to if rename_to != plan.m4b else None
+        if plan.desc_txt and plan.rename_m4b_to:
+            m = _QUALITY_TXT.match(plan.desc_txt.name)
+            if m:
+                quality_part = plan.desc_txt.name[len(m.group(1)) :]
+                plan.rename_desc_to = plan.desc_txt.with_name(f"{plan.desired_stem}{quality_part}")
+            else:
+                plan.rename_desc_to = plan.desc_txt.with_name(f"{plan.desired_stem}.txt")
+            if plan.rename_desc_to == plan.desc_txt:
+                plan.rename_desc_to = None
+    return plan
 
 
 def plan_fix(
@@ -560,11 +724,13 @@ def plan_fix(
     source_root: Path | None = None,
     debug: bool = False,
     require_source: bool = True,
+    ol_ref: str | None = None,
+    lookup_ol: bool = True,
 ) -> FixPlan | None:
     """Build a fix plan for one book dir.
 
     Raises SourceResolutionError when ``require_source`` and no source can be resolved.
-    Returns None when the book needs no changes.
+    Returns None when the book needs no changes (unless ``ol_ref`` forces a rewrite).
     """
     ignore_globs = ignore_globs or []
     cli = cli or CliPaths()
@@ -580,6 +746,7 @@ def plan_fix(
     source_path: Path | None = None
     source_snap: TagSnapshot | None = None
     reasons_prefix: str | None = None
+    common_title_reason: str = ""
 
     if require_source:
         src_dir = resolve_source_dir(
@@ -592,13 +759,25 @@ def plan_fix(
         )
         if beside_source and src_dir == book_dir:
             source_path = beside_source
+            source_snap = TagSnapshot.from_file(beside_source)
+            # Still strip Part N from a lone beside-m4b source title
+            cleaned = clean_string(source_snap.title or "").strip(" -_,.")
+            if cleaned and cleaned != source_snap.title:
+                source_snap.title = cleaned
+                common_title_reason = "title stripped part/disc markers"
         else:
             source_path = _source_audio_file(src_dir, ignore_globs)
             if source_path is None:
                 raise SourceResolutionError(book_dir, f"no audio files in source dir {src_dir}")
             if src_dir != book_dir:
                 reasons_prefix = f"source from {src_dir}"
-        source_snap = TagSnapshot.from_file(source_path)
+            source_snap = TagSnapshot.from_file(source_path)
+            common_title, common_title_reason = source_common_title(src_dir, ignore_globs)
+            if common_title:
+                source_snap.title = common_title
+                # Prefer common album too when titles were part-split
+                if not source_snap.album or fuzz.token_set_ratio(source_snap.album, common_title) / 100 < 0.5:
+                    source_snap.album = common_title
     elif beside_source:
         source_path = beside_source
         source_snap = TagSnapshot.from_file(beside_source)
@@ -607,6 +786,8 @@ def plan_fix(
     title, author, album, date, narrator, reasons = _pick_desired(book_dir, source_snap, current)
     if reasons_prefix:
         reasons.insert(0, reasons_prefix)
+    if common_title_reason:
+        reasons.insert(0 if not reasons_prefix else 1, common_title_reason)
 
     stem = safe_filename(title)
     rename_to = m4b.with_name(f"{stem}.m4b") if stem and m4b.stem != stem else None
@@ -642,6 +823,10 @@ def plan_fix(
     if desc and _desc_needs_rewrite(desc, plan):
         if "update description txt contents" not in plan.reasons:
             plan.reasons.append("update description txt contents")
+
+    if ol_ref or lookup_ol:
+        _attach_open_library(plan, ol_ref=ol_ref, apply_ol_tags=bool(ol_ref))
+
     if not plan.needs_tag_write and not plan.needs_rename and not (
         desc and _desc_needs_rewrite(desc, plan)
     ):
@@ -776,6 +961,21 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
     elif plan.desc_txt and any("description" in r for r in plan.reasons):
         print_grey(f"│  rewrite:   [[{plan.desc_txt.name}]]")
 
+    if plan.ol_status == "match" or plan.ol_status == "forced":
+        label = "openlibrary:" if plan.ol_status == "match" else "openlibrary (forced):"
+        summary = plan.ol_title or "?"
+        if plan.ol_author:
+            summary = f"{summary} — {plan.ol_author}"
+        if plan.ol_year:
+            summary = f"{summary} ({plan.ol_year})"
+        print_purple(f"│  {label} [[{summary}]]", highlight_color=LIGHT_GREY_COLOR)
+        if plan.ol_url:
+            print_dark_grey(f"│               {plan.ol_url}")
+    elif plan.ol_status == "none":
+        print_dark_grey("│  openlibrary: (no match)")
+    elif plan.ol_status == "skipped":
+        print_dark_grey("│  openlibrary: (skipped — set OPEN_LIBRARY_USER_AGENT to enable)")
+
     print_dark_grey("└─")
 
 
@@ -797,7 +997,7 @@ def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None
 
 
 def parse_apply_prompt(raw: str) -> str:
-    """Normalize an interactive prompt response to y/n/a/q (default n)."""
+    """Normalize an interactive prompt response to y/n/a/o/q (default n)."""
     s = (raw or "").strip().lower()
     if not s:
         return "n"
@@ -805,11 +1005,13 @@ def parse_apply_prompt(raw: str) -> str:
         return "y"
     if s in ("a", "all"):
         return "a"
+    if s in ("o", "ol", "openlibrary", "open library"):
+        return "o"
     if s in ("q", "quit"):
         return "q"
     if s in ("n", "no", "s", "skip"):
         return "n"
-    if s[0] in ("y", "a", "q", "n"):
+    if s[0] in ("y", "a", "o", "q", "n"):
         return s[0]
     return "n"
 
@@ -817,12 +1019,18 @@ def parse_apply_prompt(raw: str) -> str:
 def prompt_apply(plan: FixPlan) -> str:
     """Ask whether to apply *plan*.
 
-    Returns ``y``, ``n``, ``a`` (all), ``q`` (quit), or ``interrupt`` (Ctrl+C).
+    Returns ``y``, ``n``, ``a`` (all), ``o`` (open library), ``q`` (quit),
+    or ``interrupt`` (Ctrl+C).
     """
     try:
         from tinta import Tinta
 
-        prompt = Tinta().amber("  Apply this fix? ").dark_grey("[y/N/a=all/q=quit] ").to_str()
+        prompt = (
+            Tinta()
+            .amber("  Apply this fix? ")
+            .dark_grey("[y/N/a=all/o=ol/q=quit] ")
+            .to_str()
+        )
         raw = input(prompt).strip()
     except EOFError:
         return "n"
@@ -830,6 +1038,19 @@ def prompt_apply(plan: FixPlan) -> str:
         smart_print("")  # move off the prompt line
         return "interrupt"
     return parse_apply_prompt(raw)
+
+
+def prompt_ol_ref() -> str | None:
+    """Ask for an Open Library URL or id. Empty / Ctrl+C → None."""
+    try:
+        from tinta import Tinta
+
+        prompt = Tinta().amber("  Open Library URL or id: ").to_str()
+        raw = input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        smart_print("")
+        return None
+    return raw or None
 
 
 def apply_fix(plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = None) -> None:
@@ -1009,6 +1230,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Unconverted originals root; relative nesting must match the converted scope",
     )
     parser.add_argument(
+        "--ol",
+        dest="ol_ref",
+        default=None,
+        metavar="URL_OR_ID",
+        help="Force Open Library work/edition (URL or OL…W / OL…M); requires a single book target",
+    )
+    parser.add_argument(
         "--ignore",
         action="append",
         default=[],
@@ -1025,6 +1253,11 @@ def main(argv: list[str] | None = None) -> int:
         "--interactive",
         action="store_true",
         help="Show each planned fix and prompt before applying (implies write; default answer is skip)",
+    )
+    parser.add_argument(
+        "--no-ol",
+        action="store_true",
+        help="Skip automatic Open Library lookup (still allows --ol / interactive o)",
     )
     parser.add_argument("--debug", action="store_true", help="Verbose debug")
 
@@ -1060,6 +1293,13 @@ def main(argv: list[str] | None = None) -> int:
         print_red(f"source path does not exist: [[{source_root}]]")
         return 1
 
+    ol_ref = args.ol_ref
+    if ol_ref and len(book_dirs) != 1:
+        print_red(
+            f"--ol requires a single book target, but {len(book_dirs)} book dir(s) were selected"
+        )
+        return 1
+
     plans: list[FixPlan] = []
     failures: list[SourceResolutionError] = []
     for d in book_dirs:
@@ -1073,6 +1313,8 @@ def main(argv: list[str] | None = None) -> int:
                 source_root=source_root,
                 debug=args.debug,
                 require_source=True,
+                ol_ref=ol_ref,
+                lookup_ol=not args.no_ol or bool(ol_ref),
             )
         except SourceResolutionError as e:
             failures.append(e)
@@ -1114,19 +1356,42 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         if interactive and not apply_rest:
-            print_plan(plan, label="propose", cli=cli)
-            choice = prompt_apply(plan)
-            if choice in ("q", "interrupt"):
-                label = "Interrupted" if choice == "interrupt" else "Quit"
-                print_orange(f"{label} — remaining books left unchanged.")
-                break
-            if choice == "n":
-                print_dark_grey("  skipped")
-                skipped += 1
-                continue
-            if choice == "a":
-                apply_rest = True
-                print_mint("  applying this and all remaining…")
+            while True:
+                print_plan(plan, label="propose", cli=cli)
+                choice = prompt_apply(plan)
+                if choice in ("q", "interrupt"):
+                    label = "Interrupted" if choice == "interrupt" else "Quit"
+                    print_orange(f"{label} — remaining books left unchanged.")
+                    smart_print("")
+                    if failed:
+                        return 1
+                    return 0
+                if choice == "n":
+                    print_dark_grey("  skipped")
+                    skipped += 1
+                    break
+                if choice == "a":
+                    apply_rest = True
+                    print_mint("  applying this and all remaining…")
+                    print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
+                    apply_fix(plan, dry_run=False, cli=cli)
+                    applied += 1
+                    break
+                if choice == "o":
+                    ref = prompt_ol_ref()
+                    if not ref:
+                        print_dark_grey("  (no OL ref entered — showing proposal again)")
+                        continue
+                    _attach_open_library(plan, ol_ref=ref, apply_ol_tags=True)
+                    if plan.ol_status != "forced":
+                        print_orange("  Could not apply that Open Library ref; try again or skip.")
+                    continue
+                if choice == "y":
+                    print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
+                    apply_fix(plan, dry_run=False, cli=cli)
+                    applied += 1
+                    break
+            continue
 
         print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
         apply_fix(plan, dry_run=False, cli=cli)
