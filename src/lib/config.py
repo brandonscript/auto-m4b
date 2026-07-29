@@ -417,6 +417,16 @@ class Config:
 
     OPEN_LIBRARY_USER_AGENT = _OPEN_LIBRARY_USER_AGENT
 
+    @env_property(typ=bool, default=False)
+    def _COVER_OCR(self):
+        """Enable Tesseract OCR on cover art as a boost/veto for OL matching.
+
+        Requires ``tesseract-ocr``, ``pytesseract``, and Pillow in the image.
+        Default off — harmless when unset; no effect on converts when deps missing.
+        """
+
+    COVER_OCR = _COVER_OCR
+
     @env_property(
         typ=str,
         default="15,30",

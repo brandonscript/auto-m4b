@@ -130,6 +130,8 @@ rapidfuzz = "^3.13.0"
 bidict = "^0.23.1"
 regex = "^2024.11.6"
 mutagen = "^1.47.0"
+pillow = "^11.2.1"
+pytesseract = "^0.3.13"
 spacy = [
     { version = "<4", extras = ["apple"], markers = "sys_platform == 'darwin'" },
     { version = "<4", markers = "sys_platform != 'darwin'" },

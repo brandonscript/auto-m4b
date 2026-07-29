@@ -192,6 +192,28 @@ def _find_best_author(
     return (top_sim, fuzz.ratio(author, top_sim["name"]) / 100)
 
 
+def _author_name_sim(candidate: str, author_names: list[str] | str | None) -> float:
+    """Best fuzz.ratio of *candidate* against an OL ``author_name`` list (0..1)."""
+    if not candidate:
+        return 0.0
+    if isinstance(author_names, str):
+        names = [author_names] if author_names else []
+    else:
+        names = [n for n in (author_names or []) if n]
+    if not names:
+        return 0.0
+    return max(fuzz.ratio(candidate, n) for n in names) / 100
+
+
+def _title_sim(a: str, b: str) -> tuple[float, float]:
+    """Return ``(fuzz.ratio, token_set_ratio)`` both in 0..1."""
+    left = (a or "").strip()
+    right = (b or "").strip()
+    if not left or not right:
+        return 0.0, 0.0
+    return fuzz.ratio(left, right) / 100, fuzz.token_set_ratio(left, right) / 100
+
+
 def _find_best_title(
     title: str,
     matches: list[OpenLibrarySearchResult],
@@ -225,11 +247,13 @@ def _find_best_title(
     sim_ordered = sorted(matches, key=lambda x: fuzz.ratio(title, x.get("title", "")), reverse=True)
 
     author_sim_ordered = sorted(
-        matches, key=lambda x: max(fuzz.ratio(author, name) for name in x["author_name"]) if author else 0, reverse=True
+        matches,
+        key=lambda x: _author_name_sim(author or "", x.get("author_name")) if author else 0,
+        reverse=True,
     )
     narrator_sim_ordered = sorted(
         matches,
-        key=lambda x: max(fuzz.ratio(narrator, name) for name in x["author_name"]) if narrator else 0,
+        key=lambda x: _author_name_sim(narrator or "", x.get("author_name")) if narrator else 0,
         reverse=True,
     )
 
@@ -248,36 +272,38 @@ def _find_best_title(
                 lambda c: (
                     c,
                     max(
-                        fuzz.ratio(ta, a)
-                        for t in [top_scored, top_sim]
-                        for ta in t.get("author_name", [])
-                        for a in (c or {}).get("author_name", [])
+                        (
+                            fuzz.ratio(ta, a)
+                            for t in [top_scored, top_sim]
+                            for ta in t.get("author_name", [])
+                            for a in (c or {}).get("author_name", [])
+                        ),
+                        default=0,
                     ),
                 ),
                 author_candidates,
             )
         )
-        author_candidate = max(scores, key=lambda c: c[1])[0]
+        author_candidate = max(scores, key=lambda c: c[1])[0] if scores else None
 
     def _get_author_sim(
         title_res: OpenLibrarySearchResult,
     ) -> tuple[float | None, Literal["author", "narrator"] | None]:
-        _author_sim = (
-            None
-            if not author
-            else 0.0 if not author_candidate else fuzz.ratio(author, title_res.get("author_name", "")) / 100
+        names = title_res.get("author_name") or []
+        # Use `is not None` — a real 0.0 score must not fall through as falsy.
+        _author_sim: float | None = (
+            None if not author else (0.0 if not author_candidate else _author_name_sim(author, names))
         )
-        _narrator_sim = (
-            None
-            if not narrator
-            else 0.0 if not author_candidate else fuzz.ratio(narrator, title_res.get("author_name", "")) / 100
+        _narrator_sim: float | None = (
+            None if not narrator else (0.0 if not author_candidate else _author_name_sim(narrator, names))
         )
-        # Author sim is now the max of the author and narrator scores
-        if _author_sim and _narrator_sim:
-            return max(_author_sim, _narrator_sim), "author" if _author_sim > _narrator_sim else "narrator"
-        elif _author_sim:
+        if _author_sim is not None and _narrator_sim is not None:
+            if _author_sim >= _narrator_sim:
+                return _author_sim, "author"
+            return _narrator_sim, "narrator"
+        if _author_sim is not None:
             return _author_sim, "author"
-        elif _narrator_sim:
+        if _narrator_sim is not None:
             return _narrator_sim, "narrator"
         return None, None
 
@@ -319,6 +345,10 @@ class OpenLibraryAuthor:
     @property
     def name(self) -> str:
         return self.author_res.get("name", "")
+
+    @property
+    def work_count(self) -> int:
+        return int(self.author_res.get("work_count", 0) or 0)
 
     @overload
     def score(self, *, fallback: float) -> float: ...
@@ -502,7 +532,7 @@ class OpenLibraryTitle:
     def _get_author_or_narrator(self, prop: Literal["author", "narrator"]) -> str:
         original = self.original_author if prop == "author" else self.original_narrator
         if authors := self.title_res.get("author_name", [""]):
-            # return the first if there is no original author, otherwise the one wiht the highest fuzz.ratio
+            # return the first if there is no original author, otherwise the one with the highest fuzz.ratio
             if not original:
                 return authors[0]
             else:
@@ -511,8 +541,10 @@ class OpenLibraryTitle:
 
     @property
     def author(self) -> str:
+        # When tags were swapped, original_narrator is the real author — pick the
+        # OL author_name closest to that input. Never recurse through .narrator.
         if self.author_and_narrator_swapped:
-            return self.narrator
+            return self._get_author_or_narrator("narrator")
         return self._get_author_or_narrator("author")
 
     @property
@@ -521,12 +553,12 @@ class OpenLibraryTitle:
 
     @property
     def narrator(self) -> str:
-        if not self.original_narrator or not self.has_match:
+        if not self.has_match:
             return ""
-        if self.author_and_narrator_swapped and self.original_author != self.original_narrator:
-            # If they're swapped, we can return what we thought was the author as the narrator
-            return self._get_author_or_narrator("author")
-        return self._get_author_or_narrator("narrator")
+        if self.author_and_narrator_swapped and self.original_author:
+            # Mislabeled "author" input was actually the performer/narrator.
+            return self.original_author
+        return self.original_narrator or ""
 
     @property
     def date(self) -> str:
