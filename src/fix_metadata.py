@@ -40,7 +40,21 @@ from rapidfuzz import fuzz
 
 from src.lib.fs_utils import safe_filename
 from src.lib.id3_utils import write_id3_tags_mutagen
-from src.lib.term import print_debug, smart_print
+from src.lib.term import (
+    LIGHT_GREY_COLOR,
+    print_amber,
+    print_banana,
+    print_dark_grey,
+    print_debug,
+    print_green,
+    print_grey,
+    print_light_grey,
+    print_mint,
+    print_orange,
+    print_red,
+    smart_print,
+    tint_path,
+)
 
 _SOURCE_EXTS = {".mp3", ".m4a", ".flac", ".ogg", ".aac", ".wav"}
 _OUTPUT_EXTS = {".m4b"}
@@ -690,25 +704,96 @@ Size: {size}
     out_path.write_text(content, encoding="utf-8")
 
 
-def print_plan(plan: FixPlan, *, label: str = "dry-run") -> None:
-    """Print a human-readable summary of the planned fix."""
-    smart_print(f"[{label}] {plan.book_dir.name}")
+def _short_path(path: Path | str, cli: CliPaths | None = None) -> str:
+    """Prefer path relative to converted/archive/inbox; else ellipsize long abs paths."""
+    p = Path(path)
+    bases: list[Path] = []
+    if cli:
+        for b in (cli.converted, cli.archive, cli.inbox):
+            if b:
+                bases.append(b.resolve())
+    for base in bases:
+        try:
+            rel = p.resolve().relative_to(base)
+            # Label which root we relativized against
+            label = base.name  # converted | archive | inbox
+            return f"{label}/{rel.as_posix()}"
+        except ValueError:
+            continue
+    parts = p.parts
+    if len(parts) > 5:
+        return "…/" + "/".join(parts[-4:])
+    return str(p)
+
+
+def _fmt_arrow(old: str, new: str) -> str:
+    return f"{old}  →  [[{new}]]"
+
+
+def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = None) -> None:
+    """Print a human-readable, colorized summary of the planned fix."""
+    smart_print("")
+    if label == "propose":
+        print_banana(f"┌─ propose  [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
+    elif label == "dry-run":
+        print_mint(f"┌─ dry-run  [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
+    else:
+        print_mint(f"┌─ {label}  [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
+
+    # Reasons (skip verbose "source from …" — shown as its own row)
     for r in plan.reasons:
-        smart_print(f"  - {r}")
+        if r.startswith("source from "):
+            continue
+        print_light_grey(f"│  • {r}")
+
+    if plan.source:
+        src_dir = plan.source.parent if plan.source.is_file() else plan.source
+        print_grey(f"│  source:    {tint_path(_short_path(src_dir, cli))}")
+
     if plan.needs_tag_write:
-        smart_print(
-            f"  tags: title={plan.desired_title!r} author={plan.desired_author!r} "
-            f"date={plan.desired_date!r} narrator={plan.desired_narrator!r}"
-        )
+        print_grey("│  tags:")
+        cur = plan.current
+        pairs = [
+            ("title", cur.title, plan.desired_title),
+            ("author", cur.albumartist or cur.artist, plan.desired_author),
+            ("date", _year(cur.date) or cur.date, _year(plan.desired_date) or plan.desired_date),
+            ("narrator", cur.composer, plan.desired_narrator),
+        ]
+        for key, old, new in pairs:
+            old_s = (old or "—").strip() or "—"
+            new_s = (new or "—").strip() or "—"
+            label_k = f"{key}:"
+            if old_s != new_s:
+                print_grey(f"│    {label_k:<10} {old_s}  →  [[{new_s}]]")
+            else:
+                print_grey(f"│    {label_k:<10} [[{new_s}]]")
+
     if plan.rename_m4b_to:
-        smart_print(f"  rename: {plan.m4b.name} → {plan.rename_m4b_to.name}")
+        print_grey(f"│  rename:    {_fmt_arrow(plan.m4b.name, plan.rename_m4b_to.name)}")
     if plan.rename_desc_to:
-        smart_print(
-            f"  rename desc: {plan.desc_txt.name if plan.desc_txt else '?'} → "
-            f"{plan.rename_desc_to.name}"
-        )
-    elif plan.desc_txt:
-        smart_print(f"  rewrite desc: {plan.desc_txt.name}")
+        old_name = plan.desc_txt.name if plan.desc_txt else "?"
+        print_grey(f"│  rename txt: {_fmt_arrow(old_name, plan.rename_desc_to.name)}")
+    elif plan.desc_txt and any("description" in r for r in plan.reasons):
+        print_grey(f"│  rewrite:   [[{plan.desc_txt.name}]]")
+
+    print_dark_grey("└─")
+
+
+def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None) -> None:
+    """Pretty-print a source resolution failure."""
+    print_red(f"  ✗  [[{err.book_dir.name}]]")
+    msg = err.message
+    # Pull a path out of common message shapes for a second muted line.
+    if "no archive source at " in msg:
+        rest = msg.split("no archive source at ", 1)[1]
+        path_part, _, hint = rest.partition(" (pass ")
+        print_dark_grey(f"     missing: {tint_path(_short_path(path_part.strip(), cli))}")
+        if hint:
+            print_dark_grey(f"     hint:    pass {hint.rstrip(')')}")
+    elif "no matching folder under -s " in msg:
+        print_dark_grey(f"     {msg}")
+    else:
+        print_dark_grey(f"     {msg}")
 
 
 def parse_apply_prompt(raw: str) -> str:
@@ -732,13 +817,16 @@ def parse_apply_prompt(raw: str) -> str:
 def prompt_apply(plan: FixPlan) -> str:
     """Ask whether to apply *plan*. Returns ``y``, ``n``, ``a`` (all), or ``q`` (quit)."""
     try:
-        raw = input("  Apply this fix? [y/N/a=all/q=quit] ").strip()
+        from tinta import Tinta
+
+        prompt = Tinta().amber("  Apply this fix? ").dark_grey("[y/N/a=all/q=quit] ").to_str()
+        raw = input(prompt).strip()
     except EOFError:
         return "n"
     return parse_apply_prompt(raw)
 
 
-def apply_fix(plan: FixPlan, *, dry_run: bool = True) -> None:
+def apply_fix(plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = None) -> None:
     tags = {
         "title": plan.desired_title,
         "album": plan.desired_album,
@@ -749,22 +837,22 @@ def apply_fix(plan: FixPlan, *, dry_run: bool = True) -> None:
     }
 
     if dry_run:
-        print_plan(plan, label="dry-run")
+        print_plan(plan, label="dry-run", cli=cli)
         return
 
     target = plan.m4b
     if plan.needs_tag_write:
         write_id3_tags_mutagen(target, tags)
-        smart_print(f"  wrote tags → {target.name}")
+        print_green(f"  ✓ wrote tags → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
     if plan.rename_m4b_to:
         if plan.rename_m4b_to.exists() and plan.rename_m4b_to.resolve() != target.resolve():
-            smart_print(f"  SKIP rename, target exists: {plan.rename_m4b_to.name}")
+            print_orange(f"  ⚠ SKIP rename, target exists: [[{plan.rename_m4b_to.name}]]")
         else:
             target.rename(plan.rename_m4b_to)
             target = plan.rename_m4b_to
             plan.m4b = target
-            smart_print(f"  renamed m4b → {target.name}")
+            print_green(f"  ✓ renamed m4b → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
     desc_out = plan.rename_desc_to or plan.desc_txt
     if desc_out is None:
@@ -773,14 +861,20 @@ def apply_fix(plan: FixPlan, *, dry_run: bool = True) -> None:
         if plan.rename_desc_to.exists() and plan.rename_desc_to.resolve() != plan.desc_txt.resolve():
             _write_desc(plan, plan.rename_desc_to)
             plan.desc_txt.unlink(missing_ok=True)
-            smart_print(f"  rewrote+renamed desc → {plan.rename_desc_to.name}")
+            print_green(
+                f"  ✓ rewrote+renamed desc → [[{plan.rename_desc_to.name}]]",
+                highlight_color=LIGHT_GREY_COLOR,
+            )
         else:
             plan.desc_txt.rename(plan.rename_desc_to)
             _write_desc(plan, plan.rename_desc_to)
-            smart_print(f"  renamed+rewrote desc → {plan.rename_desc_to.name}")
+            print_green(
+                f"  ✓ renamed+rewrote desc → [[{plan.rename_desc_to.name}]]",
+                highlight_color=LIGHT_GREY_COLOR,
+            )
     else:
         _write_desc(plan, desc_out)
-        smart_print(f"  wrote desc → {desc_out.name}")
+        print_green(f"  ✓ wrote desc → [[{desc_out.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
 
 def _child_dirs(d: Path) -> list[Path]:
@@ -819,7 +913,7 @@ def iter_book_dirs(paths: Iterable[Path], *, recursive: bool) -> list[Path]:
     for p in paths:
         p = p.resolve()
         if not p.exists():
-            smart_print(f"skip missing path: {p}")
+            print_orange(f"skip missing path: [[{p}]]")
             continue
         if p.is_file():
             out.append(p.parent)
@@ -835,9 +929,10 @@ def iter_book_dirs(paths: Iterable[Path], *, recursive: bool) -> list[Path]:
                 for d in descendants:
                     out.append(d)
             else:
-                smart_print(
-                    f"warn: {p.name} also has {len(child_with_audio)} child book dir(s); "
-                    f"pass --recursive to include them"
+                print_amber(
+                    f"warn: [[{p.name}]] also has {len(child_with_audio)} child book dir(s); "
+                    f"pass --recursive to include them",
+                    highlight_color=LIGHT_GREY_COLOR,
                 )
         elif has_here:
             out.append(p)
@@ -847,14 +942,13 @@ def iter_book_dirs(paths: Iterable[Path], *, recursive: bool) -> list[Path]:
         else:
             if descendants:
                 if not recursive:
-                    smart_print(
-                        f"auto-recursive: {p.name} has no audio but "
-                        f"{len(descendants)} nested book dir(s)"
+                    print_dark_grey(
+                        f"auto-recursive: [[{p.name}]] — {len(descendants)} nested book dir(s)"
                     )
                 for d in descendants:
                     out.append(d)
             else:
-                smart_print(f"skip: no book dirs under {p}")
+                print_orange(f"skip: no book dirs under [[{p}]]")
 
     seen: set[Path] = set()
     uniq: list[Path] = []
@@ -933,31 +1027,35 @@ def main(argv: list[str] | None = None) -> int:
     dry_run = not (args.apply or interactive)
 
     cli = resolve_cli_paths()
+    if cli.converted or cli.archive or args.source:
+        print_dark_grey("─" * 60)
     if cli.converted:
-        smart_print(f"converted: {cli.converted}")
+        print_grey(f"converted  {tint_path(cli.converted)}")
     if cli.archive:
-        smart_print(f"archive:   {cli.archive}")
+        print_grey(f"archive    {tint_path(cli.archive)}")
     if args.source:
-        smart_print(f"source:    {args.source.resolve()}")
+        print_grey(f"source     {tint_path(args.source.resolve())}")
+    if cli.converted or cli.archive or args.source:
+        print_dark_grey("─" * 60)
 
     try:
         target_paths = resolve_target_paths(list(args.paths), cli)
     except SystemExit as e:
-        smart_print(str(e))
+        print_red(str(e))
         return 1
 
     book_dirs = iter_book_dirs(target_paths, recursive=args.recursive)
     if not book_dirs:
-        smart_print("No book folders found.")
+        print_orange("No book folders found.")
         return 1
 
     source_root = args.source.resolve() if args.source else None
     if source_root is not None and not source_root.exists():
-        smart_print(f"source path does not exist: {source_root}")
+        print_red(f"source path does not exist: [[{source_root}]]")
         return 1
 
     plans: list[FixPlan] = []
-    failed = 0
+    failures: list[SourceResolutionError] = []
     for d in book_dirs:
         scope = _scope_for_book(d, target_paths)
         try:
@@ -971,23 +1069,34 @@ def main(argv: list[str] | None = None) -> int:
                 require_source=True,
             )
         except SourceResolutionError as e:
-            smart_print(f"FAIL {e.book_dir.name}: {e.message}")
-            failed += 1
+            failures.append(e)
             continue
         if plan:
             plans.append(plan)
         elif args.debug:
             print_debug(f"ok / no changes: {d.name}")
 
+    failed = len(failures)
+    if failures:
+        smart_print("")
+        print_red(f"Source failures  [[{failed}]]")
+        for err in failures:
+            print_source_failure(err, cli)
+        smart_print("")
+
     if interactive:
         mode_label = "Interactive"
+        mode_print = print_banana
     elif dry_run:
         mode_label = "Dry-run"
+        mode_print = print_mint
     else:
         mode_label = "Applying"
-    smart_print(
-        f"{mode_label}: {len(plans)} book(s) need fixes "
-        f"({len(book_dirs)} scanned, {failed} source failures)"
+        mode_print = print_green
+    mode_print(
+        f"{mode_label}  —  [[{len(plans)}]] need fixes  ·  "
+        f"{len(book_dirs)} scanned  ·  [[{failed}]] source failures",
+        highlight_color=LIGHT_GREY_COLOR,
     )
 
     apply_rest = False
@@ -995,33 +1104,40 @@ def main(argv: list[str] | None = None) -> int:
     skipped = 0
     for plan in plans:
         if dry_run:
-            apply_fix(plan, dry_run=True)
+            apply_fix(plan, dry_run=True, cli=cli)
             continue
 
         if interactive and not apply_rest:
-            print_plan(plan, label="propose")
+            print_plan(plan, label="propose", cli=cli)
             choice = prompt_apply(plan)
             if choice == "q":
-                smart_print("Quit — remaining books left unchanged.")
+                print_orange("Quit — remaining books left unchanged.")
                 break
             if choice == "n":
-                smart_print("  skipped")
+                print_dark_grey("  skipped")
                 skipped += 1
                 continue
             if choice == "a":
                 apply_rest = True
-                smart_print("  applying this and all remaining…")
+                print_mint("  applying this and all remaining…")
 
-        smart_print(f"fixing {plan.book_dir.name}")
-        apply_fix(plan, dry_run=False)
+        print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
+        apply_fix(plan, dry_run=False, cli=cli)
         applied += 1
 
+    smart_print("")
     if dry_run and plans:
-        smart_print("\nRe-run with --apply to write changes, or -i to confirm each fix.")
+        print_dark_grey("Re-run with --apply to write changes, or -i to confirm each fix.")
     elif interactive:
-        smart_print(f"\nDone — applied {applied}, skipped {skipped}, source failures {failed}.")
+        print_green(
+            f"Done — applied [[{applied}]], skipped {skipped}, source failures [[{failed}]].",
+            highlight_color=LIGHT_GREY_COLOR,
+        )
     elif not dry_run:
-        smart_print(f"\nDone — applied {applied}, source failures {failed}.")
+        print_green(
+            f"Done — applied [[{applied}]], source failures [[{failed}]].",
+            highlight_color=LIGHT_GREY_COLOR,
+        )
 
     if failed:
         return 1
