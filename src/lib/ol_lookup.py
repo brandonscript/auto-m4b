@@ -564,6 +564,14 @@ class OpenLibraryTitle:
     def date(self) -> str:
         return str(self.title_res.get("first_publish_year", "")) if self.has_match else ""
 
+    @property
+    def key(self) -> str:
+        return self.title_res.get("key", "") if self.has_match else ""
+
+    @property
+    def url(self) -> str:
+        return f"https://openlibrary.org{self.key}" if self.key else ""
+
 
 def open_library_lookup_title(
     title: str,
@@ -636,6 +644,136 @@ def open_library_lookup_title(
         return None
     except Exception as e:
         print_debug(f"Error looking up title {title} from Open Library: {e}")
+        if "pytest" in sys.modules:
+            raise e
+        return None
+
+
+_OL_PATH_REF = re.compile(
+    r"(?:https?://(?:www\.)?openlibrary\.org)?/?(?P<kind>works|books)/(?P<id>OL\d+[WMwm])\b",
+    re.I,
+)
+_OL_BARE_REF = re.compile(r"^(?P<id>OL\d+)(?P<suffix>[WMwm])$", re.I)
+
+
+def parse_ol_ref(raw: str) -> tuple[Literal["works", "books"], str] | None:
+    """Parse an Open Library URL or id into ``(works|books, OLxxxxW|M)``.
+
+    Accepts:
+    - ``https://openlibrary.org/works/OL123W``
+    - ``/works/OL123W`` / ``works/OL123W``
+    - ``https://openlibrary.org/books/OL123M``
+    - bare ``OL123W`` / ``OL123M``
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    m = _OL_PATH_REF.search(s)
+    if m:
+        kind = m.group("kind").lower()
+        olid = m.group("id").upper()
+        # Normalize suffix letter
+        olid = olid[:-1] + olid[-1].upper()
+        return kind, olid  # type: ignore[return-value]
+    m = _OL_BARE_REF.match(s)
+    if m:
+        suffix = m.group("suffix").upper()
+        olid = f"{m.group('id').upper()}{suffix}"
+        kind: Literal["works", "books"] = "works" if suffix == "W" else "books"
+        return kind, olid
+    return None
+
+
+def open_library_fetch_by_ref(
+    ref: str,
+    *,
+    original_author: str | None = None,
+    original_narrator: str | None = None,
+) -> OpenLibraryTitle | None:
+    """Fetch a work/edition by Open Library URL or id and wrap as ``OpenLibraryTitle``.
+
+    Raises ``ValueError`` if *ref* cannot be parsed. Returns ``None`` if the user
+    agent is unset or the API returns no usable doc.
+    """
+    parsed = parse_ol_ref(ref)
+    if not parsed:
+        raise ValueError(
+            f"Unrecognized Open Library ref: {ref!r} "
+            "(expected works/OL…W, books/OL…M, or a full openlibrary.org URL)"
+        )
+    kind, olid = parsed
+
+    agent_string = _get_open_library_user_agent()
+    if not agent_string:
+        return None
+
+    key = f"/{kind}/{olid}"
+    try:
+        # Search by key — returns author_name / title in one round-trip.
+        url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(f'key:{key}')}"
+        response = requests.get(url, headers={"User-Agent": agent_string}, timeout=30)
+        response.raise_for_status()
+        docs = response.json().get("docs") or []
+        match = next((d for d in docs if d.get("key") == key), None)
+        if match is None and docs:
+            match = docs[0]
+        if match is None:
+            # Fallback: direct works/books JSON (title only; authors may be keys)
+            direct = f"https://openlibrary.org{key}.json"
+            response = requests.get(direct, headers={"User-Agent": agent_string}, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            title = data.get("title") or ""
+            author_names: list[str] = []
+            for a in data.get("authors") or []:
+                # works: {"author": {"key": "/authors/OL…A"}}; editions vary
+                akey = None
+                if isinstance(a, dict):
+                    akey = (a.get("author") or {}).get("key") if "author" in a else a.get("key")
+                if akey:
+                    ar = requests.get(
+                        f"https://openlibrary.org{akey}.json",
+                        headers={"User-Agent": agent_string},
+                        timeout=30,
+                    )
+                    if ar.ok:
+                        author_names.append(ar.json().get("name") or "")
+            match = {
+                "key": key,
+                "title": title,
+                "author_name": [n for n in author_names if n],
+                "author_key": [],
+                "work_count": 1,
+                "edition_count": 1,
+                "name": title,
+                "first_publish_year": data.get("first_publish_date") or data.get("publish_date") or 0,
+            }
+        year_raw = match.get("first_publish_year") or 0
+        year = int(year_raw) if str(year_raw).isdigit() else 0
+        safe = OpenLibrarySearchResult(
+            key=str(match.get("key") or key),
+            author_key=list(match.get("author_key") or []),
+            author_name=list(match.get("author_name") or []),
+            type=str(match.get("type") or ""),
+            name=str(match.get("name") or match.get("title") or ""),
+            work_count=int(match.get("work_count") or 1),
+            edition_count=int(match.get("edition_count") or 1),
+            title=str(match.get("title") or match.get("name") or ""),
+            first_publish_year=year,
+        )
+        return OpenLibraryTitle(
+            safe,
+            1.0,
+            1.0,
+            "author",
+            original_author=original_author,
+            original_narrator=original_narrator,
+        )
+    except requests.exceptions.RequestException as e:
+        print_debug(f"Error fetching Open Library ref {ref}: {e}")
+        return None
+    except Exception as e:
+        print_debug(f"Error fetching Open Library ref {ref}: {e}")
         if "pytest" in sys.modules:
             raise e
         return None
