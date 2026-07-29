@@ -815,7 +815,10 @@ def parse_apply_prompt(raw: str) -> str:
 
 
 def prompt_apply(plan: FixPlan) -> str:
-    """Ask whether to apply *plan*. Returns ``y``, ``n``, ``a`` (all), or ``q`` (quit)."""
+    """Ask whether to apply *plan*.
+
+    Returns ``y``, ``n``, ``a`` (all), ``q`` (quit), or ``interrupt`` (Ctrl+C).
+    """
     try:
         from tinta import Tinta
 
@@ -823,6 +826,9 @@ def prompt_apply(plan: FixPlan) -> str:
         raw = input(prompt).strip()
     except EOFError:
         return "n"
+    except KeyboardInterrupt:
+        smart_print("")  # move off the prompt line
+        return "interrupt"
     return parse_apply_prompt(raw)
 
 
@@ -1110,8 +1116,9 @@ def main(argv: list[str] | None = None) -> int:
         if interactive and not apply_rest:
             print_plan(plan, label="propose", cli=cli)
             choice = prompt_apply(plan)
-            if choice == "q":
-                print_orange("Quit — remaining books left unchanged.")
+            if choice in ("q", "interrupt"):
+                label = "Interrupted" if choice == "interrupt" else "Quit"
+                print_orange(f"{label} — remaining books left unchanged.")
                 break
             if choice == "n":
                 print_dark_grey("  skipped")
@@ -1145,4 +1152,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        smart_print("")
+        print_orange("Interrupted.")
+        sys.exit(130)
