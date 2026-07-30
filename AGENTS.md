@@ -45,6 +45,8 @@ poetry run python -c "import sys; print(sys.executable)"
 | Path                  | Purpose                                                            |
 | --------------------- | ------------------------------------------------------------------ |
 | `src/`                | Application code (`src/lib/`, `src/auto_m4b.py`)                   |
+| `src/fix_metadata.py`| Standalone CLI to retag/rename converted books (no re-encode)      |
+| `docs/fix-metadata.md` | Operator/agent reference for that CLI                            |
 | `src/tests/`          | Pytest suite                                                       |
 | `src/tests/helpers/`  | Fixtures, mocks (`pytest_dumps.py`, `pytest_fixtures.py`)          |
 | `src/tests/tmp/`      | Ephemeral test dirs (inbox, converted, etc.) — created by fixtures |
@@ -215,6 +217,27 @@ The container works on a Ragnarok SMB share that is mounted on Phantom at `/mnt/
 | Working/temp            | `/tmp/auto-m4b` (container-local)                          | `/tmp/auto-m4b`                               |
 
 When testing against live books, drop or inspect files in the host-side inbox path above.
+
+## fix_metadata CLI (retag without re-encode)
+
+Use this when converted (or `#plex`) books have wrong tags/filenames and you do **not** want to reconvert. Full flag/env reference: **[docs/fix-metadata.md](docs/fix-metadata.md)**.
+
+```bash
+# Host (Phantom) — am4b exports CLI_* paths + OPEN_LIBRARY_USER_AGENT
+am4b fix -i "George, Margaret"
+am4b fix --apply --ol OL45804W "George, Margaret/Elizabeth I (2011)"
+
+# Or via Poetry
+poetry run python -m src.fix_metadata -h
+```
+
+Notes for agents:
+
+- Default is dry-run; `-i` prompts per book; `--apply` writes.
+- Relative paths resolve under `CLI_CONVERTED_FOLDER`; no args → entire converted tree (auto-recursive).
+- Source tags come from archive mirror (or `-s`). Multi-part archives use GCS + part strippers — titles should not keep `Part 1`.
+- OL match/link is shown when `OPEN_LIBRARY_USER_AGENT` is set; `--ol` / interactive `o` force a work/edition onto a **single** book.
+- Do not rebuild the live container solely for CLI-only changes; the host Poetry tree is enough for `am4b fix`.
 
 ## Key architecture notes for development
 
