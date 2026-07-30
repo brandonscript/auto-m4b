@@ -997,43 +997,41 @@ def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None
 
 
 def parse_apply_prompt(raw: str) -> str:
-    """Normalize an interactive prompt response to y/n/a/o/q (default n)."""
+    """Normalize an interactive prompt response to y/s/o/q (default s)."""
     s = (raw or "").strip().lower()
     if not s:
-        return "n"
+        return "s"
     if s in ("y", "yes"):
         return "y"
-    if s in ("a", "all"):
-        return "a"
+    if s in ("s", "skip", "n", "no"):
+        return "s"
     if s in ("o", "ol", "openlibrary", "open library"):
         return "o"
     if s in ("q", "quit"):
         return "q"
-    if s in ("n", "no", "s", "skip"):
-        return "n"
-    if s[0] in ("y", "a", "o", "q", "n"):
-        return s[0]
-    return "n"
+    if s[0] in ("y", "s", "o", "q", "n"):
+        return "s" if s[0] == "n" else s[0]
+    return "s"
 
 
 def prompt_apply(plan: FixPlan) -> str:
     """Ask whether to apply *plan*.
 
-    Returns ``y``, ``n``, ``a`` (all), ``o`` (open library), ``q`` (quit),
+    Returns ``y``, ``s`` (skip), ``o`` (open library), ``q`` (quit),
     or ``interrupt`` (Ctrl+C).
     """
     try:
         from tinta import Tinta
 
-        prompt = (
-            Tinta()
-            .amber("  Apply this fix? ")
-            .dark_grey("[y/N/a=all/o=ol/q=quit] ")
-            .to_str()
-        )
-        raw = input(prompt).strip()
+        smart_print("")
+        print_amber("  Apply this fix?")
+        print_dark_grey("    y  yes — write these changes")
+        print_dark_grey("    s  skip — leave this book unchanged  (default)")
+        print_dark_grey("    o  open library — enter a URL or id, then review again")
+        print_dark_grey("    q  quit — stop without changing remaining books")
+        raw = input(Tinta().amber("  Choice [y/S/o/q]: ").to_str()).strip()
     except EOFError:
-        return "n"
+        return "s"
     except KeyboardInterrupt:
         smart_print("")  # move off the prompt line
         return "interrupt"
@@ -1045,8 +1043,14 @@ def prompt_ol_ref() -> str | None:
     try:
         from tinta import Tinta
 
-        prompt = Tinta().amber("  Open Library URL or id: ").to_str()
-        raw = input(prompt).strip()
+        smart_print("")
+        print_amber("  Open Library override")
+        print_dark_grey("    Paste a work/edition URL or id, then press Enter.")
+        print_dark_grey("    Examples:")
+        print_dark_grey("      https://openlibrary.org/works/OL45804W")
+        print_dark_grey("      OL45804W")
+        print_dark_grey("    Leave blank to cancel.")
+        raw = input(Tinta().amber("  OL ref: ").to_str()).strip()
     except (EOFError, KeyboardInterrupt):
         smart_print("")
         return None
@@ -1347,7 +1351,6 @@ def main(argv: list[str] | None = None) -> int:
         highlight_color=LIGHT_GREY_COLOR,
     )
 
-    apply_rest = False
     applied = 0
     skipped = 0
     for plan in plans:
@@ -1355,7 +1358,7 @@ def main(argv: list[str] | None = None) -> int:
             apply_fix(plan, dry_run=True, cli=cli)
             continue
 
-        if interactive and not apply_rest:
+        if interactive:
             while True:
                 print_plan(plan, label="propose", cli=cli)
                 choice = prompt_apply(plan)
@@ -1366,21 +1369,14 @@ def main(argv: list[str] | None = None) -> int:
                     if failed:
                         return 1
                     return 0
-                if choice == "n":
+                if choice == "s":
                     print_dark_grey("  skipped")
                     skipped += 1
-                    break
-                if choice == "a":
-                    apply_rest = True
-                    print_mint("  applying this and all remaining…")
-                    print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
-                    apply_fix(plan, dry_run=False, cli=cli)
-                    applied += 1
                     break
                 if choice == "o":
                     ref = prompt_ol_ref()
                     if not ref:
-                        print_dark_grey("  (no OL ref entered — showing proposal again)")
+                        print_dark_grey("  (cancelled — showing proposal again)")
                         continue
                     _attach_open_library(plan, ol_ref=ref, apply_ol_tags=True)
                     if plan.ol_status != "forced":
