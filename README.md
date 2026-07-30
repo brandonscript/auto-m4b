@@ -16,6 +16,7 @@ A Python-native audiobook converter that watches a folder for new audiobooks and
 - **Series support** — handles nested series structures (e.g. `Author / Series / Book 01`)
 - **Crash protection** — skips known-bad books on subsequent runs to avoid infinite retry loops
 - **Backup** — optionally backs up source files before conversion
+- **fix_metadata CLI** — retag/rename already-converted `.m4b` files without re-encoding (see [docs/fix-metadata.md](docs/fix-metadata.md))
 
 ## Requirements
 
@@ -132,6 +133,17 @@ poetry run python -m src --max-loops 1
 ```bash
 poetry run python -m src --match-filter "Hardy Boys"
 ```
+
+## Retagging converted books
+
+For metadata/filename fixes **without** re-encoding, use the `fix_metadata` CLI:
+
+```bash
+poetry run python -m src.fix_metadata -i "Author Name"
+poetry run python -m src.fix_metadata --apply "Author Name/Book Title (2020)"
+```
+
+Full reference (path env vars, archive/`-s` source resolution, Open Library `--ol` / interactive `o`): **[docs/fix-metadata.md](docs/fix-metadata.md)**.
 
 ## Folder structure
 
