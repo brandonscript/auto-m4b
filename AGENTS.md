@@ -223,11 +223,15 @@ When testing against live books, drop or inspect files in the host-side inbox pa
 Use this when converted (or `#plex`) books have wrong tags/filenames and you do **not** want to reconvert. Full flag/env reference: **[docs/fix-metadata.md](docs/fix-metadata.md)**.
 
 ```bash
-# Host (Phantom) — am4b exports CLI_* paths + OPEN_LIBRARY_USER_AGENT
-am4b fix -i "George, Margaret"
-am4b fix --apply --ol OL45804W "George, Margaret/Elizabeth I (2011)"
+# Host needs CLI_* paths when compose CONVERTED_FOLDER is container-only (/media/...)
+export CLI_CONVERTED_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/converted
+export CLI_ARCHIVE_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/archive
+export CLI_INBOX_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox
+export OPEN_LIBRARY_USER_AGENT='auto-m4b/1.0 (you@example.com)'
 
-# Or via Poetry
+poetry run python -m src.fix_metadata -i "George, Margaret"
+poetry run python -m src.fix_metadata --apply --ol OL45804W \
+  "George, Margaret/Elizabeth I (2011)"
 poetry run python -m src.fix_metadata -h
 ```
 
@@ -237,7 +241,7 @@ Notes for agents:
 - Relative paths resolve under `CLI_CONVERTED_FOLDER`; no args → entire converted tree (auto-recursive).
 - Source tags come from archive mirror (or `-s`). Multi-part archives use GCS + part strippers — titles should not keep `Part 1`.
 - OL match/link is shown when `OPEN_LIBRARY_USER_AGENT` is set; `--ol` / interactive `o` force a work/edition onto a **single** book.
-- Do not rebuild the live container solely for CLI-only changes; the host Poetry tree is enough for `am4b fix`.
+- Do not rebuild the live container solely for CLI-only changes; the host Poetry tree is enough to run `python -m src.fix_metadata`.
 
 ## Key architecture notes for development
 
