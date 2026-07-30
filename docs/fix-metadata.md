@@ -17,10 +17,8 @@ Prefer this over re-dropping books into the inbox when only metadata/filenames a
 ```bash
 # From the repo (Poetry venv)
 poetry run python -m src.fix_metadata -h
-
-# Host helper on Phantom (see ~/.zshrc am4b)
-am4b fix -i "George, Margaret"
-am4b fix --apply "George, Margaret/Elizabeth I (2011)"
+poetry run python -m src.fix_metadata -i "George, Margaret"
+poetry run python -m src.fix_metadata --apply "George, Margaret/Elizabeth I (2011)"
 ```
 
 Default is **dry-run**. Write with `--apply`, or confirm each book with `-i` / `--interactive`.
@@ -47,7 +45,7 @@ export OPEN_LIBRARY_USER_AGENT='auto-m4b/1.0 (you@example.com)'
 
 Log file is always `{converted}/auto-m4b.log` (no separate env var).
 
-`am4b fix` on Phantom exports the `CLI_*` paths and Open Library UA for you.
+`OPEN_LIBRARY_USER_AGENT` uses the same format as the converter (see README Open Library setup).
 
 ## Recursion
 
