@@ -49,18 +49,18 @@ def test_last_first_conversion():
 
 
 def test_parse_apply_prompt():
-    assert parse_apply_prompt("") == "n"
+    assert parse_apply_prompt("") == "s"
     assert parse_apply_prompt("y") == "y"
     assert parse_apply_prompt("Yes") == "y"
-    assert parse_apply_prompt("n") == "n"
-    assert parse_apply_prompt("skip") == "n"
-    assert parse_apply_prompt("a") == "a"
-    assert parse_apply_prompt("all") == "a"
+    assert parse_apply_prompt("s") == "s"
+    assert parse_apply_prompt("skip") == "s"
+    assert parse_apply_prompt("n") == "s"
     assert parse_apply_prompt("o") == "o"
     assert parse_apply_prompt("ol") == "o"
     assert parse_apply_prompt("q") == "q"
     assert parse_apply_prompt("quit") == "q"
-    assert parse_apply_prompt("maybe") == "n"
+    assert parse_apply_prompt("a") == "s"  # "all" removed; unknown → skip
+    assert parse_apply_prompt("maybe") == "s"
 
 
 def test_parse_ol_ref():

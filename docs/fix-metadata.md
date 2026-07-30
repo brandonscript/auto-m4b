@@ -76,7 +76,14 @@ When `OPEN_LIBRARY_USER_AGENT` is set, proposals show an OL match + link (**disp
 
 Accepted refs: full `openlibrary.org/works/…` or `/books/…` URLs, or bare `OL123W` / `OL123M`.
 
-Interactive prompt: `[y/N/a=all/o=ol/q=quit]`. Ctrl+C quits cleanly (no traceback).
+Interactive prompt (multi-line menu):
+
+- `y` — apply this book  
+- `s` — skip (default)  
+- `o` — then paste an Open Library URL or id (e.g. `OL45804W`); proposal is rebuilt  
+- `q` — quit  
+
+Ctrl+C quits cleanly (no traceback).
 
 ## Useful flags
 
