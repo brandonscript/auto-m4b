@@ -98,9 +98,11 @@ Ctrl+C quits cleanly (no traceback).
 
 ## Dates / years
 
-Folder trailing `(YYYY)` is the library prior for large mismatches (e.g. polluted id3 `2017` vs folder `2008`). When folder and existing id3 only differ by **one** year (publication vs audiobook/edition noise), the existing id3 date is left alone — no rewrite. Open Library year stays display-only unless forced (`--ol` / `o`) or accepted via `m`.
+Folder trailing `(YYYY)` is the local prior for large mismatches (e.g. polluted id3 `2017` vs folder `2008`). When folder and existing id3 only differ by **one** year (publication vs audiobook/edition noise), the existing id3 date is left alone — no rewrite.
 
-Filesystem / id3 date colors are judged against **desired** date (what would be written), not OL: match = mint, mismatch = amber. When FS is wrong and id3 is right, id3 is mint (not grey) so the pair never reads as grey+amber.
+Once Open Library is attached, if **any two of** filesystem / id3 / OL agree on a year, that consensus wins (e.g. id3+OL `1997` over folder `2007`). Forced OL (`--ol` / `o` / `m`) still applies OL tags directly.
+
+Filesystem / id3 / OL date colors are judged against **desired** date (what would be written): match = mint, mismatch = amber. When FS is wrong and id3 is right, id3 is mint (not grey) so the pair never reads as grey+amber.
 
 ## Minimalist titles
 
@@ -126,6 +128,9 @@ Open Library auto lookup always runs the dual full + stripped query described ab
 ```
 
 Interactive mode and `-o`/`--ol` can retag from the converted folder/m4b alone when archive source files are missing (still pass `-s` when you have them). Dry-run / non-interactive `--apply` without `-o` still require a resolvable source.
+
+Large author folders: planning shows an updating `Planning i/N · folder` line first. Interactive keeps that pass local, then runs Open Library on those local candidates (so date consensus can clear no-ops) and only then prints the mode banner — e.g. `Interactive // 1 of 7 needs fixing · No missing source files` or `Interactive // No books need fixing`.
+
 ## Tests
 
 ```bash

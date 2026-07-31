@@ -34,6 +34,7 @@ import argparse
 import fnmatch
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -199,8 +200,12 @@ class FixPlan:
         return self.rename_m4b_to is not None and self.rename_m4b_to != self.m4b
 
     @property
+    def needs_desc_rewrite(self) -> bool:
+        return bool(self.desc_txt) and _desc_needs_rewrite(self.desc_txt, self)
+
+    @property
     def needs_work(self) -> bool:
-        return self.needs_tag_write or self.needs_rename or bool(self.desc_txt)
+        return self.needs_tag_write or self.needs_rename or self.needs_desc_rewrite
 
 
 def folder_title_hint(folder_name: str) -> str:
@@ -964,7 +969,54 @@ def _attach_open_library(
 
     if apply_ol_tags and plan.ol_status == "forced":
         _apply_ol_fields_to_desired(plan)
+    else:
+        # Auto OL is display-only for tags, but date can adopt a 2-of-3 consensus.
+        _apply_date_consensus(plan)
     return plan
+
+
+def _normalize_year(value: str | None) -> str:
+    """Extract a 4-digit year string, or empty if none."""
+    return get_year_from_date(value or "") or ""
+
+
+def _year_consensus(*years: str | None) -> str | None:
+    """Return a year shared by at least two non-empty inputs, else None."""
+    counts: dict[str, int] = {}
+    for raw in years:
+        y = _normalize_year(raw)
+        if not y:
+            continue
+        counts[y] = counts.get(y, 0) + 1
+    winners = [y for y, n in counts.items() if n >= 2]
+    if len(winners) == 1:
+        return winners[0]
+    return None
+
+
+def _apply_date_consensus(plan: FixPlan) -> None:
+    """If FS / id3 / OL agree 2-of-3 on a year, adopt that as desired_date.
+
+    Local planning still prefers folder year (except ±1 near-tie). Once OL is
+    attached, a clear majority (e.g. id3+OL 1997 vs folder 2007) overrides the
+    folder prior so we don't churn a correct publication year toward an
+    audiobook/folder year.
+    """
+    if plan.ol_status not in ("match", "low_confidence"):
+        return
+    ol_y = _normalize_year(plan.ol_year)
+    if not ol_y:
+        return
+    fs_y = _normalize_year(plan.fs_date)
+    id3_y = _normalize_year(plan.current.date)
+    winner = _year_consensus(fs_y, id3_y, ol_y)
+    if not winner:
+        return
+    cur = _normalize_year(plan.desired_date)
+    if winner == cur:
+        return
+    plan.reasons.append(f"date consensus {cur or '(none)'} → {winner} (2 of FS/id3/OL)")
+    plan.desired_date = winner
 
 
 def _apply_ol_fields_to_desired(plan: FixPlan) -> None:
@@ -1186,9 +1238,7 @@ def plan_fix(
             plan, ol_ref=ol_ref, apply_ol_tags=bool(ol_ref), minimalist=minimalist
         )
 
-    if not plan.needs_tag_write and not plan.needs_rename and not (
-        desc and _desc_needs_rewrite(desc, plan)
-    ):
+    if not plan.needs_work:
         return None
     return plan
 
@@ -1548,10 +1598,17 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
                     .to_str()
                 )
 
-            def _ol_row(label: str, value: str, *, primary: bool = True) -> None:
+            def _ol_row(
+                label: str,
+                value: str,
+                truth_val: str = "",
+                *,
+                primary: bool = True,
+                is_date: bool = False,
+            ) -> None:
                 empty = not (value or "").strip()
                 display = (
-                    value.strip()
+                    _prop_display(value, empty_label="(missing)", is_date=is_date)
                     if not empty
                     else ("(unknown)" if label == "Narrator" else "(missing)")
                 )
@@ -1560,15 +1617,24 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
                     s.dark_grey(display, sep="")
                 elif not primary:
                     s.grey(display, sep="")
-                elif low:
+                elif low and not _prop_equal(value, truth_val, is_date=is_date):
+                    # Low-confidence + disagrees with desired → amber
                     s.amber(display, sep="")
-                else:
+                elif _prop_equal(value, truth_val, is_date=is_date):
                     s.mint(display, sep="")
+                else:
+                    # Confident OL that disagrees with desired (e.g. lost 2-of-3 vote)
+                    s.amber(display, sep="")
                 smart_print(s.to_str())
 
-            _ol_row("Title", plan.ol_title)
-            _ol_row("Author", plan.ol_author)
-            _ol_row("Date", get_year_from_date(plan.ol_year) or plan.ol_year)
+            _ol_row("Title", plan.ol_title, truth["title"])
+            _ol_row("Author", plan.ol_author, truth["author"])
+            _ol_row(
+                "Date",
+                get_year_from_date(plan.ol_year) or plan.ol_year,
+                truth["date"],
+                is_date=True,
+            )
             _ol_row("Narrator", "", primary=False)
             if plan.ol_key:
                 work_id = plan.ol_key.rsplit("/", 1)[-1]
@@ -1873,7 +1939,7 @@ def iter_book_dirs(paths: Iterable[Path], *, recursive: bool) -> list[Path]:
             if descendants:
                 if not recursive:
                     print_dark_grey(
-                        f"auto-recursive: [[{p.name}]] — {len(descendants)} nested book dir(s)"
+                        f"Recursively processing: [[{p.name}]] — {len(descendants)} nested book dir(s)"
                     )
                 for d in descendants:
                     out.append(d)
@@ -1904,10 +1970,56 @@ def _scope_for_book(book_dir: Path, scopes: list[Path]) -> Path:
 
 
 def _banner_fixing_clause(need_n: int, total_n: int) -> str:
+    """Human phrase for how many books need fixing in a scan."""
+    if need_n <= 0:
+        return "No books need fixing"
     verb = "needs" if need_n == 1 else "need"
     if need_n == total_n:
         return f"{need_n} {verb} fixing"
     return f"{need_n} of {total_n} {verb} fixing"
+
+
+def _banner_missing_clause(failed: int) -> str:
+    if failed <= 0:
+        return "No missing source files"
+    unit = "file" if failed == 1 else "files"
+    return f"{failed} missing source {unit}"
+
+
+def _format_mode_banner(mode_label: str, need_n: int, total_n: int, failed: int) -> str:
+    """Mode // needs-fixing · missing-sources (omit missing when both are zero)."""
+    fixing = _banner_fixing_clause(need_n, total_n)
+    if need_n <= 0 and failed <= 0:
+        return f"{mode_label} // {fixing}"
+    return f"{mode_label} // {fixing} · {_banner_missing_clause(failed)}"
+
+
+def _format_planning_progress(i: int, total: int, name: str) -> str:
+    """Progress line for the eager plan_fix loop."""
+    return f"Planning {i}/{total} · {name}"
+
+
+def _planning_progress_width() -> int:
+    return min(100, max(40, shutil.get_terminal_size((100, 20)).columns - 1))
+
+
+def _print_planning_progress(i: int, total: int, name: str) -> None:
+    """Overwrite-friendly planning progress (dark grey; cleared when done)."""
+    from tinta import Tinta
+
+    line = _format_planning_progress(i, total, name)
+    width = _planning_progress_width()
+    shown = line if len(line) <= width else line[: width - 1] + "…"
+    padded = f"{shown:<{width}}"
+    colored = Tinta().dark_grey(padded, sep="").to_str()
+    sys.stdout.write(f"\r{colored}")
+    sys.stdout.flush()
+
+
+def _clear_planning_progress() -> None:
+    width = _planning_progress_width()
+    sys.stdout.write(f"\r{' ' * width}\r")
+    sys.stdout.flush()
 
 
 class _FixMetadataParser(argparse.ArgumentParser):
@@ -2055,10 +2167,15 @@ def main(argv: list[str] | None = None) -> int:
 
     # Interactive and forced-OL can retag from folder/m4b alone (no archive source).
     require_source = not (interactive or bool(ol_ref))
+    # Interactive (without forced -o): local scan first; OL attaches per book on review.
+    defer_ol = interactive and not bool(ol_ref)
+    lookup_ol_upfront = (not args.no_ol or bool(ol_ref)) and not defer_ol
 
     plans: list[FixPlan] = []
     failures: list[SourceResolutionError] = []
-    for d in book_dirs:
+    total_dirs = len(book_dirs)
+    for idx, d in enumerate(book_dirs, start=1):
+        _print_planning_progress(idx, total_dirs, d.name)
         scope = _scope_for_book(d, target_paths)
         try:
             plan = plan_fix(
@@ -2070,7 +2187,7 @@ def main(argv: list[str] | None = None) -> int:
                 debug=args.debug,
                 require_source=require_source,
                 ol_ref=ol_ref,
-                lookup_ol=not args.no_ol or bool(ol_ref),
+                lookup_ol=lookup_ol_upfront,
                 minimalist=minimalist,
             )
         except SourceResolutionError as e:
@@ -2079,7 +2196,11 @@ def main(argv: list[str] | None = None) -> int:
         if plan:
             plans.append(plan)
         elif args.debug:
+            _clear_planning_progress()
             print_debug(f"ok / no changes: {d.name}")
+
+    _clear_planning_progress()
+    smart_print("")
 
     failed = len(failures)
     if failures:
@@ -2088,6 +2209,16 @@ def main(argv: list[str] | None = None) -> int:
         for err in failures:
             print_source_failure(err, cli)
         smart_print("")
+
+    # Interactive defer-OL: attach OL to local candidates before the banner so
+    # "needs fixing" matches what you'll actually be prompted for.
+    if defer_ol and not args.no_ol:
+        kept: list[FixPlan] = []
+        for plan in plans:
+            _attach_open_library(plan, apply_ol_tags=False, minimalist=minimalist)
+            if plan.needs_work:
+                kept.append(plan)
+        plans = kept
 
     if interactive:
         mode_label = "Interactive"
@@ -2098,16 +2229,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         mode_label = "Applying"
         mode_print = print_green
-    low_n = sum(1 for p in plans if p.ol_status == "low_confidence")
-    need_n = len(plans)
+
     total_n = len(book_dirs)
-    fixing = _banner_fixing_clause(need_n, total_n)
-    missing = f"{failed} missing source file{'s' if failed != 1 else ''}"
-    banner = f"{mode_label} // {fixing} · {missing}"
-    if low_n:
-        match_word = "match" if low_n == 1 else "matches"
-        banner += f" · {low_n} low confidence OL {match_word}"
-    mode_print(banner)
+    mode_print(_format_mode_banner(mode_label, len(plans), total_n, failed))
 
     last_book_printed_done = False
     for i, plan in enumerate(plans):

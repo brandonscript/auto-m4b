@@ -28,12 +28,18 @@ from src.fix_metadata import (
     source_common_filename,
     source_common_title,
     source_files_display,
+    _apply_date_consensus,
     _apply_ol_fields_to_desired,
     _attach_open_library,
     _banner_fixing_clause,
+    _banner_missing_clause,
+    _format_mode_banner,
+    _format_planning_progress,
     _id3_already_correct_style,
+    _prop_equal,
     _stem_matches_book_title,
     _truth_props,
+    _year_consensus,
 )
 from src.lib.parsers import swap_firstname_lastname
 from src.lib.ol_lookup import (
@@ -1208,32 +1214,96 @@ def test_attach_ol_enriches_with_local_edition_base_not_au_work(
     assert "Two Pearls" not in plan.desired_title
 
 
-def test_low_confidence_ol_count_in_banner_phrasing():
-    """Mode banner includes low-confidence OL counts when present."""
-    plans = [
-        MagicMock(ol_status="match"),
-        MagicMock(ol_status="low_confidence"),
-        MagicMock(ol_status="low_confidence"),
-        MagicMock(ol_status="none"),
-    ]
-    low_n = sum(1 for p in plans if p.ol_status == "low_confidence")
-    assert low_n == 2
+def test_format_planning_progress():
+    assert _format_planning_progress(12, 133, "The Left Hand of Darkness (1969)") == (
+        "Planning 12/133 · The Left Hand of Darkness (1969)"
+    )
 
+
+def test_plan_fix_defers_ol_then_attach(tmp_path: Path, monkeypatch):
+    """Interactive defer: plan_fix(lookup_ol=False), then _attach_open_library later."""
+    converted = tmp_path / "converted"
+    archive = tmp_path / "archive"
+    book = converted / "Goodman, Alison" / "Eon 01 - Eon - Dragoneye Reborn (2008)"
+    arch = archive / "Goodman, Alison" / "Eon 01 - Eon - Dragoneye Reborn (2008)"
+    _touch(book / "Eon Series.m4b", size=50)
+    _touch(arch / "part1.mp3", size=80)
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        if path.suffix == ".m4b":
+            return TagSnapshot(title="Eon Series", artist="Greg Bear", date="2017", path=path)
+        return TagSnapshot(title="Dragoneye Reborn", artist="Alison Goodman", date="2008", path=path)
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    cli = CliPaths(converted=converted.resolve(), archive=archive.resolve(), inbox=tmp_path / "inbox")
+    plan = plan_fix(
+        book,
+        cli=cli,
+        scope_root=converted / "Goodman, Alison",
+        require_source=True,
+        lookup_ol=False,
+    )
+    assert plan is not None
+    assert plan.needs_work
+    assert not plan.ol_status
+    assert not plan.ol_title
+
+    ol = MagicMock()
+    ol.title = "Eon"
+    ol.author = "Alison Goodman"
+    ol.date = "2008"
+    ol.key = "/works/OL29358192W"
+    ol.url = "https://openlibrary.org/works/OL29358192W"
+    ol.score = MagicMock(return_value=0.9)
+    ol.has_match = True
+
+    monkeypatch.setenv("OPEN_LIBRARY_USER_AGENT", "test/1.0 (t@e.com)")
+    monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: ol)
+    monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
+    monkeypatch.setattr(
+        "src.lib.ol_lookup._fetch_work_editions",
+        lambda *a, **k: [{"title": "Eon", "subtitle": "Dragoneye Reborn"}],
+    )
+    monkeypatch.setattr(
+        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        lambda *a, **k: "Dragoneye Reborn",
+    )
+    monkeypatch.setattr(
+        "src.lib.ol_lookup._get_open_library_user_agent",
+        lambda: "test/1.0 (t@e.com)",
+    )
+
+    _attach_open_library(plan, apply_ol_tags=False)
+    assert plan.ol_status == "match"
+    assert plan.desired_title == "Eon: Dragoneye Reborn"
+    assert plan.needs_work
+
+
+def test_low_confidence_ol_count_in_banner_phrasing():
+    """Mode banner: needs-fixing + missing sources (no OL-on-review junk)."""
+    assert _banner_fixing_clause(0, 7) == "No books need fixing"
     assert _banner_fixing_clause(1, 1) == "1 needs fixing"
-    assert _banner_fixing_clause(1, 2) == "1 of 2 needs fixing"
-    assert _banner_fixing_clause(2, 3) == "2 of 3 need fixing"
+    assert _banner_fixing_clause(1, 7) == "1 of 7 needs fixing"
+    assert _banner_fixing_clause(2, 7) == "2 of 7 need fixing"
     assert _banner_fixing_clause(5, 5) == "5 need fixing"
 
-    banner = f"Dry-run // {_banner_fixing_clause(len(plans), 5)} · 1 missing source file"
-    if low_n:
-        match_word = "match" if low_n == 1 else "matches"
-        banner += f" · {low_n} low confidence OL {match_word}"
-    assert "4 of 5 need fixing" in banner
-    assert "2 low confidence OL matches" in banner
+    assert _banner_missing_clause(0) == "No missing source files"
+    assert _banner_missing_clause(1) == "1 missing source file"
+    assert _banner_missing_clause(2) == "2 missing source files"
 
-    # Zero low-confidence → banner suffix omitted
-    banner_clean = f"Dry-run // {_banner_fixing_clause(1, 1)} · 0 missing source files"
-    assert "low confidence OL" not in banner_clean
+    assert (
+        _format_mode_banner("Interactive", 1, 7, 0)
+        == "Interactive // 1 of 7 needs fixing · No missing source files"
+    )
+    assert (
+        _format_mode_banner("Interactive", 2, 7, 2)
+        == "Interactive // 2 of 7 need fixing · 2 missing source files"
+    )
+    assert _format_mode_banner("Interactive", 0, 7, 0) == "Interactive // No books need fixing"
+    assert (
+        _format_mode_banner("Interactive", 0, 7, 2)
+        == "Interactive // No books need fixing · 2 missing source files"
+    )
 
 
 def test_truth_props_date_uses_desired_not_ol(tmp_path: Path):
@@ -1288,3 +1358,158 @@ def test_truth_props_prefers_desired_when_ol_year_differs(tmp_path: Path):
     )
     assert _truth_props(plan)["date"] == "2008"
     assert _id3_already_correct_style("2008", "2008", is_date=True) == "light_grey"
+
+
+def test_needs_work_respects_matching_desc_and_date_consensus(tmp_path: Path):
+    """needs_work stays False when tags+desc already match; dirty desc or pre-consensus date churn."""
+    m4b = tmp_path / "The Memoirs of Cleopatra.m4b"
+    m4b.touch()
+    title = "The Memoirs of Cleopatra"
+    author = "Margaret George"
+
+    # Case 1: tags match desired, no rename, desc already has correct Book title / Author.
+    desc_ok = tmp_path / "ok.txt"
+    desc_ok.write_text(f"Book title: {title}\nAuthor: {author}\n", encoding="utf-8")
+    plan_ok = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title=title,
+        desired_author=author,
+        desired_album=title,
+        desired_date="1997",
+        desired_narrator="",
+        desired_stem=title,
+        current=TagSnapshot(
+            title=title,
+            artist=author,
+            album=title,
+            albumartist=author,
+            date="1997",
+            path=m4b,
+        ),
+        desc_txt=desc_ok,
+    )
+    assert plan_ok.needs_desc_rewrite is False
+    assert plan_ok.needs_work is False
+
+    # Case 2: same tags, but desc has the wrong title → rewrite + work needed.
+    desc_bad = tmp_path / "bad.txt"
+    desc_bad.write_text(f"Book title: Wrong Title\nAuthor: {author}\n", encoding="utf-8")
+    plan_bad = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title=title,
+        desired_author=author,
+        desired_album=title,
+        desired_date="1997",
+        desired_narrator="",
+        desired_stem=title,
+        current=TagSnapshot(
+            title=title,
+            artist=author,
+            album=title,
+            albumartist=author,
+            date="1997",
+            path=m4b,
+        ),
+        desc_txt=desc_bad,
+    )
+    assert plan_bad.needs_desc_rewrite is True
+    assert plan_bad.needs_work is True
+
+    # Case 3 (Cleopatra): folder prior 2007, then id3+OL consensus → 1997; tags+desc already good.
+    desc_cleo = tmp_path / "cleo.txt"
+    desc_cleo.write_text(f"Book title: {title}\nAuthor: {author}\n", encoding="utf-8")
+    plan_cleo = FixPlan(
+        book_dir=tmp_path / "The Memoirs of Cleopatra (2007)",
+        m4b=m4b,
+        source=None,
+        desired_title=title,
+        desired_author=author,
+        desired_album=title,
+        desired_date="2007",
+        desired_narrator="",
+        desired_stem=title,
+        current=TagSnapshot(
+            title=title,
+            artist=author,
+            album=title,
+            albumartist=author,
+            date="1997",
+            path=m4b,
+        ),
+        desc_txt=desc_cleo,
+        fs_date="2007",
+        ol_status="match",
+        ol_year="1997",
+    )
+    assert plan_cleo.needs_work is True  # date mismatch before consensus
+    _apply_date_consensus(plan_cleo)
+    assert plan_cleo.desired_date == "1997"
+    assert plan_cleo.needs_desc_rewrite is False
+    assert plan_cleo.needs_work is False
+
+
+def test_year_consensus_two_of_three():
+    assert _year_consensus("2007", "1997", "1997") == "1997"
+    assert _year_consensus("2008", "2017", "2008") == "2008"
+    assert _year_consensus("2008", "2008", "2008") == "2008"
+    assert _year_consensus("2008", "2017", "2010") is None
+    assert _year_consensus("2008", "", "2008") == "2008"
+    assert _year_consensus("2008", "2017", "") is None
+
+
+def test_apply_date_consensus_id3_ol_over_folder(tmp_path: Path):
+    """Cleopatra case: folder 2007 outlier loses to id3+OL 1997."""
+    m4b = tmp_path / "The Memoirs of Cleopatra.m4b"
+    m4b.touch()
+    plan = FixPlan(
+        book_dir=tmp_path / "The Memoirs of Cleopatra (2007)",
+        m4b=m4b,
+        source=None,
+        desired_title="The Memoirs of Cleopatra",
+        desired_author="Margaret George",
+        desired_album="The Memoirs of Cleopatra",
+        desired_date="2007",  # local folder prior before consensus
+        desired_narrator="",
+        desired_stem="The Memoirs of Cleopatra",
+        current=TagSnapshot(
+            title="The Memoirs of Cleopatra",
+            artist="Margaret George",
+            date="1997",
+            path=m4b,
+        ),
+        fs_date="2007",
+        ol_status="match",
+        ol_year="1997",
+    )
+    _apply_date_consensus(plan)
+    assert plan.desired_date == "1997"
+    assert any("consensus" in r for r in plan.reasons)
+    # OL agrees with desired → would color mint; FS disagrees
+    assert _prop_equal(plan.ol_year, _truth_props(plan)["date"], is_date=True)
+    assert not _prop_equal(plan.fs_date, _truth_props(plan)["date"], is_date=True)
+
+
+def test_apply_date_consensus_skips_when_no_majority(tmp_path: Path):
+    m4b = tmp_path / "book.m4b"
+    m4b.touch()
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Eon",
+        desired_author="Alison Goodman",
+        desired_album="Eon",
+        desired_date="2008",
+        desired_narrator="",
+        desired_stem="Eon",
+        current=TagSnapshot(title="Eon", artist="Alison Goodman", date="2017", path=m4b),
+        fs_date="2008",
+        ol_status="match",
+        ol_year="2010",
+    )
+    _apply_date_consensus(plan)
+    assert plan.desired_date == "2008"
