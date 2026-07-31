@@ -15,7 +15,7 @@ from src.lib.ffprobe_utils import ffprobe_file
 from src.lib.formatters import strip_leading_the
 from src.lib.ol_lookup import open_library_lookup_author, open_library_lookup_title
 from src.lib.books_tree import BooksTree
-from src.lib.cleaners import strip_leading_articles, title_case_ol_title
+from src.lib.cleaners import strip_leading_articles, strip_leading_author_dash, title_case_ol_title
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim
 from src.lib.parsers import (
@@ -1329,13 +1329,11 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # the author appears at the very start followed by a dash separator so we don't
     # accidentally truncate legitimate subtitles like "Cat's Cradle - A Novel".
     if not ol_resolved and book.title and book.artist:
-        _author_prefix = re.compile(r"^" + re.escape(book.artist) + r"\s*[-–—]\s*", re.I)
-        if _m := _author_prefix.match(book.title):
-            _remainder = book.title[_m.end():].strip()
-            if _remainder:
-                book.title = _remainder
-                book.album = book.title
-                book.sortalbum = strip_leading_articles(book.title)
+        _remainder = strip_leading_author_dash(book.title, book.artist)
+        if _remainder != book.title and _remainder:
+            book.title = _remainder
+            book.album = book.title
+            book.sortalbum = strip_leading_articles(book.title)
 
     # Never leave Title/Album blank — Plex shows "[Unknown Album]" otherwise.
     # Falls back through ID3 → fs_title → folder/file basename.

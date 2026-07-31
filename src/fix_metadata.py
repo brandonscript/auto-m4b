@@ -42,22 +42,29 @@ from typing import Iterable
 from mutagen import File as MutagenFile
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import clean_string, title_case_ol_title
+from src.lib.cleaners import (
+    clean_string,
+    is_author_only_name,
+    looks_like_marketing_subtitle,
+    minimalist_title,
+    strip_leading_author_dash,
+    title_case_ol_title,
+)
 from src.lib.compare import find_greatest_common_string
 from src.lib.fs_utils import safe_filename
 from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.term import (
     LIGHT_GREY_COLOR,
+    border,
+    divider,
     print_amber,
     print_banana,
     print_dark_grey,
     print_debug,
     print_green,
     print_grey,
-    print_light_grey,
     print_mint,
     print_orange,
-    print_purple,
     print_red,
     smart_print,
     tint_path,
@@ -69,6 +76,7 @@ _AUDIO_EXTS = _SOURCE_EXTS | _OUTPUT_EXTS
 _MAX_RECURSE_DEPTH = 4
 
 _YEAR_SUFFIX = re.compile(r"\s*\(\d{4}\)\s*$")
+_FOLDER_YEAR = re.compile(r"\((\d{4})\)\s*$")
 _NARRATOR_BRACKET = re.compile(r"\s*\[[^\]]+\]")
 _SERIES_PREFIX = re.compile(r"^(.+?)\s+-\s+(.+)$")
 _COLLECTIONS_PREFIX = re.compile(r"^\[Collections\]\s*", re.I)
@@ -149,13 +157,20 @@ class FixPlan:
     rename_m4b_to: Path | None = None
     desc_txt: Path | None = None
     rename_desc_to: Path | None = None
+    # Folder / path priors (shown in "Filesystem")
+    fs_title: str = ""
+    fs_author: str = ""
+    fs_date: str = ""
+    fs_narrator: str = ""
+    fs_files: str = ""  # LCS stem + original ext, e.g. "Author - Title.mp3"
     # Open Library (display; tags only forced via --ol / interactive o)
     ol_title: str = ""
     ol_author: str = ""
     ol_year: str = ""
     ol_key: str = ""
     ol_url: str = ""
-    ol_status: str = ""  # match | none | skipped | forced
+    ol_score: float = 0.0
+    ol_status: str = ""  # match | low_confidence | none | skipped | forced
 
     @property
     def needs_tag_write(self) -> bool:
@@ -244,6 +259,16 @@ def parent_author_hint(book_dir: Path) -> str:
     return _last_first_to_first_last(parent)
 
 
+def filesystem_extracted(book_dir: Path) -> tuple[str, str, str, str]:
+    """Title / author / date / narrator priors from folder path alone."""
+    title = folder_title_hint(book_dir.name)
+    author = parent_author_hint(book_dir)
+    narrator = folder_narrator_hint(book_dir.name)
+    ym = _FOLDER_YEAR.search(book_dir.name)
+    date = ym.group(1) if ym else ""
+    return title, author, date, narrator
+
+
 def _title_usable(title: str) -> bool:
     t = (title or "").strip()
     if not t or len(t) < 2:
@@ -253,10 +278,25 @@ def _title_usable(title: str) -> bool:
     return True
 
 
+def _env_truthy(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_minimalist(*, flag_on: bool = False, flag_off: bool = False) -> bool:
+    """Resolve minimalist mode: explicit flags beat ``CLI_MINIMALIST`` env."""
+    if flag_off:
+        return False
+    if flag_on:
+        return True
+    return _env_truthy("CLI_MINIMALIST")
+
+
 def _pick_desired(
     book_dir: Path,
     source: TagSnapshot | None,
     current: TagSnapshot,
+    *,
+    minimalist: bool = False,
 ) -> tuple[str, str, str, str, str, list[str]]:
     """Return (title, author, album, date, narrator, reasons)."""
     reasons: list[str] = []
@@ -285,9 +325,69 @@ def _pick_desired(
     else:
         title = folder_title or current.title or book_dir.name
 
+    # Provisional author early so title cleanup can strip leading "Author - ".
     src_author = ""
     if source:
         src_author = source.albumartist or source.artist or ""
+    provisional_author = ""
+    if src_author and not _looks_like_title(src_author, title or folder_title):
+        provisional_author = src_author
+    elif parent_author:
+        provisional_author = parent_author
+    elif (current.artist or "").strip() and not _looks_like_title(
+        current.artist, title or folder_title
+    ):
+        provisional_author = current.artist.strip()
+
+    if provisional_author and title:
+        deauthored = strip_leading_author_dash(title, provisional_author)
+        if deauthored != title and _title_usable(deauthored):
+            reasons.append(f"strip author prefix from title {title!r}")
+            title = deauthored
+
+    if minimalist and title:
+        from src.lib.ol_lookup import _subtitle_sep_normalized, id3_prefer_colon_separator
+
+        stripped = minimalist_title(title, author=provisional_author)
+        candidates: list[str] = []
+        for cand in (current.title or "", folder_title, stripped):
+            if not _title_usable(cand):
+                continue
+            deauthored_cand = strip_leading_author_dash(cand, provisional_author)
+            cand_core = minimalist_title(cand, author=provisional_author)
+            if is_author_only_name(cand_core, provisional_author):
+                continue
+            # still has marketing junk relative to cleaned core
+            if cand_core.casefold() != deauthored_cand.strip().casefold():
+                continue
+            if fuzz.token_set_ratio(cand, stripped) / 100 >= 0.85:
+                c = deauthored_cand.strip() or cand.strip()
+                if c not in candidates and not is_author_only_name(c, provisional_author):
+                    candidates.append(c)
+        if not candidates:
+            candidates = (
+                [stripped]
+                if not is_author_only_name(stripped, provisional_author)
+                else [title]
+            )
+        # Prefer colon form when candidates only differ by ": " vs " - "
+        chosen = candidates[0]
+        for cand in candidates:
+            if _subtitle_sep_normalized(cand) != _subtitle_sep_normalized(chosen):
+                continue
+            if ": " in cand and ": " not in chosen:
+                chosen = cand
+        chosen = id3_prefer_colon_separator(chosen)
+        if chosen != title:
+            reasons.append(f"minimalist title {title!r} → {chosen!r}")
+            title = chosen
+    elif title:
+        from src.lib.ol_lookup import id3_prefer_colon_separator
+
+        normalized = id3_prefer_colon_separator(title)
+        if normalized != title:
+            reasons.append(f"id3 colon subtitle {title!r} → {normalized!r}")
+            title = normalized
     author = ""
     if src_author and not _looks_like_title(src_author, title):
         author = src_author
@@ -316,8 +416,25 @@ def _pick_desired(
 
     album = title
 
+    folder_year = ""
+    ym = _FOLDER_YEAR.search(book_dir.name)
+    if ym:
+        folder_year = ym.group(1)
+
     date = ""
-    if source and source.date:
+    if folder_year:
+        cur_y = _year(current.date)
+        src_y = _year(source.date) if source and source.date else ""
+        # ±1 year near-tie (publication vs audiobook/edition): leave id3 alone.
+        if cur_y and abs(int(cur_y) - int(folder_year)) == 1:
+            date = cur_y
+        else:
+            date = folder_year
+            if cur_y and cur_y != folder_year:
+                reasons.append(f"date {cur_y} → {folder_year}")
+            elif src_y and src_y != folder_year:
+                reasons.append(f"date from folder ({folder_year}) over source {src_y}")
+    elif source and source.date:
         date = source.date
         if _year(current.date) and _year(current.date) != _year(date):
             reasons.append(f"date {_year(current.date)} → {_year(date)}")
@@ -335,6 +452,37 @@ def _pick_desired(
             pass
 
     return title, author, album, date, narrator, reasons
+
+
+def _usable_rename_stem(s: str, author: str = "") -> bool:
+    return bool(s) and not is_author_only_name(s, author)
+
+
+def _stem_matches_book_title(stem: str, title: str, author: str = "") -> bool:
+    """True when *stem* already names the book (title or Author - Title).
+
+    Treats ``: `` and `` - `` as the same separator so ``The Searcher - A Novel``
+    matches title ``The Searcher: A Novel``.
+    """
+    from src.lib.ol_lookup import _subtitle_sep_normalized
+
+    s_norm = _subtitle_sep_normalized(stem)
+    if not s_norm:
+        return False
+    candidates: list[str] = []
+    t = (title or "").strip()
+    if t:
+        candidates.append(safe_filename(t))
+        candidates.append(t)
+    a = (author or "").strip()
+    if a and t:
+        title_fs = safe_filename(t)
+        candidates.append(f"{a} - {title_fs}")
+        candidates.append(safe_filename(f"{a} - {t}"))
+    for c in candidates:
+        if c and s_norm == _subtitle_sep_normalized(c):
+            return True
+    return False
 
 
 def _looks_like_title(name: str, title: str) -> bool:
@@ -568,6 +716,32 @@ def _source_audio_files(source_dir: Path, ignore_globs: list[str]) -> list[Path]
     )
 
 
+def _clean_gcs_values(values: list[str]) -> str:
+    """GCS across *values*, then ``clean_string`` to strip Part/Disc markers."""
+    if not values:
+        return ""
+    if len(values) == 1:
+        return clean_string(values[0]).strip(" -_,.")
+    gcs = find_greatest_common_string(values)
+    if not gcs:
+        return clean_string(values[0]).strip(" -_,.")
+    # Prefer original casing from the first value that contains the gcs
+    gcs_l = gcs.lower()
+    for v in values:
+        idx = v.lower().find(gcs_l)
+        if idx >= 0:
+            raw = v[idx : idx + len(gcs)]
+            break
+    else:
+        raw = gcs
+    cleaned = clean_string(raw).strip(" -_,.")
+    # Digit-truncated GCS guard (same idea as scorers): if GCS ends in a digit
+    # and is a prefix of the first value, prefer cleaning the first full value.
+    if cleaned and values[0].lower().startswith(cleaned.lower()) and cleaned[-1].isdigit():
+        return clean_string(values[0]).strip(" -_,.")
+    return cleaned
+
+
 def source_common_title(source_dir: Path, ignore_globs: list[str] | None = None) -> tuple[str, str]:
     """Derive a book title from multi-file sources via GCS + part/disc strip.
 
@@ -589,50 +763,53 @@ def source_common_title(source_dir: Path, ignore_globs: list[str] | None = None)
         if snap.album:
             albums.append(snap.album)
 
-    def _clean_gcs(values: list[str]) -> str:
-        if not values:
-            return ""
-        if len(values) == 1:
-            return clean_string(values[0]).strip(" -_,.")
-        gcs = find_greatest_common_string(values)
-        if not gcs:
-            return clean_string(values[0]).strip(" -_,.")
-        # Prefer original casing from the first value that contains the gcs
-        gcs_l = gcs.lower()
-        for v in values:
-            idx = v.lower().find(gcs_l)
-            if idx >= 0:
-                raw = v[idx : idx + len(gcs)]
-                break
-        else:
-            raw = gcs
-        cleaned = clean_string(raw).strip(" -_,.")
-        # Digit-truncated GCS guard (same idea as scorers): if GCS ends in a digit
-        # and is a prefix of the first value, prefer cleaning the first full value.
-        if cleaned and values[0].lower().startswith(cleaned.lower()) and cleaned[-1].isdigit():
-            return clean_string(values[0]).strip(" -_,.")
-        return cleaned
-
-    title = _clean_gcs(titles)
+    title = _clean_gcs_values(titles)
     if _title_usable(title):
         reason = "title from common source (stripped parts)" if len(titles) > 1 or (
             titles and clean_string(titles[0]) != titles[0]
         ) else ""
         return title, reason
 
-    album = _clean_gcs(albums)
+    album = _clean_gcs_values(albums)
     if _title_usable(album):
         return album, "title from common album (stripped parts)"
 
-    stems = [f.stem for f in files]
-    stem_title = _clean_gcs(stems)
+    stem_title = _clean_gcs_values([f.stem for f in files])
     if _title_usable(stem_title):
         return stem_title, "title from common filenames (stripped parts)"
 
     return "", ""
 
 
-    return "", ""
+def source_common_filename(source_dir: Path, ignore_globs: list[str] | None = None) -> str:
+    """Part/disc-stripped GCS of source *filenames* (stems), for m4b rename.
+
+    Unlike ``source_common_title``, this always prefers filenames over ID3 titles,
+    so e.g. ``Author - Title, Part 1/2`` → ``Author - Title``.
+    """
+    ignore_globs = ignore_globs or []
+    files = _source_audio_files(source_dir, ignore_globs)
+    if not files:
+        return ""
+    return _clean_gcs_values([f.stem for f in files])
+
+
+def source_files_display(source_dir: Path, ignore_globs: list[str] | None = None) -> str:
+    """``<LCS stem>.<ext>`` for Filesystem ``Original file(s)`` row.
+
+    Extension is the most common suffix among source audio files.
+    """
+    ignore_globs = ignore_globs or []
+    files = _source_audio_files(source_dir, ignore_globs)
+    if not files:
+        return ""
+    stem = _clean_gcs_values([f.stem for f in files])
+    if not stem:
+        return ""
+    from collections import Counter
+
+    ext = Counter(f.suffix.lower() for f in files).most_common(1)[0][0]
+    return f"{stem}{ext}"
 
 
 def _source_audio_file(source_dir: Path, ignore_globs: list[str]) -> Path | None:
@@ -648,9 +825,21 @@ def _attach_open_library(
     *,
     ol_ref: str | None = None,
     apply_ol_tags: bool = False,
+    minimalist: bool = False,
 ) -> FixPlan:
     """Lookup or fetch Open Library metadata onto *plan* (mutates and returns it)."""
-    from src.lib.ol_lookup import open_library_fetch_by_ref, open_library_lookup_title
+    from src.lib.ol_lookup import (
+        _best_matching_edition_base_title,
+        _best_matching_edition_subtitle,
+        _desired_matches_edition_title,
+        _get_open_library_user_agent,
+        id3_prefer_colon_separator,
+        join_title_subtitle,
+        ol_match_band,
+        ol_title_uses_dash_separator,
+        open_library_fetch_by_ref,
+        open_library_lookup_title,
+    )
 
     try:
         if ol_ref:
@@ -665,16 +854,43 @@ def _attach_open_library(
                 return plan
             plan.ol_status = "forced"
         else:
-            ol = open_library_lookup_title(
+            # Always try full + stripped core so marketing junk does not block matches.
+            queries: list[str] = []
+            for q in (
                 plan.desired_title,
-                author=plan.desired_author,
-                narrator=plan.desired_narrator or None,
-                method="similarity",
-            )
-            if ol is None or not ol.has_match:
-                plan.ol_status = "none" if ol is not None else "skipped"
+                minimalist_title(plan.desired_title or "", author=plan.desired_author),
+                folder_title_hint(plan.book_dir.name),
+            ):
+                q = (q or "").strip()
+                if q and q.casefold() not in {x.casefold() for x in queries}:
+                    queries.append(q)
+
+            best_ol = None
+            best_band = "skipped"
+            best_score = -1.0
+            band_rank = {"match": 3, "low_confidence": 2, "none": 1, "skipped": 0}
+            for q in queries:
+                cand = open_library_lookup_title(
+                    q,
+                    author=plan.desired_author,
+                    narrator=plan.desired_narrator or None,
+                    method="similarity",
+                )
+                band = ol_match_band(cand)
+                score = float(cand.score(fallback=0.0)) if cand is not None else 0.0
+                if band_rank.get(band, 0) > band_rank.get(best_band, 0) or (
+                    band == best_band and score > best_score
+                ):
+                    best_ol, best_band, best_score = cand, band, score
+
+            ol = best_ol
+            if best_band == "skipped":
+                plan.ol_status = "skipped"
                 return plan
-            plan.ol_status = "match"
+            if best_band == "none":
+                plan.ol_status = "none"
+                return plan
+            plan.ol_status = best_band  # match | low_confidence
     except ValueError as e:
         plan.ol_status = "none"
         plan.reasons.append(str(e))
@@ -683,36 +899,99 @@ def _attach_open_library(
         plan.ol_status = "none"
         return plan
 
-    plan.ol_title = ol.title or ""
-    plan.ol_author = ol.author or ""
-    plan.ol_year = ol.date or ""
-    plan.ol_key = ol.key or ""
-    plan.ol_url = ol.url or ""
+    plan.ol_title = title_case_ol_title(ol.title) if ol and ol.title else ""
+    plan.ol_author = ol.author if ol else ""
+    plan.ol_year = ol.date if ol else ""
+    plan.ol_key = ol.key if ol else ""
+    plan.ol_url = ol.url if ol else ""
+    plan.ol_score = float(ol.score(fallback=0.0)) if ol else 0.0
+
+    # Enrich title with edition subtitle when local naming already attests those tokens.
+    # Prefer an edition base closest to local naming (e.g. Eon) over a regional
+    # alternate work title (e.g. The Two Pearls of Wisdom). Never use a marketing
+    # source-only title (e.g. Dragoneye Reborn alone) as the join base.
+    agent = _get_open_library_user_agent()
+    if agent and plan.ol_key and plan.ol_status in ("match", "low_confidence", "forced"):
+        work_title = (plan.ol_title or "").strip()
+        corpus = " ".join(
+            p
+            for p in (
+                plan.book_dir.name,
+                folder_title_hint(plan.book_dir.name),
+                plan.fs_files or "",
+                plan.fs_title or "",
+                plan.desired_title or "",
+            )
+            if p
+        )
+        prefer_local = (plan.desired_title or plan.fs_title or "").strip() or None
+        # Keep a local title that already matches an edition form (US Eon vs AU work title).
+        already_good = bool(
+            prefer_local
+            and _desired_matches_edition_title(plan.ol_key, prefer_local, agent=agent)
+        )
+        base_title = _best_matching_edition_base_title(
+            plan.ol_key,
+            corpus,
+            work_title=work_title,
+            prefer_local=prefer_local,
+            agent=agent,
+        )
+        sub = None
+        if not already_good:
+            sub = _best_matching_edition_subtitle(
+                plan.ol_key,
+                corpus,
+                base_title=base_title,
+                agent=agent,
+                prefer_local=prefer_local,
+            )
+        # Never re-attach trilogy/Book N/unabridged noise (esp. in minimalist mode).
+        if sub and looks_like_marketing_subtitle(sub):
+            sub = None
+        if sub and base_title:
+            # id3 defaults to colon; dash only if OL title is already dash-form.
+            prefer_dash = ol_title_uses_dash_separator(
+                plan.ol_title or "", base_title, sub
+            )
+            enriched = title_case_ol_title(
+                join_title_subtitle(base_title, sub, prefer_dash=prefer_dash)
+            )
+            enriched = id3_prefer_colon_separator(
+                enriched, ol_title_hint=plan.ol_title if prefer_dash else None
+            )
+            if enriched and enriched != plan.desired_title:
+                # Minimalist: do not grow a clean desired title with OL subtitle noise
+                if (
+                    minimalist
+                    and minimalist_title(enriched, author=plan.desired_author)
+                    != enriched.strip()
+                ):
+                    pass
+                else:
+                    plan.desired_title = enriched
+                    plan.desired_album = enriched
+                    plan.ol_title = enriched
+                    plan.reasons.append(f"title + OL subtitle ({sub!r})")
 
     if apply_ol_tags and plan.ol_status == "forced":
-        if plan.ol_title:
-            plan.desired_title = title_case_ol_title(plan.ol_title)
-            plan.desired_album = plan.desired_title
-            plan.desired_stem = safe_filename(plan.desired_title)
-            plan.reasons.append(f"title from Open Library ({plan.ol_key})")
-        if plan.ol_author:
-            plan.desired_author = plan.ol_author
-            plan.reasons.append(f"author from Open Library ({plan.ol_author!r})")
-        if plan.ol_year and not _year(plan.desired_date):
-            plan.desired_date = plan.ol_year
-        # Refresh rename targets
-        rename_to = plan.m4b.with_name(f"{plan.desired_stem}.m4b")
-        plan.rename_m4b_to = rename_to if rename_to != plan.m4b else None
-        if plan.desc_txt and plan.rename_m4b_to:
-            m = _QUALITY_TXT.match(plan.desc_txt.name)
-            if m:
-                quality_part = plan.desc_txt.name[len(m.group(1)) :]
-                plan.rename_desc_to = plan.desc_txt.with_name(f"{plan.desired_stem}{quality_part}")
-            else:
-                plan.rename_desc_to = plan.desc_txt.with_name(f"{plan.desired_stem}.txt")
-            if plan.rename_desc_to == plan.desc_txt:
-                plan.rename_desc_to = None
+        _apply_ol_fields_to_desired(plan)
     return plan
+
+
+def _apply_ol_fields_to_desired(plan: FixPlan) -> None:
+    """Copy stored OL fields into desired_* tags (does not change rename stem)."""
+    if plan.ol_title:
+        plan.desired_title = plan.ol_title
+        plan.desired_album = plan.desired_title
+        plan.reasons.append(f"title from Open Library ({plan.ol_key})")
+    if plan.ol_author:
+        plan.desired_author = plan.ol_author
+        plan.reasons.append(f"author from Open Library ({plan.ol_author!r})")
+    if plan.ol_year:
+        if _year(plan.desired_date) != _year(str(plan.ol_year)):
+            plan.reasons.append(f"date from Open Library ({plan.ol_year})")
+        plan.desired_date = str(plan.ol_year)
 
 
 def plan_fix(
@@ -726,6 +1005,7 @@ def plan_fix(
     require_source: bool = True,
     ol_ref: str | None = None,
     lookup_ol: bool = True,
+    minimalist: bool = False,
 ) -> FixPlan | None:
     """Build a fix plan for one book dir.
 
@@ -747,6 +1027,8 @@ def plan_fix(
     source_snap: TagSnapshot | None = None
     reasons_prefix: str | None = None
     common_title_reason: str = ""
+    filename_stem: str = ""
+    fs_files: str = ""
 
     if require_source:
         src_dir = resolve_source_dir(
@@ -757,6 +1039,8 @@ def plan_fix(
             source_root=source_root,
             debug=debug,
         )
+        filename_stem = source_common_filename(src_dir, ignore_globs)
+        fs_files = source_files_display(src_dir, ignore_globs)
         if beside_source and src_dir == book_dir:
             source_path = beside_source
             source_snap = TagSnapshot.from_file(beside_source)
@@ -765,6 +1049,10 @@ def plan_fix(
             if cleaned and cleaned != source_snap.title:
                 source_snap.title = cleaned
                 common_title_reason = "title stripped part/disc markers"
+            if not filename_stem:
+                filename_stem = clean_string(beside_source.stem).strip(" -_,.")
+            if not fs_files:
+                fs_files = beside_source.name
         else:
             source_path = _source_audio_file(src_dir, ignore_globs)
             if source_path is None:
@@ -781,15 +1069,91 @@ def plan_fix(
     elif beside_source:
         source_path = beside_source
         source_snap = TagSnapshot.from_file(beside_source)
+        filename_stem = clean_string(beside_source.stem).strip(" -_,.")
+        fs_files = beside_source.name
 
     current = TagSnapshot.from_file(m4b)
-    title, author, album, date, narrator, reasons = _pick_desired(book_dir, source_snap, current)
+    title, author, album, date, narrator, reasons = _pick_desired(
+        book_dir, source_snap, current, minimalist=minimalist
+    )
+    # Local determinations (folder + source) before any Open Library override.
+    # fs_date is the folder (YYYY) prior, not the picked desired date.
+    folder_date = filesystem_extracted(book_dir)[2]
+    fs_title, fs_author, fs_date, fs_narrator = (
+        title,
+        author,
+        folder_date,
+        narrator,
+    )
     if reasons_prefix:
         reasons.insert(0, reasons_prefix)
     if common_title_reason:
         reasons.insert(0 if not reasons_prefix else 1, common_title_reason)
 
-    stem = safe_filename(title)
+    # Rename stem = part-stripped GCS of source filenames (not the ID3 title).
+    # Never emit an author-only stem — prefer the original source filename, then
+    # title, then the current m4b name (minimalist or not).
+    raw_stem = filename_stem or title or m4b.stem
+    stem = safe_filename(raw_stem) if raw_stem else ""
+    title_stem = safe_filename(title) if title else ""
+    original_stem = safe_filename(filename_stem) if filename_stem else ""
+
+    if minimalist and raw_stem:
+        cleaned = minimalist_title(raw_stem, author=author)
+        cleaned = safe_filename(cleaned) if cleaned else ""
+        if _usable_rename_stem(cleaned, author):
+            if cleaned != stem:
+                reasons.append(f"minimalist rename stem {stem!r} → {cleaned!r}")
+            stem = cleaned
+        elif _usable_rename_stem(title_stem, author):
+            if title_stem != stem:
+                reasons.append(
+                    f"minimalist rename stem rejected {cleaned or stem!r}; "
+                    f"using title {title_stem!r}"
+                )
+            stem = title_stem
+        elif _usable_rename_stem(original_stem, author):
+            if original_stem != stem:
+                reasons.append(
+                    f"minimalist rename stem rejected {cleaned or stem!r}; "
+                    f"keeping source {original_stem!r}"
+                )
+            stem = original_stem
+        else:
+            if m4b.stem != stem:
+                reasons.append(
+                    f"minimalist rename stem rejected {cleaned or stem!r}; "
+                    f"keeping {m4b.stem!r}"
+                )
+            stem = m4b.stem
+    elif not _usable_rename_stem(stem, author):
+        # Non-minimalist: still never rename to author-only.
+        if _usable_rename_stem(original_stem, author):
+            reasons.append(
+                f"rename stem rejected author-only {stem!r}; "
+                f"keeping source {original_stem!r}"
+            )
+            stem = original_stem
+        elif _usable_rename_stem(title_stem, author):
+            reasons.append(
+                f"rename stem rejected author-only {stem!r}; "
+                f"using title {title_stem!r}"
+            )
+            stem = title_stem
+        else:
+            reasons.append(
+                f"rename stem rejected author-only {stem!r}; "
+                f"keeping {m4b.stem!r}"
+            )
+            stem = m4b.stem
+
+    # If the current .m4b already matches the title (or Author - Title), keep it —
+    # don't rename to a glued source stem like TheSearcherANovel_ep7.
+    if _stem_matches_book_title(m4b.stem, title, author):
+        if stem != m4b.stem:
+            reasons.append(f"keep current filename {m4b.stem!r} (matches title)")
+        stem = m4b.stem
+
     rename_to = m4b.with_name(f"{stem}.m4b") if stem and m4b.stem != stem else None
     if rename_to == m4b:
         rename_to = None
@@ -819,13 +1183,20 @@ def plan_fix(
         rename_m4b_to=rename_to,
         desc_txt=desc,
         rename_desc_to=rename_desc if rename_desc and rename_desc != desc else None,
+        fs_title=fs_title,
+        fs_author=fs_author,
+        fs_date=fs_date,
+        fs_narrator=fs_narrator,
+        fs_files=fs_files,
     )
     if desc and _desc_needs_rewrite(desc, plan):
         if "update description txt contents" not in plan.reasons:
             plan.reasons.append("update description txt contents")
 
     if ol_ref or lookup_ol:
-        _attach_open_library(plan, ol_ref=ol_ref, apply_ol_tags=bool(ol_ref))
+        _attach_open_library(
+            plan, ol_ref=ol_ref, apply_ol_tags=bool(ol_ref), minimalist=minimalist
+        )
 
     if not plan.needs_tag_write and not plan.needs_rename and not (
         desc and _desc_needs_rewrite(desc, plan)
@@ -911,77 +1282,345 @@ def _short_path(path: Path | str, cli: CliPaths | None = None) -> str:
     return str(p)
 
 
-def _fmt_arrow(old: str, new: str) -> str:
-    return f"{old}  →  [[{new}]]"
+def _prop_equal(a: str | None, b: str | None, *, is_date: bool = False) -> bool:
+    if is_date:
+        ya, yb = _year(a or ""), _year(b or "")
+        if ya or yb:
+            return ya == yb and bool(ya)
+    return (a or "").strip().casefold() == (b or "").strip().casefold()
+
+
+def _prop_display(value: str | None, *, empty_label: str = "(missing)", is_date: bool = False) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return empty_label
+    if is_date:
+        return _year(raw) or raw
+    return raw
+
+
+def _truth_props(plan: FixPlan) -> dict[str, str]:
+    """Canonical values used to color FS / id3 rows (what we would write).
+
+    Open Library is display-only for auto matches — do not use OL fields as truth
+    for FS/id3 coloring, or near-tie dates / local titles paint as "wrong".
+    """
+    return {
+        "title": plan.desired_title or "",
+        "author": plan.desired_author or "",
+        "date": _year(plan.desired_date) or plan.desired_date or "",
+        "narrator": plan.desired_narrator or "",
+    }
+
+
+def _id3_already_correct_style(
+    fs_value: str | None,
+    truth: str,
+    *,
+    is_date: bool = False,
+) -> str:
+    """Mint when FS is wrong so the correct id3 value is green, not grey+amber."""
+    fs = (fs_value or "").strip()
+    if fs and not _prop_equal(fs, truth, is_date=is_date):
+        return "mint"
+    return "light_grey"
+
+
+def _print_reviewing_box(book_name: str) -> None:
+    """Nested dashed/solid box matching conversion book headers."""
+    from tinta import Tinta
+
+    # Match term.box() spacing: space after ││ and before closing ││
+    plain = f"Reviewing {book_name}"
+    max_len = len(plain)
+    border(max_len + 2, l="╭", c="╌", r="╮")
+    smart_print(
+        Tinta()
+        .dark_grey("││", sep=" ")
+        .light_grey("Reviewing ", sep="")
+        .mint(book_name, sep=" ")
+        .dark_grey("││", sep="")
+        .to_str()
+    )
+    border(max_len + 2, l="╰", c="╌", r="╯")
+
+
+def _framed_header(title: str, *, style: str) -> None:
+    """``┌─ Title`` rail header. style: dark_grey | banana."""
+    from tinta import Tinta
+
+    smart_print("")
+    if style == "banana":
+        smart_print(Tinta().banana(f"┌─ {title}").to_str())
+    else:
+        # Dim rail like the reviewing box border; title text is white
+        smart_print(
+            Tinta().dark_grey("┌─ ", sep="").white(title, sep="").to_str()
+        )
+
+
+def _framed_footer(*, style: str) -> None:
+    from tinta import Tinta
+
+    if style == "banana":
+        smart_print(Tinta().banana("└─").to_str())
+    else:
+        smart_print(Tinta().dark_grey("└─").to_str())
+
+
+def _print_framed_prop(
+    label: str,
+    value: str | None,
+    truth: str,
+    *,
+    frame_style: str = "dark_grey",
+    is_date: bool = False,
+    already_correct_style: str = "mint",
+) -> None:
+    """Property row inside a ``│`` frame, colored vs *truth* (no label padding)."""
+    from tinta import Tinta
+
+    empty = not (value or "").strip()
+    # Empty with no truth → unknown; empty with truth → missing (shown in proposed)
+    empty_label = "(unknown)" if empty and not (truth or "").strip() else "(missing)"
+    display = _prop_display(value, empty_label=empty_label, is_date=is_date)
+    if frame_style == "banana":
+        s = Tinta().banana("│ ", sep="")
+    else:
+        s = Tinta().dark_grey("│ ", sep="")
+    s.grey(f"{label}: ", sep="")
+    if empty or display in ("(missing)", "(unknown)"):
+        s.dark_grey(display, sep="")
+    elif _prop_equal(value, truth, is_date=is_date):
+        if already_correct_style == "light_grey":
+            s.light_grey(display, sep="")
+        else:
+            s.mint(display, sep="")
+    else:
+        s.amber(display, sep="")
+    smart_print(s.to_str())
+
+
+def _print_proposed_block(
+    tag_rows: list[tuple[str, str | None, str | None, bool]],
+    rename: tuple[str, str] | None = None,
+) -> None:
+    """Print Proposed fixes with aligned tag columns; rename on its own line.
+
+    Each tag row is ``(label, old_raw, new_raw, is_date)``.
+    *unknown* (both empty): dark grey ``(unknown)`` only, no arrow.
+    *missing* (old empty, new set): ``(missing) » new``.
+    """
+    from tinta import Tinta
+
+    if not tag_rows and not rename:
+        return
+
+    # Precompute displays for alignment (only rows that show an arrow/change pair)
+    prepared: list[tuple[str, str, str, str]] = []
+    # kind: unknown | missing | equal | change
+    for label, old, new, is_date in tag_rows:
+        old_empty = not (old or "").strip()
+        new_empty = not (new or "").strip()
+        if old_empty and new_empty:
+            prepared.append((label, "unknown", "(unknown)", ""))
+        elif old_empty and not new_empty:
+            prepared.append((
+                label,
+                "missing",
+                "(missing)",
+                _prop_display(new, is_date=is_date),
+            ))
+        else:
+            old_d = _prop_display(old, is_date=is_date)
+            new_d = _prop_display(new, empty_label="(unknown)", is_date=is_date)
+            kind = "equal" if _prop_equal(old, new, is_date=is_date) else "change"
+            prepared.append((label, kind, old_d, new_d))
+
+    label_w = max(
+        [len(f"{label}:") for label, *_ in prepared]
+        + ([len("Rename:")] if rename else [])
+        + [len("Narrator:")]
+    )
+    paired = [(old_d, new_d) for _, kind, old_d, new_d in prepared if kind != "unknown"]
+    old_w = max((len(o) for o, _ in paired), default=0)
+
+    _framed_header("Proposed fixes", style="banana")
+    for label, kind, old_d, new_d in prepared:
+        label_s = f"{label}:"
+        s = Tinta().banana("│ ", sep="").grey(f"{label_s:<{label_w}} ", sep="")
+        if kind == "unknown":
+            s.dark_grey("(unknown)", sep="")
+        elif kind == "equal":
+            s.light_grey(f"{old_d:<{old_w}}", sep="").dark_grey(" » ", sep="").light_grey(
+                new_d, sep=" "
+            ).mint("✓", sep="")
+        elif kind == "missing":
+            s.dark_grey(f"{old_d:<{old_w}}", sep="").dark_grey(" » ", sep="").mint(new_d, sep="")
+        else:
+            s.amber(f"{old_d:<{old_w}}", sep="").dark_grey(" » ", sep="").mint(new_d, sep="")
+        smart_print(s.to_str())
+
+    if rename:
+        old_name, new_name = rename
+        s = (
+            Tinta()
+            .banana("│ ", sep="")
+            .grey("Rename: ", sep="")
+            .amber(old_name, sep="")
+            .dark_grey(" » ", sep="")
+            .mint(new_name, sep="")
+        )
+        smart_print(s.to_str())
+    _framed_footer(style="banana")
 
 
 def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = None) -> None:
-    """Print a human-readable, colorized summary of the planned fix."""
+    """Print review blocks + consolidated proposed fixes (mockup layout)."""
+    from tinta import Tinta
+
+    del label, cli  # layout is the same for propose / dry-run
+    truth = _truth_props(plan)
+
     smart_print("")
-    if label == "propose":
-        print_banana(f"┌─ propose  [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
-    elif label == "dry-run":
-        print_mint(f"┌─ dry-run  [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
-    else:
-        print_mint(f"┌─ {label}  [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
+    _print_reviewing_box(plan.book_dir.name)
 
-    # Reasons (skip verbose "source from …" — shown as its own row)
-    for r in plan.reasons:
-        if r.startswith("source from "):
-            continue
-        print_light_grey(f"│  • {r}")
+    _framed_header("Filesystem", style="light_grey")
+    if plan.fs_files:
+        smart_print(
+            Tinta()
+            .dark_grey("│ ", sep="")
+            .grey("Original file(s): ", sep="")
+            .mint(plan.fs_files, sep="")
+            .to_str()
+        )
+    _print_framed_prop("Title", plan.fs_title, truth["title"])
+    _print_framed_prop("Author", plan.fs_author, truth["author"])
+    _print_framed_prop("Date", plan.fs_date, truth["date"], is_date=True)
+    _print_framed_prop("Narrator", plan.fs_narrator, truth["narrator"])
+    _framed_footer(style="light_grey")
 
-    if plan.source:
-        src_dir = plan.source.parent if plan.source.is_file() else plan.source
-        print_grey(f"│  source:    {tint_path(_short_path(src_dir, cli))}")
+    cur = plan.current
+    _framed_header("id3 tags", style="light_grey")
+    _print_framed_prop(
+        "Title",
+        cur.title,
+        truth["title"],
+        already_correct_style=_id3_already_correct_style(plan.fs_title, truth["title"]),
+    )
+    _print_framed_prop(
+        "Author",
+        cur.albumartist or cur.artist,
+        truth["author"],
+        already_correct_style=_id3_already_correct_style(
+            plan.fs_author, truth["author"]
+        ),
+    )
+    _print_framed_prop(
+        "Date",
+        _year(cur.date) or cur.date,
+        truth["date"],
+        is_date=True,
+        already_correct_style=_id3_already_correct_style(
+            plan.fs_date, truth["date"], is_date=True
+        ),
+    )
+    _print_framed_prop(
+        "Narrator",
+        cur.composer,
+        truth["narrator"],
+        already_correct_style=_id3_already_correct_style(
+            plan.fs_narrator, truth["narrator"]
+        ),
+    )
+    _framed_footer(style="light_grey")
 
-    if plan.needs_tag_write:
-        print_grey("│  tags:")
-        cur = plan.current
-        pairs = [
-            ("title", cur.title, plan.desired_title),
-            ("author", cur.albumartist or cur.artist, plan.desired_author),
-            ("date", _year(cur.date) or cur.date, _year(plan.desired_date) or plan.desired_date),
-            ("narrator", cur.composer, plan.desired_narrator),
-        ]
-        for key, old, new in pairs:
-            old_s = (old or "—").strip() or "—"
-            new_s = (new or "—").strip() or "—"
-            label_k = f"{key}:"
-            if old_s != new_s:
-                print_grey(f"│    {label_k:<10} {old_s}  →  [[{new_s}]]")
-            else:
-                print_grey(f"│    {label_k:<10} [[{new_s}]]")
+    if plan.ol_status in ("match", "forced", "none", "low_confidence"):
+        # Always show when OL ran (UA set); skip only when lookup was disabled
+        if plan.ol_status == "forced":
+            header = "openlibrary (forced)"
+        else:
+            header = "openlibrary"
+        _framed_header(header, style="light_grey")
+        if plan.ol_status == "none":
+            smart_print(
+                Tinta()
+                .dark_grey("│ ", sep="")
+                .pink("(No matches found)", sep="")
+                .to_str()
+            )
+        else:
+            low = plan.ol_status == "low_confidence"
+            if low:
+                score_s = f"{plan.ol_score:.1f}".rstrip("0").rstrip(".") or "0"
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .pink(f"(Low confidence match • {score_s})", sep="")
+                    .to_str()
+                )
 
+            def _ol_row(label: str, value: str, *, primary: bool = True) -> None:
+                empty = not (value or "").strip()
+                display = (
+                    value.strip()
+                    if not empty
+                    else ("(unknown)" if label == "Narrator" else "(missing)")
+                )
+                s = Tinta().dark_grey("│ ", sep="").grey(f"{label}: ", sep="")
+                if empty:
+                    s.dark_grey(display, sep="")
+                elif not primary:
+                    s.grey(display, sep="")
+                elif low:
+                    s.amber(display, sep="")
+                else:
+                    s.mint(display, sep="")
+                smart_print(s.to_str())
+
+            _ol_row("Title", plan.ol_title)
+            _ol_row("Author", plan.ol_author)
+            _ol_row("Date", _year(plan.ol_year) or plan.ol_year)
+            _ol_row("Narrator", "", primary=False)
+            if plan.ol_key:
+                work_id = plan.ol_key.rsplit("/", 1)[-1]
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .grey("Work: ", sep="")
+                    .grey(work_id, sep="")
+                    .to_str()
+                )
+            if plan.ol_url:
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .grey("Link: ", sep="")
+                    .grey(plan.ol_url, sep="")
+                    .to_str()
+                )
+        _framed_footer(style="light_grey")
+
+    tag_rows: list[tuple[str, str | None, str | None, bool]] = [
+        ("Title", cur.title, plan.desired_title, False),
+        ("Author", cur.albumartist or cur.artist, plan.desired_author, False),
+        (
+            "Date",
+            _year(cur.date) or cur.date,
+            _year(plan.desired_date) or plan.desired_date,
+            True,
+        ),
+        ("Narrator", cur.composer, plan.desired_narrator, False),
+    ]
+    rename = None
     if plan.rename_m4b_to:
-        print_grey(f"│  rename:    {_fmt_arrow(plan.m4b.name, plan.rename_m4b_to.name)}")
-    if plan.rename_desc_to:
-        old_name = plan.desc_txt.name if plan.desc_txt else "?"
-        print_grey(f"│  rename txt: {_fmt_arrow(old_name, plan.rename_desc_to.name)}")
-    elif plan.desc_txt and any("description" in r for r in plan.reasons):
-        print_grey(f"│  rewrite:   [[{plan.desc_txt.name}]]")
-
-    if plan.ol_status == "match" or plan.ol_status == "forced":
-        label = "openlibrary:" if plan.ol_status == "match" else "openlibrary (forced):"
-        summary = plan.ol_title or "?"
-        if plan.ol_author:
-            summary = f"{summary} — {plan.ol_author}"
-        if plan.ol_year:
-            summary = f"{summary} ({plan.ol_year})"
-        print_purple(f"│  {label} [[{summary}]]", highlight_color=LIGHT_GREY_COLOR)
-        if plan.ol_url:
-            print_dark_grey(f"│               {plan.ol_url}")
-    elif plan.ol_status == "none":
-        print_dark_grey("│  openlibrary: (no match)")
-    elif plan.ol_status == "skipped":
-        print_dark_grey("│  openlibrary: (skipped — set OPEN_LIBRARY_USER_AGENT to enable)")
-
-    print_dark_grey("└─")
+        rename = (plan.m4b.name, plan.rename_m4b_to.name)
+    _print_proposed_block(tag_rows, rename=rename)
 
 
 def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None) -> None:
     """Pretty-print a source resolution failure."""
-    print_red(f"  ✗  [[{err.book_dir.name}]]")
+    print_red(f"  ×  [[{err.book_dir.name}]]")
     msg = err.message
     # Pull a path out of common message shapes for a second muted line.
     if "no archive source at " in msg:
@@ -997,7 +1636,7 @@ def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None
 
 
 def parse_apply_prompt(raw: str) -> str:
-    """Normalize an interactive prompt response to y/s/o/q (default s)."""
+    """Normalize an interactive prompt response to y/s/o/m/q (default s)."""
     s = (raw or "").strip().lower()
     if not s:
         return "s"
@@ -1007,29 +1646,80 @@ def parse_apply_prompt(raw: str) -> str:
         return "s"
     if s in ("o", "ol", "openlibrary", "open library"):
         return "o"
+    if s in ("m", "match", "use match"):
+        return "m"
     if s in ("q", "quit"):
         return "q"
-    if s[0] in ("y", "s", "o", "q", "n"):
-        return "s" if s[0] == "n" else s[0]
+    if len(s) == 1 and s in ("y", "s", "o", "m", "q", "n"):
+        return "s" if s == "n" else s
     return "s"
 
 
 def prompt_apply(plan: FixPlan) -> str:
     """Ask whether to apply *plan*.
 
-    Returns ``y``, ``s`` (skip), ``o`` (open library), ``q`` (quit),
-    or ``interrupt`` (Ctrl+C).
+    Returns ``y``, ``s`` (skip), ``o`` (open library), ``m`` (use low-confidence
+    match), ``q`` (quit), or ``interrupt`` (Ctrl+C).
     """
     try:
         from tinta import Tinta
 
         smart_print("")
-        print_amber("  Apply this fix?")
-        print_dark_grey("    y  yes — write these changes")
-        print_dark_grey("    s  skip — leave this book unchanged  (default)")
-        print_dark_grey("    o  open library — enter a URL or id, then review again")
-        print_dark_grey("    q  quit — stop without changing remaining books")
-        raw = input(Tinta().amber("  Choice [y/S/o/q]: ").to_str()).strip()
+        print_amber("Apply this fix?")
+        smart_print("")
+        # 2-space indent; two spaces between key and description
+        smart_print(
+            Tinta()
+            .dark_grey("  ", sep="")
+            .amber("y", sep="")
+            .dark_grey("  ", sep="")
+            .light_grey("yes", sep="")
+            .to_str()
+        )
+        smart_print(
+            Tinta()
+            .dark_grey("  ", sep="")
+            .amber("s", sep="")
+            .dark_grey("  ", sep="")
+            .light_grey("skip", sep="")
+            .dark_grey(" (default)", sep="")
+            .to_str()
+        )
+        if plan.ol_status == "low_confidence":
+            smart_print(
+                Tinta()
+                .dark_grey("  ", sep="")
+                .amber("m", sep="")
+                .dark_grey("  ", sep="")
+                .light_grey("use this openlibrary match", sep="")
+                .to_str()
+            )
+        smart_print(
+            Tinta()
+            .dark_grey("  ", sep="")
+            .amber("o", sep="")
+            .dark_grey("  ", sep="")
+            .light_grey("provide an openlibrary id or url...", sep="")
+            .to_str()
+        )
+        smart_print(
+            Tinta()
+            .dark_grey("  ", sep="")
+            .amber("q", sep="")
+            .dark_grey("  ", sep="")
+            .light_grey("quit", sep="")
+            .to_str()
+        )
+        smart_print("")
+        choice_keys = "y/S/m/o/q" if plan.ol_status == "low_confidence" else "y/S/o/q"
+        t = Tinta().dark_grey("[", sep="")
+        for ch in choice_keys:
+            if ch == "/":
+                t.dark_grey("/", sep="")
+            else:
+                t.amber(ch, sep="")
+        t.dark_grey("]: ", sep="")
+        raw = input(t.to_str()).strip()
     except EOFError:
         return "s"
     except KeyboardInterrupt:
@@ -1044,20 +1734,36 @@ def prompt_ol_ref() -> str | None:
         from tinta import Tinta
 
         smart_print("")
-        print_amber("  Open Library override")
-        print_dark_grey("    Paste a work/edition URL or id, then press Enter.")
-        print_dark_grey("    Examples:")
-        print_dark_grey("      https://openlibrary.org/works/OL45804W")
-        print_dark_grey("      OL45804W")
-        print_dark_grey("    Leave blank to cancel.")
-        raw = input(Tinta().amber("  OL ref: ").to_str()).strip()
+        print_amber("Open Library override")
+        smart_print("")
+        print_dark_grey("Paste a work/edition URL or id, then press Enter.")
+        print_dark_grey("Examples:")
+        smart_print(
+            Tinta().dark_grey("  ").to_str() + tint_path("https://openlibrary.org/works/OL45804W")
+        )
+        smart_print(Tinta().dark_grey("  ").to_str() + tint_path("OL45804W"))
+        print_dark_grey("Leave blank to cancel.")
+        smart_print("")
+        raw = input(Tinta().amber("OL ref ").dark_grey(": ").to_str()).strip()
     except (EOFError, KeyboardInterrupt):
         smart_print("")
         return None
     return raw or None
 
 
-def apply_fix(plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = None) -> None:
+def print_ol_session_notice(*, no_ol: bool = False) -> None:
+    """Session-level Open Library status (below auto-recursive, once)."""
+    if no_ol:
+        print_dark_grey("openlibrary  (disabled via --no-ol)")
+        return
+    ua = (os.environ.get("OPEN_LIBRARY_USER_AGENT") or "").strip()
+    if not ua:
+        print_dark_grey("openlibrary unavailable (set OPEN_LIBRARY_USER_AGENT to enable)")
+
+
+def apply_fix(
+    plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = None, quiet: bool = False
+) -> None:
     tags = {
         "title": plan.desired_title,
         "album": plan.desired_album,
@@ -1074,7 +1780,8 @@ def apply_fix(plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = Non
     target = plan.m4b
     if plan.needs_tag_write:
         write_id3_tags_mutagen(target, tags)
-        print_green(f"  ✓ wrote tags → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
+        if not quiet:
+            print_green(f"  ✓ wrote tags → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
     if plan.rename_m4b_to:
         if plan.rename_m4b_to.exists() and plan.rename_m4b_to.resolve() != target.resolve():
@@ -1083,7 +1790,8 @@ def apply_fix(plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = Non
             target.rename(plan.rename_m4b_to)
             target = plan.rename_m4b_to
             plan.m4b = target
-            print_green(f"  ✓ renamed m4b → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
+            if not quiet:
+                print_green(f"  ✓ renamed m4b → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
     desc_out = plan.rename_desc_to or plan.desc_txt
     if desc_out is None:
@@ -1092,20 +1800,23 @@ def apply_fix(plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = Non
         if plan.rename_desc_to.exists() and plan.rename_desc_to.resolve() != plan.desc_txt.resolve():
             _write_desc(plan, plan.rename_desc_to)
             plan.desc_txt.unlink(missing_ok=True)
-            print_green(
-                f"  ✓ rewrote+renamed desc → [[{plan.rename_desc_to.name}]]",
-                highlight_color=LIGHT_GREY_COLOR,
-            )
+            if not quiet:
+                print_green(
+                    f"  ✓ rewrote+renamed desc → [[{plan.rename_desc_to.name}]]",
+                    highlight_color=LIGHT_GREY_COLOR,
+                )
         else:
             plan.desc_txt.rename(plan.rename_desc_to)
             _write_desc(plan, plan.rename_desc_to)
-            print_green(
-                f"  ✓ renamed+rewrote desc → [[{plan.rename_desc_to.name}]]",
-                highlight_color=LIGHT_GREY_COLOR,
-            )
+            if not quiet:
+                print_green(
+                    f"  ✓ renamed+rewrote desc → [[{plan.rename_desc_to.name}]]",
+                    highlight_color=LIGHT_GREY_COLOR,
+                )
     else:
         _write_desc(plan, desc_out)
-        print_green(f"  ✓ wrote desc → [[{desc_out.name}]]", highlight_color=LIGHT_GREY_COLOR)
+        if not quiet:
+            print_green(f"  ✓ wrote desc → [[{desc_out.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
 
 def _child_dirs(d: Path) -> list[Path]:
@@ -1144,7 +1855,7 @@ def iter_book_dirs(paths: Iterable[Path], *, recursive: bool) -> list[Path]:
     for p in paths:
         p = p.resolve()
         if not p.exists():
-            print_orange(f"skip missing path: [[{p}]]")
+            print_orange(f"Path does not exist: [[{p}]]\n")
             continue
         if p.is_file():
             out.append(p.parent)
@@ -1204,9 +1915,41 @@ def _scope_for_book(book_dir: Path, scopes: list[Path]) -> Path:
     return max(matches, key=lambda p: len(p.parts))
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="python -m src.fix_metadata",
+def _banner_fixing_clause(need_n: int, total_n: int) -> str:
+    verb = "needs" if need_n == 1 else "need"
+    if need_n == total_n:
+        return f"{need_n} {verb} fixing"
+    return f"{need_n} of {total_n} {verb} fixing"
+
+
+class _FixMetadataParser(argparse.ArgumentParser):
+    """Friendlier argparse errors — no usage wall, colored message."""
+
+    def error(self, message: str) -> None:
+        # Avoid stock "prog: error:" + full usage dump.
+        smart_print("")
+        msg = (message or "").strip()
+        if msg.lower().startswith("unrecognized arguments:"):
+            bad = msg.split(":", 1)[1].strip()
+            print_red("Unrecognized argument(s)")
+            print_red(f"  [[{bad}]]")
+        elif msg.lower().startswith("the following arguments are required:"):
+            need = msg.split(":", 1)[1].strip()
+            print_red("Missing required argument(s)")
+            print_red(f"  [[{need}]]")
+        else:
+            print_red(msg)
+        usage = self.format_usage().strip()
+        if usage.lower().startswith("usage:"):
+            usage = usage[6:].strip()
+        print_dark_grey(f"Usage:  {usage}")
+        print_dark_grey(f"Help:   {self.prog} -h")
+        self.exit(2)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = _FixMetadataParser(
+        prog="fix_metadata",
         description=(
             "Correct ID3 tags, m4b filenames, and companion .txt for converted audiobooks "
             "(no re-encode). Defaults to CLI_CONVERTED_FOLDER with smart recursion; "
@@ -1220,8 +1963,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Book/author folder(s); relative paths resolve under converted. Default: converted root",
     )
     parser.add_argument(
-        "--recursive",
         "-r",
+        "--recursive",
         action="store_true",
         help="Include child book dirs when the path itself is also a book (mixed folders)",
     )
@@ -1234,6 +1977,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Unconverted originals root; relative nesting must match the converted scope",
     )
     parser.add_argument(
+        "-o",
         "--ol",
         dest="ol_ref",
         default=None,
@@ -1261,13 +2005,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-ol",
         action="store_true",
-        help="Skip automatic Open Library lookup (still allows --ol / interactive o)",
+        help="Skip automatic Open Library lookup (still allows -o / interactive o)",
+    )
+    parser.add_argument(
+        "--minimalist",
+        action="store_true",
+        help="Prefer core titles; strip series/Book N/(Unabridged) junk (or set CLI_MINIMALIST=1)",
+    )
+    parser.add_argument(
+        "--no-minimalist",
+        action="store_true",
+        help="Disable minimalist title mode even if CLI_MINIMALIST is set",
     )
     parser.add_argument("--debug", action="store_true", help="Verbose debug")
+    return parser
 
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_arg_parser()
     args = parser.parse_args(argv)
     interactive = bool(args.interactive)
     dry_run = not (args.apply or interactive)
+    minimalist = resolve_minimalist(flag_on=args.minimalist, flag_off=args.no_minimalist)
 
     cli = resolve_cli_paths()
     if cli.converted or cli.archive or args.source:
@@ -1292,6 +2051,8 @@ def main(argv: list[str] | None = None) -> int:
         print_orange("No book folders found.")
         return 1
 
+    print_ol_session_notice(no_ol=bool(args.no_ol))
+
     source_root = args.source.resolve() if args.source else None
     if source_root is not None and not source_root.exists():
         print_red(f"source path does not exist: [[{source_root}]]")
@@ -1300,9 +2061,12 @@ def main(argv: list[str] | None = None) -> int:
     ol_ref = args.ol_ref
     if ol_ref and len(book_dirs) != 1:
         print_red(
-            f"--ol requires a single book target, but {len(book_dirs)} book dir(s) were selected"
+            f"-o/--ol requires a single book target, but {len(book_dirs)} book dir(s) were selected"
         )
         return 1
+
+    # Interactive and forced-OL can retag from folder/m4b alone (no archive source).
+    require_source = not (interactive or bool(ol_ref))
 
     plans: list[FixPlan] = []
     failures: list[SourceResolutionError] = []
@@ -1316,9 +2080,10 @@ def main(argv: list[str] | None = None) -> int:
                 scope_root=scope,
                 source_root=source_root,
                 debug=args.debug,
-                require_source=True,
+                require_source=require_source,
                 ol_ref=ol_ref,
                 lookup_ol=not args.no_ol or bool(ol_ref),
+                minimalist=minimalist,
             )
         except SourceResolutionError as e:
             failures.append(e)
@@ -1331,7 +2096,7 @@ def main(argv: list[str] | None = None) -> int:
     failed = len(failures)
     if failures:
         smart_print("")
-        print_red(f"Source failures  [[{failed}]]")
+        print_red("Can't find source files")
         for err in failures:
             print_source_failure(err, cli)
         smart_print("")
@@ -1345,15 +2110,19 @@ def main(argv: list[str] | None = None) -> int:
     else:
         mode_label = "Applying"
         mode_print = print_green
-    mode_print(
-        f"{mode_label}  —  [[{len(plans)}]] need fixes  ·  "
-        f"{len(book_dirs)} scanned  ·  [[{failed}]] source failures",
-        highlight_color=LIGHT_GREY_COLOR,
-    )
+    low_n = sum(1 for p in plans if p.ol_status == "low_confidence")
+    need_n = len(plans)
+    total_n = len(book_dirs)
+    fixing = _banner_fixing_clause(need_n, total_n)
+    missing = f"{failed} missing source file{'s' if failed != 1 else ''}"
+    banner = f"{mode_label} // {fixing} · {missing}"
+    if low_n:
+        match_word = "match" if low_n == 1 else "matches"
+        banner += f" · {low_n} low confidence OL {match_word}"
+    mode_print(banner)
 
-    applied = 0
-    skipped = 0
-    for plan in plans:
+    last_book_printed_done = False
+    for i, plan in enumerate(plans):
         if dry_run:
             apply_fix(plan, dry_run=True, cli=cli)
             continue
@@ -1363,49 +2132,63 @@ def main(argv: list[str] | None = None) -> int:
                 print_plan(plan, label="propose", cli=cli)
                 choice = prompt_apply(plan)
                 if choice in ("q", "interrupt"):
-                    label = "Interrupted" if choice == "interrupt" else "Quit"
-                    print_orange(f"{label} — remaining books left unchanged.")
+                    # smart_print collapses consecutive empties; force a blank gap
+                    print()
+                    from tinta import Tinta
+
+                    smart_print(Tinta().light_pink("Meow.").to_str())
                     smart_print("")
                     if failed:
                         return 1
                     return 0
                 if choice == "s":
-                    print_dark_grey("  skipped")
-                    skipped += 1
+                    print_dark_grey("(skipped)")
+                    last_book_printed_done = False
                     break
                 if choice == "o":
                     ref = prompt_ol_ref()
                     if not ref:
                         print_dark_grey("  (cancelled — showing proposal again)")
                         continue
-                    _attach_open_library(plan, ol_ref=ref, apply_ol_tags=True)
+                    _attach_open_library(
+                        plan, ol_ref=ref, apply_ol_tags=True, minimalist=minimalist
+                    )
                     if plan.ol_status != "forced":
                         print_orange("  Could not apply that Open Library ref; try again or skip.")
                     continue
+                if choice == "m":
+                    if plan.ol_status != "low_confidence":
+                        print_orange("  No low-confidence Open Library match to accept.")
+                        continue
+                    _apply_ol_fields_to_desired(plan)
+                    plan.ol_status = "forced"
+                    print_mint("  Using Open Library match", highlight_color=LIGHT_GREY_COLOR)
+                    continue
                 if choice == "y":
-                    print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
-                    apply_fix(plan, dry_run=False, cli=cli)
-                    applied += 1
+                    apply_fix(plan, dry_run=False, cli=cli, quiet=True)
+                    # smart_print collapses consecutive empties; match conversion spacing
+                    print()
+                    from tinta import Tinta
+
+                    smart_print(Tinta().light_grey("Done ", sep="").mint("✓", sep="").to_str())
+                    print()
+                    last_book_printed_done = i == len(plans) - 1
+                    if i < len(plans) - 1:
+                        # print_plan leads with one blank; do not add another here
+                        divider()
                     break
             continue
 
         print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
         apply_fix(plan, dry_run=False, cli=cli)
-        applied += 1
 
     smart_print("")
     if dry_run and plans:
         print_dark_grey("Re-run with --apply to write changes, or -i to confirm each fix.")
-    elif interactive:
-        print_green(
-            f"Done — applied [[{applied}]], skipped {skipped}, source failures [[{failed}]].",
-            highlight_color=LIGHT_GREY_COLOR,
-        )
-    elif not dry_run:
-        print_green(
-            f"Done — applied [[{applied}]], source failures [[{failed}]].",
-            highlight_color=LIGHT_GREY_COLOR,
-        )
+    elif (interactive or not dry_run) and not last_book_printed_done:
+        from tinta import Tinta
+
+        smart_print(Tinta().light_grey("Done ", sep="").mint("✓", sep="").to_str())
 
     if failed:
         return 1
@@ -1417,5 +2200,7 @@ if __name__ == "__main__":
         sys.exit(main())
     except KeyboardInterrupt:
         smart_print("")
-        print_orange("Interrupted.")
+        from tinta import Tinta
+
+        smart_print(Tinta().light_pink("Meow.").to_str())
         sys.exit(130)

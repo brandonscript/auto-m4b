@@ -40,6 +40,7 @@ Compose uses `INBOX_FOLDER` / `CONVERTED_FOLDER` / `ARCHIVE_FOLDER` (container `
 export CLI_CONVERTED_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/converted
 export CLI_ARCHIVE_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/archive
 export CLI_INBOX_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox
+export CLI_MINIMALIST=1   # optional; prefer core titles (see Minimalist titles)
 export OPEN_LIBRARY_USER_AGENT='auto-m4b/1.0 (you@example.com)'
 ```
 
@@ -69,21 +70,45 @@ When `OPEN_LIBRARY_USER_AGENT` is set, proposals show an OL match + link (**disp
 
 | Mode | Flag / key | Behavior |
 | ---- | ---------- | -------- |
-| Auto | (default) | Lookup by desired title/author; show link |
+| Auto | (default) | Lookup by desired title/author; show link; may enrich proposed title with edition subtitle when local naming attests it |
 | Skip auto | `--no-ol` | No automatic lookup |
 | Force (CLI) | `--ol URL_OR_ID` | Single-book only; applies OL title/author/year |
 | Force (interactive) | `o` at the prompt | Paste URL or `OL…W` / `OL…M`, re-show proposal |
+| Accept low-confidence | `m` at the prompt | Only when OL shows a low-confidence candidate |
+
+Auto lookup uses structured `title=` first, then free-text `q=` if that misses (edition subtitles / alt titles). **Dual title query:** every auto lookup always tries the full desired title **and** the minimalist-stripped core (even when minimalist mode is off), so marketing junk like *The Lady Helen Trilogy, Book 1 (Unabridged)* does not block a match on *The Dark Days Club*. When the work title scores below 0.5 but author confidence is solid (≥ 0.5, or the author was resolved onto the query), editions are fetched and titles/subtitles are scored so marketing titles (e.g. *Eon: Dragoneye Reborn*) can promote the match. Score ≥ 0.5 → confident match (display only for author/date); 0.15–0.5 → low-confidence (amber; use `m` to adopt). Below that → no match.
+
+When an edition subtitle is strongly attested in local naming (folder / source content tokens), the **proposed id3 title** becomes `Base: Subtitle` using the edition/work base closest to local naming (e.g. *Eon: Dragoneye Reborn*, *Eona: The Last Dragoneye*) — never stacking two marketing subtitles, and never replacing a local/US form with a regional alternate work title (e.g. *The Two Pearls of Wisdom*). Id3 `Title: Subtitle` prefers colon; filenames map `:` → ` - ` via `safe_filename`; folder dashes are not an id3 signal (dash only when Open Library’s title itself uses that form).
+
+Dry-run / non-interactive `--apply` report the count of low-confidence OL matches in the mode banner but never auto-adopt low-confidence OL author/date — only interactive `m` or forced `--ol` / `o` applies those. Session end prints light grey `Done` and mint `✓` (matching per-book Done); exit code is still non-zero when any source lookups failed.
 
 Accepted refs: full `openlibrary.org/works/…` or `/books/…` URLs, or bare `OL123W` / `OL123M`.
 
-Interactive prompt (multi-line menu):
+Interactive prompt:
 
-- `y` — apply this book  
+- `y` — yes  
 - `s` — skip (default)  
-- `o` — then paste an Open Library URL or id (e.g. `OL45804W`); proposal is rebuilt  
+- `m` — use this openlibrary match (only when low-confidence)  
+- `o` — provide an Open Library id or url  
 - `q` — quit  
 
+Review layout: nested Reviewing book box, then Filesystem / id3 tags / optional Open Library blocks (mint = correct, amber = wrong/low-confidence OL, grey = missing, light grey = already correct), then a yellow Proposed fixes rail. Session-level Open Library skip/disable notice prints once under auto-recursive.
+
 Ctrl+C quits cleanly (no traceback).
+
+## Dates / years
+
+Folder trailing `(YYYY)` is the library prior for large mismatches (e.g. polluted id3 `2017` vs folder `2008`). When folder and existing id3 only differ by **one** year (publication vs audiobook/edition noise), the existing id3 date is left alone — no rewrite. Open Library year stays display-only unless forced (`--ol` / `o`) or accepted via `m`.
+
+Filesystem / id3 date colors are judged against **desired** date (what would be written), not OL: match = mint, mismatch = amber. When FS is wrong and id3 is right, id3 is mint (not grey) so the pair never reads as grey+amber.
+
+## Minimalist titles
+
+Set `CLI_MINIMALIST=1` (or pass `--minimalist`) to prefer core book titles and strip series / Book N / `(Unabridged)` marketing suffixes from proposed id3 titles and rename stems. `--no-minimalist` disables the mode even when the env var is set. Minimalist (and title cleanup generally) is author-aware: a leading `Author - ` prefix is stripped before series cleanup so author dashes cannot collapse a stem to the author alone. Rename stems never become author-only — if cleanup fails, the source filename or current `.m4b` name is kept.
+
+Example: source title *The Dark Days Club: The Lady Helen Trilogy, Book 1 (Unabridged)* → desired title *The Dark Days Club*. Substantive subtitles such as *Eona: The Last Dragoneye* are left alone.
+
+Open Library auto lookup always runs the dual full + stripped query described above, regardless of this flag.
 
 ## Useful flags
 
@@ -92,14 +117,17 @@ Ctrl+C quits cleanly (no traceback).
 --apply             Write without prompting
 -r, --recursive     Include child book dirs when the path itself is also a book
 -s, --source PATH   Unconverted originals root
---ol URL_OR_ID      Force Open Library work/edition (one book)
+-o, --ol URL_OR_ID  Force Open Library work/edition (one book)
 --no-ol             Skip automatic OL lookup
+--minimalist        Prefer core titles; strip series/Book N/(Unabridged) (or CLI_MINIMALIST=1)
+--no-minimalist     Disable minimalist even if CLI_MINIMALIST is set
 --ignore GLOB       Skip matching filenames (repeatable)
 --debug             Verbose debug
 ```
 
+Interactive mode and `-o`/`--ol` can retag from the converted folder/m4b alone when archive source files are missing (still pass `-s` when you have them). Dry-run / non-interactive `--apply` without `-o` still require a resolvable source.
 ## Tests
 
 ```bash
-poetry run python -m pytest src/tests/test_fix_metadata.py -q
+poetry run python -m pytest src/tests/test_fix_metadata.py src/tests/test_cleaners_minimalist.py -q
 ```

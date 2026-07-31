@@ -67,6 +67,33 @@ def strip_author_narrator(s: str, author: str | None = None, narrator: str | Non
     return s
 
 
+def strip_leading_author_dash(s: str, author: str | None) -> str:
+    """Remove a leading ``Author - `` / ``Author – `` prefix from a title or stem.
+
+    Only strips when a non-empty remainder remains, so we never collapse to
+    author-only or empty. Does not remove author names elsewhere in the string.
+    """
+    original = s or ""
+    text = original.strip()
+    a = (author or "").strip()
+    if not text or not a:
+        return text
+    m = re.match(r"^" + re.escape(a) + r"\s*[-–—]\s*(.+)$", text, flags=re.I)
+    if not m:
+        return original
+    remainder = m.group(1).strip()
+    return remainder if remainder else original
+
+
+def is_author_only_name(s: str, author: str | None) -> bool:
+    """True when *s* is empty/junk or equals *author* (case-insensitive)."""
+    text = (s or "").strip()
+    if not text or len(text) < 2:
+        return True
+    a = (author or "").strip()
+    return bool(a) and text.casefold() == a.casefold()
+
+
 def fix_smart_quotes(s: str) -> str:
     """Takes a string and replaces smart quotes with regular quotes"""
     if not s:
@@ -159,6 +186,82 @@ def title_case_ol_title(s: str) -> str:
     from titlecase import titlecase
 
     return titlecase(s)
+
+
+# Audible / retailer marketing suffixes (series, book index, abridgement).
+_MIN_ABRIDGEMENT = re.compile(
+    r"\s*[\(\[]\s*(?:un)?abridged\s*[\)\]]|\s*[\(\[]\s*ab\s*[\)\]]",
+    re.I,
+)
+_MIN_BOOK_VOL = re.compile(
+    r"\s*[,:\-–—]?\s*(?:book|bk\.?|vol(?:ume)?\.?)\s*\d+\b.*$",
+    re.I,
+)
+_MIN_SERIES_SUBTITLE = re.compile(
+    # Colon form: "Title: The Foo Trilogy…" (Audible-style)
+    r"\s*:\s*the\s+.+?\s+(?:trilogy|series|saga|cycle|chronicles)\b.*$"
+    # Dash form: only short series tails (e.g. "Some Book - The Foo Trilogy")
+    r"|"
+    r"\s+[-–—]\s*the\s+(?:\w+\s+){0,4}(?:trilogy|series|saga|cycle|chronicles)\b.*$"
+    # Space form: "Title The Foo Bar Trilogy…" without colon/dash before series
+    # (keeps "Author - Title" when dash form must not swallow the book title)
+    r"|"
+    r"\s+the\s+(?:\w+\s+){0,5}(?:trilogy|series|saga|cycle|chronicles)\b.*$",
+    re.I,
+)
+_MIN_SERIES_COMMA = re.compile(
+    r"\s*,\s*the\s+.+?\s+(?:trilogy|series|saga|cycle|chronicles)\b.*$",
+    re.I,
+)
+
+
+def looks_like_marketing_subtitle(subtitle: str) -> bool:
+    """True for trilogy/series/Book N/unabridged-style subtitle noise."""
+    s = (subtitle or "").strip()
+    if not s:
+        return False
+    if _MIN_ABRIDGEMENT.search(s):
+        return True
+    if re.search(r"\b(?:trilogy|series|saga|cycle|chronicles)\b", s, re.I):
+        return True
+    if re.search(r"\b(?:book|bk\.?|vol(?:ume)?\.?)\s*\d+\b", s, re.I):
+        return True
+    return False
+
+
+def minimalist_title(s: str, author: str | None = None) -> str:
+    """Strip series / Book N / (Unabridged) marketing suffixes from a title.
+
+    When *author* is provided, a leading ``Author - `` prefix is removed first so
+    author dashes cannot bait series-subtitle stripping into deleting the real title.
+
+    Example::
+
+        The Dark Days Club: The Lady Helen Trilogy, Book 1 (Unabridged)
+        → The Dark Days Club
+
+        Alison Goodman - The Dark Days Club The Lady Helen Trilogy, Book 1 (Unabridged)
+        → The Dark Days Club   (with author=Alison Goodman)
+    """
+    if not s:
+        return s
+    original = s.strip()
+    out = strip_leading_author_dash(original, author) if author else original
+    # Order: abridgement markers can trail Book N; strip Book/series after.
+    prev = None
+    while prev != out:
+        prev = out
+        out = _MIN_ABRIDGEMENT.sub("", out).strip()
+        out = _MIN_BOOK_VOL.sub("", out).strip()
+        out = _MIN_SERIES_SUBTITLE.sub("", out).strip()
+        out = _MIN_SERIES_COMMA.sub("", out).strip()
+        out = out.rstrip(" ,;:.-–—").strip()
+    out = clean_string(out)
+    out = out.strip(" -_,.")
+    # Never return author-only after stripping marketing junk.
+    if is_author_only_name(out, author):
+        return original
+    return out or original
 
 
 def clean_name_abbreviations(s: str, mode: Literal["periods", "periods_spaces", "strip"] = "periods") -> str:
