@@ -59,6 +59,8 @@ Log file is always `{converted}/auto-m4b.log` (no separate env var).
 
 Author hints never climb above `CLI_CONVERTED_FOLDER` (or archive/inbox): if the book dir is a **direct child** of converted (`converted/Author/*.m4b` with no nested book folder), the folder name is treated as the author and the title comes from id3 / filename — not from the converted root’s basename.
 
+Rename stems: strip series/`NN - ` prefixes as usual, but if the original source or current `.m4b` stem already ended with `(YYYY)`, keep that year on the filename (years are optional, but never drop one that was already there).
+
 ## Source reconstruction
 
 Order of preference:

@@ -2,25 +2,53 @@
 
 from __future__ import annotations
 
+import re
+
 from rapidfuzz import fuzz
 
 from src.lib.cleaners import is_author_only_name
 from src.lib.fs_utils import safe_filename
+
+_YEAR_SUFFIX = re.compile(r"\s*\((\d{4})\)\s*$")
 
 
 def _usable_rename_stem(s: str, author: str = "") -> bool:
     return bool(s) and not is_author_only_name(s, author)
 
 
+def year_suffix_from_stem(stem: str) -> str:
+    """Return `` (YYYY)`` if *stem* ends with a paren year, else ``""``."""
+    m = _YEAR_SUFFIX.search(stem or "")
+    return f" ({m.group(1)})" if m else ""
+
+
+def preserve_original_year_in_stem(stem: str, *originals: str) -> str:
+    """Keep ``(YYYY)`` on the rename stem when an original filename already had it.
+
+    Years are not required on filenames, but if the source/current stem carried
+    one, do not drop it when the stem is rebuilt from a yearless title.
+    """
+    s = (stem or "").strip()
+    if not s or _YEAR_SUFFIX.search(s):
+        return s
+    for orig in originals:
+        suffix = year_suffix_from_stem(orig or "")
+        if suffix:
+            return f"{s}{suffix}"
+    return s
+
+
 def _stem_matches_book_title(stem: str, title: str, author: str = "") -> bool:
     """True when *stem* already names the book (title or Author - Title).
 
     Treats ``: `` and `` - `` as the same separator so ``The Searcher - A Novel``
-    matches title ``The Searcher: A Novel``.
+    matches title ``The Searcher: A Novel``. Trailing ``(YYYY)`` on the stem is
+    ignored for the comparison so a yearful filename still matches a yearless title.
     """
     from src.lib.ol_lookup import _subtitle_sep_normalized
 
-    s_norm = _subtitle_sep_normalized(stem)
+    s_bare = _YEAR_SUFFIX.sub("", stem or "").strip()
+    s_norm = _subtitle_sep_normalized(s_bare)
     if not s_norm:
         return False
     candidates: list[str] = []
