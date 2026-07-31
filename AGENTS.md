@@ -45,9 +45,13 @@ poetry run python -c "import sys; print(sys.executable)"
 | Path                  | Purpose                                                            |
 | --------------------- | ------------------------------------------------------------------ |
 | `src/`                | Application code (`src/lib/`, `src/auto_m4b.py`)                   |
-| `src/fix_metadata.py`| Standalone CLI to retag/rename converted books (no re-encode)      |
+| `src/lib/metadata/`   | Shared metadata planner (fix CLI + convert): plan, priors, OL attach, stems, apply |
+| `src/fix_metadata.py`| CLI UX/apply wrapper around `src.lib.metadata` (no re-encode)      |
 | `docs/fix-metadata.md` | Operator/agent reference for that CLI                            |
+| `docs/metadata-conflicts.md` | Convert vs shared planner divergence log (manual review)     |
 | `src/tests/`          | Pytest suite                                                       |
+| `src/tests/test_metadata_plan.py` | Domain tests for shared planner                          |
+| `src/tests/test_metadata_divergence.py` | Contract locks + conflict inventory anchors           |
 | `src/tests/helpers/`  | Fixtures, mocks (`pytest_dumps.py`, `pytest_fixtures.py`)          |
 | `src/tests/tmp/`      | Ephemeral test dirs (inbox, converted, etc.) — created by fixtures |
 | `src/tests/fixtures/` | Static test audio/fixture files                                    |

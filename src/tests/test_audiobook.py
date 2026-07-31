@@ -45,7 +45,8 @@ class test_safe_filename_in_audiobook_paths:
     def test_build_file_has_no_colon(self, book_with_colon_title: Audiobook):
         name = book_with_colon_title.build_file.name
         assert ":" not in name
-        assert name == "Into the Fire - A LitRPG Fantasy Cooking Adventure (Morcster Chef, Book 2).m4b"
+        # Always-minimalist convert strips ", Book 2)" marketing from title stems.
+        assert name == "Into the Fire - A LitRPG Fantasy Cooking Adventure.m4b"
 
     def test_converted_file_stem_has_no_colon(self, book_with_colon_title: Audiobook):
         # converted_file._build_filename() uses self.basename (the inbox folder
@@ -57,7 +58,7 @@ class test_safe_filename_in_audiobook_paths:
     def test_final_desc_file_has_no_colon(self, book_with_colon_title: Audiobook):
         name = book_with_colon_title.final_desc_file.name
         assert ":" not in name
-        assert name.startswith("Into the Fire - A LitRPG Fantasy Cooking Adventure (Morcster Chef, Book 2) [")
+        assert name.startswith("Into the Fire - A LitRPG Fantasy Cooking Adventure [")
 
     def test_converted_file_preserves_dr_prefix(self, house_on_the_cliff__flat_mp3: Audiobook, tmp_path):
         """Path.with_suffix must not truncate 'Dr. Laszlo…' to 'Dr.m4b'."""

@@ -36,6 +36,12 @@ from src.lib.cleaners import (
         ),
         # Short dash series tails still strip.
         ("Some Book - The Foo Trilogy", None, "Some Book"),
+        # Parenthetical "(Series, Book N)" must not leave a dangling open paren.
+        (
+            "Into the Fire: A LitRPG Fantasy Cooking Adventure (Morcster Chef, Book 2)",
+            None,
+            "Into the Fire: A LitRPG Fantasy Cooking Adventure",
+        ),
     ],
 )
 def test_minimalist_title(raw: str, author: str | None, expected: str):

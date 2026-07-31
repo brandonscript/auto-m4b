@@ -2,7 +2,11 @@
 
 Standalone CLI for correcting ID3 tags, `.m4b` filenames, and companion quality `.txt` files **after** conversion. It does not re-encode audio.
 
-Primary module: [`src/fix_metadata.py`](../src/fix_metadata.py).
+- CLI / UX: [`src/fix_metadata.py`](../src/fix_metadata.py)
+- Shared planner (also used by convert): [`src/lib/metadata/`](../src/lib/metadata/)
+- Convert ↔ shared divergences (manual review): [`metadata-conflicts.md`](metadata-conflicts.md)
+
+Convert always runs **minimalist** title cleanup. The CLI still honors `--minimalist` / `--no-minimalist` / `CLI_MINIMALIST`.
 
 ## When to use it
 
@@ -52,6 +56,8 @@ Log file is always `{converted}/auto-m4b.log` (no separate env var).
 
 - No audio in a dir, but nested book dirs → **auto-recursive** (author / converted root).
 - Audio here **and** child book dirs → process this dir only; warn unless `-r` / `--recursive`.
+
+Author hints never climb above `CLI_CONVERTED_FOLDER` (or archive/inbox): if the book dir is a **direct child** of converted (`converted/Author/*.m4b` with no nested book folder), the folder name is treated as the author and the title comes from id3 / filename — not from the converted root’s basename.
 
 ## Source reconstruction
 
