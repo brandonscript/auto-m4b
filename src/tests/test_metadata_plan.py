@@ -19,11 +19,13 @@ from src.lib.metadata import (
     map_source_dir,
     parent_author_hint,
     plan_fix,
+    preserve_original_year_in_stem,
     resolve_minimalist,
     resolve_source_dir,
     source_common_filename,
     source_common_title,
     source_files_display,
+    year_suffix_from_stem,
     _apply_date_consensus,
     _apply_ol_fields_to_desired,
     _attach_open_library,
@@ -80,6 +82,32 @@ def test_stem_matches_book_title_author_prefixed():
 
 def test_stem_matches_book_title_rejects_glued_source():
     assert _stem_matches_book_title("TheSearcherANovel_ep7", "The Searcher: A Novel") is False
+
+
+def test_year_suffix_from_stem_trailing_paren_year():
+    assert year_suffix_from_stem("02 - Tiny Little Thing (2015)") == " (2015)"
+
+
+def test_preserve_original_year_in_stem_from_numbered_source():
+    assert (
+        preserve_original_year_in_stem("Tiny Little Thing", "02 - Tiny Little Thing (2015)")
+        == "Tiny Little Thing (2015)"
+    )
+
+
+def test_preserve_original_year_in_stem_already_yearful_unchanged():
+    assert (
+        preserve_original_year_in_stem("Tiny Little Thing (2015)", "other")
+        == "Tiny Little Thing (2015)"
+    )
+
+
+def test_preserve_original_year_in_stem_no_year_unchanged():
+    assert preserve_original_year_in_stem("Tiny Little Thing", "no year") == "Tiny Little Thing"
+
+
+def test_stem_matches_book_title_ignores_trailing_year():
+    assert _stem_matches_book_title("Tiny Little Thing (2015)", "Tiny Little Thing") is True
 
 
 def test_cli_root_identity_not_folder_name(tmp_path: Path):
@@ -732,6 +760,42 @@ def test_plan_fix_keeps_searcher_dash_stem_not_glued_archive(
     assert plan is not None
     assert plan.rename_m4b_to is None
     assert plan.desired_stem == "The Searcher - A Novel"
+
+
+def test_plan_fix_preserves_year_from_archive_filename_stem(tmp_path: Path, monkeypatch):
+    """Yearless m4b + yearful archive stem → desired_stem keeps (YYYY) under minimalist."""
+    converted = tmp_path / "converted"
+    archive = tmp_path / "archive"
+    folder = "Tiny Little Thing"
+    book = converted / "Author, Test" / folder
+    arch = archive / "Author, Test" / folder
+    _touch(book / "Tiny Little Thing.m4b", size=50)
+    _touch(arch / "02 - Tiny Little Thing (2015).mp3", size=80)
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        return TagSnapshot(
+            title="Tiny Little Thing",
+            artist="Test Author",
+            albumartist="Test Author",
+            path=path,
+        )
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    cli = CliPaths(converted=converted.resolve(), archive=archive.resolve(), inbox=tmp_path / "inbox")
+    plan = plan_fix(
+        book,
+        cli=cli,
+        scope_root=converted / "Author, Test",
+        require_source=True,
+        lookup_ol=False,
+        minimalist=True,
+    )
+    assert plan is not None
+    assert plan.desired_title == "Tiny Little Thing"
+    assert plan.desired_stem.endswith("(2015)")
+    assert plan.desired_stem == "Tiny Little Thing (2015)"
+    if plan.rename_m4b_to is not None:
+        assert "(2015)" in plan.rename_m4b_to.name
 
 
 def test_source_common_title_strips_parts(tmp_path: Path, monkeypatch):

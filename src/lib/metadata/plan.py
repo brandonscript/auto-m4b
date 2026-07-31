@@ -22,7 +22,11 @@ from src.lib.metadata.sources import (
     source_common_title,
     source_files_display,
 )
-from src.lib.metadata.stem import _stem_matches_book_title, _usable_rename_stem
+from src.lib.metadata.stem import (
+    _stem_matches_book_title,
+    _usable_rename_stem,
+    preserve_original_year_in_stem,
+)
 from src.lib.metadata.apply import _desc_needs_rewrite
 
 
@@ -185,6 +189,12 @@ def plan_fix(
         if stem != m4b.stem:
             reasons.append(f"keep current filename {m4b.stem!r} (matches title)")
         stem = m4b.stem
+
+    # Keep (YYYY) on the filename when the original stem already had it.
+    yearful = preserve_original_year_in_stem(stem, filename_stem, m4b.stem, original_stem)
+    if yearful != stem:
+        reasons.append(f"keep year in filename {stem!r} → {yearful!r}")
+        stem = yearful
 
     rename_to = m4b.with_name(ensure_audio_ext(stem, ".m4b")) if stem and m4b.stem != stem else None
     if rename_to == m4b:

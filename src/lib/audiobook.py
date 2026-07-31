@@ -25,7 +25,11 @@ from src.lib.fs_utils import (
     last_updated_at,
     safe_filename,
 )
-from src.lib.metadata.stem import _stem_matches_book_title, _usable_rename_stem
+from src.lib.metadata.stem import (
+    _stem_matches_book_title,
+    _usable_rename_stem,
+    preserve_original_year_in_stem,
+)
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info, get_year_from_date
 from src.lib.typing import AudiobookFmt, DirName, Id3TagDictWithDnumTnum, SizeFmt
@@ -284,7 +288,7 @@ class Audiobook(BaseModel):
             ):
                 return base_stem
             if _usable_rename_stem(title_stem, author):
-                return title_stem
+                return preserve_original_year_in_stem(title_stem, base_stem, self.basename)
         return safe_filename(self.basename)
 
     @staticmethod

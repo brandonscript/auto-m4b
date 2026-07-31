@@ -27,6 +27,8 @@ from src.lib.metadata.stem import (
     _looks_like_title,
     _stem_matches_book_title,
     _usable_rename_stem,
+    preserve_original_year_in_stem,
+    year_suffix_from_stem,
 )
 
 __all__ = [
@@ -53,4 +55,6 @@ __all__ = [
     "_stem_matches_book_title",
     "_usable_rename_stem",
     "_year_consensus",
+    "preserve_original_year_in_stem",
+    "year_suffix_from_stem",
 ]
