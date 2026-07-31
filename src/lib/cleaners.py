@@ -258,6 +258,11 @@ def minimalist_title(s: str, author: str | None = None) -> str:
         out = out.rstrip(" ,;:.-–—").strip()
     out = clean_string(out)
     out = out.strip(" -_,.")
+    # Book/series strip inside "(Series Name, Book N)" can leave an unbalanced
+    # open paren — drop the orphaned tail so we don't emit "(Morcster Chef".
+    if out.count("(") > out.count(")"):
+        out = out.rsplit("(", 1)[0].rstrip(" ,;:.-–—").strip()
+        out = clean_string(out).strip(" -_,.")
     # Never return author-only after stripping marketing junk.
     if is_author_only_name(out, author):
         return original

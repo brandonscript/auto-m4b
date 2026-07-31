@@ -83,6 +83,9 @@ testpaths = ["src/tests"]
 python_files = ["*_test.py", "test_*.py"]
 python_classes = ["test_", "_test", "Test*"]
 python_functions = ["test_", "_test"]
+markers = [
+    "non_minimalist: asserts non-minimalist (unstripped marketing/trilogy) title or stem behavior",
+]
 
 # ─── Native converter coverage gate ──────────────────────────────────────────
 # Unit tests (fast, no audio) cover the pure-logic modules (chapters, encoder,

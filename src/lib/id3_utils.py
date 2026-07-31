@@ -13,11 +13,20 @@ from tinta import Tinta
 
 from src.lib.ffprobe_utils import ffprobe_file
 from src.lib.formatters import strip_leading_the
-from src.lib.ol_lookup import open_library_lookup_author, open_library_lookup_title
 from src.lib.books_tree import BooksTree
-from src.lib.cleaners import strip_leading_articles, strip_leading_author_dash, title_case_ol_title
+from src.lib.cleaners import (
+    minimalist_title,
+    strip_leading_articles,
+    strip_leading_author_dash,
+    title_case_ol_title,
+)
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim
+from src.lib.ol_lookup import (
+    id3_prefer_colon_separator,
+    open_library_lookup_author,
+    open_library_lookup_title,
+)
 from src.lib.parsers import (
     get_year_from_date,
     parse_narrator,
@@ -336,9 +345,14 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     def _check_title(orop: str, id3_tag: TagSource):
         nonlocal title_needs_updating, new_tags
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
+        author_for_title = book.artist or book.author or ""
         if bool(ol_title):
             if ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
                 new_title = _normalize_ol_title(NotNone(ol_title).title)
+                # Shared Phase-3 transforms (colon subtitle + always-minimalist).
+                # Date consensus (_apply_date_consensus) is intentionally not
+                # wired here yet — see docs/metadata-conflicts.md.
+                new_title = _finalize_convert_title(new_title, author=author_for_title)
                 # If book.title already matches the words, prefer it only when it
                 # is at least as "Title-Cased" as the normalized OL title (more/equal
                 # capitals). That keeps intentional casing like brand names while
@@ -369,7 +383,9 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
             # source tags sometimes embed LibriVox/archive.org edition info
             # (e.g. ", Version 3", ", Brown Cloth") that shouldn't appear in
             # the final audiobook title tag.
-            cleaned_title = _strip_ol_edition_suffix(book.title)
+            cleaned_title = _finalize_convert_title(
+                _strip_ol_edition_suffix(book.title), author=author_for_title
+            )
             if tag_value != cleaned_title:
                 title_needs_updating = True
                 updates.append(lambda: _print_needs_updating(orop, tag_value, cleaned_title))
@@ -819,6 +835,20 @@ def _normalize_ol_title(title: str) -> str:
     an OL title is assigned to ``book.title`` or written into ID3 tags.
     """
     return title_case_ol_title(_strip_ol_edition_suffix(title))
+
+
+def _finalize_convert_title(title: str, author: str | None = None) -> str:
+    """Shared colon + always-minimalist transforms for convert titles.
+
+    Phase 3 wires convert outputs through ``id3_prefer_colon_separator`` and
+    ``minimalist_title`` without replacing OCR / MetadataScore / OL-early
+    selection. Phase 4 may replace that selection path with ``plan_fix``.
+    """
+    if not (title or "").strip():
+        return title or ""
+    out = id3_prefer_colon_separator(title)
+    out = minimalist_title(out, author=author)
+    return out
 
 
 # Early-extraction acceptance floors (title similarity is 0..1).
@@ -1338,6 +1368,23 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # Never leave Title/Album blank — Plex shows "[Unknown Album]" otherwise.
     # Falls back through ID3 → fs_title → folder/file basename.
     ensure_title_and_album(book)
+
+    # Phase 3: shared colon + always-minimalist transforms on the resolved
+    # title/album. Selection stays OCR / MetadataScore / OL-early for now;
+    # Phase 4 may replace that path with plan_fix.
+    _author_for_title = book.artist or book.author or ""
+    _pre_title = (book.title or "").strip()
+    if book.title:
+        book.title = _finalize_convert_title(book.title, author=_author_for_title)
+    # Convert normally keeps album == title; sync when album matched pre-finalize
+    # title (or is empty), otherwise finalize album independently.
+    _pre_album = (book.album or "").strip()
+    if not _pre_album or _pre_album == _pre_title:
+        book.album = book.title
+    else:
+        book.album = _finalize_convert_title(book.album, author=_author_for_title)
+    if book.title:
+        book.sortalbum = strip_leading_articles(book.title)
 
     t4 = time.time()
 

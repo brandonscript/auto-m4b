@@ -5,7 +5,7 @@ from typing import Literal, overload
 from pydantic import BaseModel, ConfigDict
 
 from src.lib.books_tree import BooksTree
-from src.lib.cleaners import is_author_only_name
+from src.lib.cleaners import minimalist_title
 from src.lib.config import cfg
 from src.lib.ffmpeg_utils import (
     DurationFmt,
@@ -25,6 +25,7 @@ from src.lib.fs_utils import (
     last_updated_at,
     safe_filename,
 )
+from src.lib.metadata.stem import _stem_matches_book_title, _usable_rename_stem
 from src.lib.misc import get_dir_name_from_path
 from src.lib.parsers import count_distinct_romans, extract_path_info, get_year_from_date
 from src.lib.typing import AudiobookFmt, DirName, Id3TagDictWithDnumTnum, SizeFmt
@@ -250,10 +251,16 @@ class Audiobook(BaseModel):
 
         - Single-file m4b/m4a/aac passthrough: keep the original source filename
           so we don't silently rename e.g. "Witching for Hope Premonition Pointe,
-          Book 2.m4b" → "Witching for Hope.m4b".
-        - Otherwise prefer a usable book title; reject garbage like "3" (from
-          mis-parsed "Books1-3") and fall back to the inbox folder basename.
+          Book 2.m4b" → "Witching for Hope.m4b" (do not minimalist-strip
+          passthrough stems — Book N / series tokens are intentional there).
+        - Otherwise prefer a usable book title (always-minimalist convert),
+          refuse author-only via shared ``_usable_rename_stem``, and fall back
+          to the inbox folder basename. Prefer basename when it already matches
+          the title (shared ``_stem_matches_book_title`` colon/dash normalize).
         """
+        author = self.artist or ""
+        title = (self.title or "").strip()
+
         if self.orig_file_type in ("m4a", "m4b", "aac"):
             src_dir = self.merge_dir if self.merge_dir.exists() else self.inbox_dir
             if src_dir.exists() and src_dir.is_dir():
@@ -261,13 +268,23 @@ class Audiobook(BaseModel):
                 if len(audio) == 1:
                     # Keep original stem unless it collapsed to author-only.
                     stem = safe_filename(audio[0].stem)
-                    if not is_author_only_name(stem, self.artist):
+                    if _usable_rename_stem(stem, author):
                         return stem
 
-        title = (self.title or "").strip()
         if title and not self._is_garbage_output_title(title):
-            if not is_author_only_name(title, self.artist):
-                return safe_filename(title)
+            # Convert is always-minimalist for title-derived stems.
+            cleaned = minimalist_title(title, author=author)
+            title_stem = safe_filename(cleaned) if cleaned else ""
+            base_stem = safe_filename(self.basename)
+            # Prefer inbox basename when it already names the book (shared
+            # colon/dash-normalized match) — avoids rewriting a good dash stem
+            # just because id3 title uses a colon.
+            if _stem_matches_book_title(base_stem, cleaned or title, author) and _usable_rename_stem(
+                base_stem, author
+            ):
+                return base_stem
+            if _usable_rename_stem(title_stem, author):
+                return title_stem
         return safe_filename(self.basename)
 
     @staticmethod
