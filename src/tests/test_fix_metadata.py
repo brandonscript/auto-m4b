@@ -32,10 +32,10 @@ from src.fix_metadata import (
     _attach_open_library,
     _banner_fixing_clause,
     _id3_already_correct_style,
-    _last_first_to_first_last,
     _stem_matches_book_title,
     _truth_props,
 )
+from src.lib.parsers import swap_firstname_lastname
 from src.lib.ol_lookup import (
     OL_LOW_CONFIDENCE_MIN,
     OL_MATCH_MIN,
@@ -221,9 +221,9 @@ def test_cli_error_is_readable(capfd):
 
 
 def test_last_first_conversion():
-    assert _last_first_to_first_last("Le Guin, Ursula K.") == "Ursula K. Le Guin"
-    assert _last_first_to_first_last("French, Tana") == "Tana French"
-    assert _last_first_to_first_last("Ursula K. Le Guin") == "Ursula K. Le Guin"
+    assert swap_firstname_lastname("Le Guin, Ursula K.") == "Ursula K. Le Guin"
+    assert swap_firstname_lastname("French, Tana") == "Tana French"
+    assert swap_firstname_lastname("Ursula K. Le Guin") == "Ursula K. Le Guin"
 
 
 def test_parse_apply_prompt():
@@ -812,12 +812,49 @@ def test_source_files_display_strips_parts(tmp_path: Path):
 
 
 def test_plan_fix_rename_stem_from_filename_gcs(tmp_path: Path, monkeypatch):
-    """desired_stem / rename uses author-prefixed filename GCS, not bare ID3 title."""
+    """Keep title-matching m4b stem; do not rename to author-prefixed filename GCS."""
     converted = tmp_path / "converted"
     archive = tmp_path / "archive"
     book = converted / "Goodman, Alison" / "Dragoneye Reborn (2008)"
     arch = archive / "Goodman, Alison" / "Dragoneye Reborn (2008)"
     _touch(book / "Dragoneye Reborn.m4b", size=50)
+    part_files = {
+        "Alison Goodman - Dragoneye Reborn, Part 1.mp3": "Dragoneye Reborn",
+        "Alison Goodman - Dragoneye Reborn, Part 2.mp3": "Dragoneye Reborn",
+        "Alison Goodman - Dragoneye Reborn, Part 3.mp3": "Dragoneye Reborn",
+    }
+    for name in part_files:
+        _touch(arch / name, size=80)
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        if path.name in part_files:
+            return TagSnapshot(title=part_files[path.name], artist="Alison Goodman", path=path)
+        if path.suffix == ".m4b":
+            return TagSnapshot(title="Dragoneye Reborn", artist="", path=path)
+        return TagSnapshot(path=path)
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    cli = CliPaths(converted=converted.resolve(), archive=archive.resolve(), inbox=tmp_path / "inbox")
+    plan = plan_fix(
+        book,
+        cli=cli,
+        scope_root=converted / "Goodman, Alison",
+        require_source=True,
+        lookup_ol=False,
+    )
+    assert plan is not None
+    assert plan.desired_title == "Dragoneye Reborn"
+    assert plan.desired_stem == "Dragoneye Reborn"
+    assert plan.rename_m4b_to is None
+
+
+def test_plan_fix_rename_stem_from_filename_gcs_when_junk(tmp_path: Path, monkeypatch):
+    """Junk m4b stem still renames to author-prefixed filename GCS."""
+    converted = tmp_path / "converted"
+    archive = tmp_path / "archive"
+    book = converted / "Goodman, Alison" / "Dragoneye Reborn (2008)"
+    arch = archive / "Goodman, Alison" / "Dragoneye Reborn (2008)"
+    _touch(book / "Book.m4b", size=50)
     part_files = {
         "Alison Goodman - Dragoneye Reborn, Part 1.mp3": "Dragoneye Reborn",
         "Alison Goodman - Dragoneye Reborn, Part 2.mp3": "Dragoneye Reborn",

@@ -51,8 +51,10 @@ from src.lib.cleaners import (
     title_case_ol_title,
 )
 from src.lib.compare import find_greatest_common_string
-from src.lib.fs_utils import safe_filename
+from src.lib.fs_utils import ensure_audio_ext, safe_filename, try_relative_to
 from src.lib.id3_utils import write_id3_tags_mutagen
+from src.lib.misc import parse_bool
+from src.lib.parsers import get_year_from_date, swap_firstname_lastname
 from src.lib.term import (
     LIGHT_GREY_COLOR,
     border,
@@ -175,7 +177,7 @@ class FixPlan:
     @property
     def needs_tag_write(self) -> bool:
         cur = self.current
-        date_changed = bool(self.desired_date) and _year(cur.date) != _year(self.desired_date)
+        date_changed = bool(self.desired_date) and get_year_from_date(cur.date) != get_year_from_date(self.desired_date)
         narrator_changed = False
         if self.desired_narrator:
             narrator_changed = (cur.composer or "") != self.desired_narrator
@@ -199,19 +201,6 @@ class FixPlan:
     @property
     def needs_work(self) -> bool:
         return self.needs_tag_write or self.needs_rename or bool(self.desc_txt)
-
-
-def _year(date: str) -> str:
-    m = re.search(r"(\d{4})", date or "")
-    return m.group(1) if m else ""
-
-
-def _last_first_to_first_last(name: str) -> str:
-    name = (name or "").strip()
-    if "," not in name:
-        return name
-    last, first = name.split(",", 1)
-    return f"{first.strip()} {last.strip()}".strip()
 
 
 def folder_title_hint(folder_name: str) -> str:
@@ -256,7 +245,7 @@ def parent_author_hint(book_dir: Path) -> str:
     parent = book_dir.parent.name.strip()
     if not parent or parent.startswith("#"):
         return ""
-    return _last_first_to_first_last(parent)
+    return swap_firstname_lastname(parent)
 
 
 def filesystem_extracted(book_dir: Path) -> tuple[str, str, str, str]:
@@ -279,7 +268,10 @@ def _title_usable(title: str) -> bool:
 
 
 def _env_truthy(name: str) -> bool:
-    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+    v = (os.environ.get(name) or "").strip().lower()
+    if v == "on":
+        return True
+    return parse_bool(v) if v else False
 
 
 def resolve_minimalist(*, flag_on: bool = False, flag_off: bool = False) -> bool:
@@ -423,8 +415,8 @@ def _pick_desired(
 
     date = ""
     if folder_year:
-        cur_y = _year(current.date)
-        src_y = _year(source.date) if source and source.date else ""
+        cur_y = get_year_from_date(current.date)
+        src_y = get_year_from_date(source.date) if source and source.date else ""
         # ±1 year near-tie (publication vs audiobook/edition): leave id3 alone.
         if cur_y and abs(int(cur_y) - int(folder_year)) == 1:
             date = cur_y
@@ -436,8 +428,8 @@ def _pick_desired(
                 reasons.append(f"date from folder ({folder_year}) over source {src_y}")
     elif source and source.date:
         date = source.date
-        if _year(current.date) and _year(current.date) != _year(date):
-            reasons.append(f"date {_year(current.date)} → {_year(date)}")
+        if get_year_from_date(current.date) and get_year_from_date(current.date) != get_year_from_date(date):
+            reasons.append(f"date {get_year_from_date(current.date)} → {get_year_from_date(date)}")
     elif current.date:
         date = current.date
 
@@ -614,11 +606,7 @@ def resolve_target_paths(raw_paths: list[Path], cli: CliPaths) -> list[Path]:
 def _is_under(child: Path, parent: Path | None) -> bool:
     if parent is None:
         return False
-    try:
-        child.resolve().relative_to(parent.resolve())
-        return True
-    except ValueError:
-        return False
+    return try_relative_to(child.resolve(), parent.resolve()) is not None
 
 
 def map_source_dir(
@@ -989,7 +977,7 @@ def _apply_ol_fields_to_desired(plan: FixPlan) -> None:
         plan.desired_author = plan.ol_author
         plan.reasons.append(f"author from Open Library ({plan.ol_author!r})")
     if plan.ol_year:
-        if _year(plan.desired_date) != _year(str(plan.ol_year)):
+        if get_year_from_date(plan.desired_date) != get_year_from_date(str(plan.ol_year)):
             plan.reasons.append(f"date from Open Library ({plan.ol_year})")
         plan.desired_date = str(plan.ol_year)
 
@@ -1154,7 +1142,7 @@ def plan_fix(
             reasons.append(f"keep current filename {m4b.stem!r} (matches title)")
         stem = m4b.stem
 
-    rename_to = m4b.with_name(f"{stem}.m4b") if stem and m4b.stem != stem else None
+    rename_to = m4b.with_name(ensure_audio_ext(stem, ".m4b")) if stem and m4b.stem != stem else None
     if rename_to == m4b:
         rename_to = None
 
@@ -1284,7 +1272,7 @@ def _short_path(path: Path | str, cli: CliPaths | None = None) -> str:
 
 def _prop_equal(a: str | None, b: str | None, *, is_date: bool = False) -> bool:
     if is_date:
-        ya, yb = _year(a or ""), _year(b or "")
+        ya, yb = get_year_from_date(a or ""), get_year_from_date(b or "")
         if ya or yb:
             return ya == yb and bool(ya)
     return (a or "").strip().casefold() == (b or "").strip().casefold()
@@ -1295,7 +1283,7 @@ def _prop_display(value: str | None, *, empty_label: str = "(missing)", is_date:
     if not raw:
         return empty_label
     if is_date:
-        return _year(raw) or raw
+        return get_year_from_date(raw) or raw
     return raw
 
 
@@ -1308,7 +1296,7 @@ def _truth_props(plan: FixPlan) -> dict[str, str]:
     return {
         "title": plan.desired_title or "",
         "author": plan.desired_author or "",
-        "date": _year(plan.desired_date) or plan.desired_date or "",
+        "date": get_year_from_date(plan.desired_date) or plan.desired_date or "",
         "narrator": plan.desired_narrator or "",
     }
 
@@ -1518,7 +1506,7 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
     )
     _print_framed_prop(
         "Date",
-        _year(cur.date) or cur.date,
+        get_year_from_date(cur.date) or cur.date,
         truth["date"],
         is_date=True,
         already_correct_style=_id3_already_correct_style(
@@ -1580,7 +1568,7 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
 
             _ol_row("Title", plan.ol_title)
             _ol_row("Author", plan.ol_author)
-            _ol_row("Date", _year(plan.ol_year) or plan.ol_year)
+            _ol_row("Date", get_year_from_date(plan.ol_year) or plan.ol_year)
             _ol_row("Narrator", "", primary=False)
             if plan.ol_key:
                 work_id = plan.ol_key.rsplit("/", 1)[-1]
@@ -1606,8 +1594,8 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
         ("Author", cur.albumartist or cur.artist, plan.desired_author, False),
         (
             "Date",
-            _year(cur.date) or cur.date,
-            _year(plan.desired_date) or plan.desired_date,
+            get_year_from_date(cur.date) or cur.date,
+            get_year_from_date(plan.desired_date) or plan.desired_date,
             True,
         ),
         ("Narrator", cur.composer, plan.desired_narrator, False),
