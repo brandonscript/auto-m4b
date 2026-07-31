@@ -5,6 +5,7 @@ from typing import Literal, overload
 from pydantic import BaseModel, ConfigDict
 
 from src.lib.books_tree import BooksTree
+from src.lib.cleaners import is_author_only_name
 from src.lib.config import cfg
 from src.lib.ffmpeg_utils import (
     DurationFmt,
@@ -258,12 +259,15 @@ class Audiobook(BaseModel):
             if src_dir.exists() and src_dir.is_dir():
                 audio = find_audio_files_in_dir(src_dir)
                 if len(audio) == 1:
-                    # Keep original stem; ensure_audio_ext only normalizes extension later
-                    return safe_filename(audio[0].stem)
+                    # Keep original stem unless it collapsed to author-only.
+                    stem = safe_filename(audio[0].stem)
+                    if not is_author_only_name(stem, self.artist):
+                        return stem
 
         title = (self.title or "").strip()
         if title and not self._is_garbage_output_title(title):
-            return safe_filename(title)
+            if not is_author_only_name(title, self.artist):
+                return safe_filename(title)
         return safe_filename(self.basename)
 
     @staticmethod

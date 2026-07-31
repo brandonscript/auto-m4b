@@ -214,6 +214,450 @@ def _title_sim(a: str, b: str) -> tuple[float, float]:
     return fuzz.ratio(left, right) / 100, fuzz.token_set_ratio(left, right) / 100
 
 
+# Align with id3_utils auto-apply floor (score >= 0.5).
+OL_MATCH_MIN = 0.5
+# Drop pure noise from free-text q= fallback; keep edition-subtitle hits (~0.2).
+OL_LOW_CONFIDENCE_MIN = 0.15
+
+
+def _edition_title_strings(edition: dict) -> list[str]:
+    """Work/edition title variants for similarity scoring."""
+    title = (edition.get("title") or "").strip()
+    subtitle = (edition.get("subtitle") or "").strip()
+    out: list[str] = []
+    if title:
+        out.append(title)
+    if title and subtitle:
+        out.append(f"{title}: {subtitle}")
+        out.append(f"{title} - {subtitle}")
+    if subtitle and subtitle not in out:
+        out.append(subtitle)
+    return out
+
+
+def _fetch_work_editions(work_key: str, *, agent: str) -> list[dict]:
+    """Return edition entry dicts for a work key (``/works/OL…W``)."""
+    if not work_key:
+        return []
+    key = work_key if work_key.startswith("/") else f"/works/{work_key}"
+    try:
+        url = f"https://openlibrary.org{key}/editions.json"
+        response = requests.get(url, headers={"User-Agent": agent}, timeout=30)
+        response.raise_for_status()
+        entries = response.json().get("entries") or []
+    except Exception as e:
+        print_debug(f"Error fetching editions for {key}: {e}")
+        return []
+    return [ed for ed in entries if isinstance(ed, dict)]
+
+
+def _edition_subtitle_candidates(edition: dict) -> list[str]:
+    """Subtitle strings from an edition (field or parsed from title)."""
+    title = (edition.get("title") or "").strip()
+    subtitle = (edition.get("subtitle") or "").strip()
+    out: list[str] = []
+    if subtitle:
+        out.append(subtitle)
+    # "Eona: the last Dragoneye" / "Eona - The Last Dragoneye" with no subtitle field
+    for sep in (": ", " - ", ":", " -"):
+        if sep in title:
+            left, right = title.split(sep, 1)
+            right = right.strip()
+            if left.strip() and right and right not in out:
+                out.append(right)
+            break
+    return out
+
+
+def _title_contains_subtitle(title: str, subtitle: str) -> bool:
+    """True if *subtitle* tokens are already present in *title*."""
+    t = (title or "").strip()
+    s = (subtitle or "").strip()
+    if not t or not s:
+        return False
+    if s.lower() in t.lower():
+        return True
+    return fuzz.token_set_ratio(t, s) / 100 >= 0.85 and len(s) <= len(t) + 5
+
+
+def ol_title_uses_dash_separator(ol_title: str, base: str, subtitle: str) -> bool:
+    """True when the OL title itself is ``base - subtitle`` (not colon).
+
+    Folder / filesystem dashes are ignored — only Open Library's form counts.
+    """
+    ol = (ol_title or "").strip().lower()
+    b = (base or "").strip().lower()
+    s = (subtitle or "").strip().lower()
+    if not ol or not b or not s:
+        return False
+    if f"{b}: {s}" in ol or f"{b}:{s}" in ol:
+        return False
+    if f"{b} - {s}" in ol or f"{b} -{s}" in ol:
+        return True
+    if re.search(re.escape(b) + r"\s+-\s+" + re.escape(s), ol):
+        return True
+    return False
+
+
+# Back-compat alias (tests / older call sites) — dash signal is OL-only now.
+def _local_prefers_dash_separator(corpus: str, base: str, subtitle: str) -> bool:
+    """Deprecated: use ``ol_title_uses_dash_separator``. Treats *corpus* as an OL title."""
+    return ol_title_uses_dash_separator(corpus, base, subtitle)
+
+
+def id3_prefer_colon_separator(title: str, *, ol_title_hint: str | None = None) -> str:
+    """Normalize ``Title - Subtitle`` → ``Title: Subtitle`` for id3 tags.
+
+    Keeps a dash only when *ol_title_hint* is already a dash-form title/subtitle.
+    """
+    t = (title or "").strip()
+    if not t or ": " in t:
+        return t
+    m = re.match(r"^(.+?)\s+-\s+(.+)$", t)
+    if not m:
+        return t
+    left, right = m.group(1).strip(), m.group(2).strip()
+    if not left or not right:
+        return t
+    if ol_title_hint and ol_title_uses_dash_separator(ol_title_hint, left, right):
+        return t
+    return f"{left}: {right}"
+
+
+def _subtitle_sep_normalized(title: str) -> str:
+    """Compare titles treating ``: `` and `` - `` as the same separator."""
+    t = (title or "").strip().casefold()
+    return re.sub(r"\s*:\s*", " - ", t)
+
+
+def join_title_subtitle(base: str, subtitle: str, *, prefer_dash: bool = False) -> str:
+    """Join base + subtitle for id3. Default separator is ``: ``; use `` - `` when preferred.
+
+    Does not add a separator if *base* already contains *subtitle*.
+    """
+    base = (base or "").strip()
+    subtitle = (subtitle or "").strip()
+    if not subtitle:
+        return base
+    if not base:
+        return subtitle
+    if _title_contains_subtitle(base, subtitle):
+        return base
+    # Strip a leading separator from subtitle if present
+    subtitle = re.sub(r"^[\s:\-]+", "", subtitle).strip()
+    if not subtitle or _title_contains_subtitle(base, subtitle):
+        return base
+    sep = " - " if prefer_dash else ": "
+    return f"{base}{sep}{subtitle}"
+
+
+_SUBTITLE_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+)
+
+
+def _subtitle_content_tokens(text: str) -> list[str]:
+    """Alphanumeric tokens length > 2, minus stopwords."""
+    return [
+        t
+        for t in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if len(t) > 2 and t not in _SUBTITLE_STOPWORDS
+    ]
+
+
+def _subtitle_attested_locally(subtitle: str, naming_corpus: str, *, min_fraction: float = 0.75) -> bool:
+    """True when ≥ *min_fraction* of subtitle content tokens appear in *naming_corpus*."""
+    tokens = _subtitle_content_tokens(subtitle)
+    if not tokens:
+        return False
+    corpus = (naming_corpus or "").lower()
+    if not corpus.strip():
+        return False
+    # Prefer whole-token hits so short fragments do not over-match.
+    corpus_tokens = set(re.findall(r"[a-z0-9]+", corpus))
+    hits = sum(1 for t in tokens if t in corpus_tokens)
+    return (hits / len(tokens)) >= min_fraction
+
+
+def _split_title_subtitle_parts(title: str) -> tuple[str, str] | None:
+    """Split ``Left: Right`` / ``Left - Right`` into base + subtitle, or None."""
+    t = (title or "").strip()
+    if not t:
+        return None
+    for sep in (": ", " - ", ":", " -"):
+        if sep in t:
+            left, right = t.split(sep, 1)
+            left, right = left.strip(), right.strip()
+            if left and right:
+                return left, right
+    return None
+
+
+def _edition_base_title_candidates(edition: dict) -> list[str]:
+    """Base (left) titles from an edition — never a standalone subtitle."""
+    title = (edition.get("title") or "").strip()
+    out: list[str] = []
+    if not title:
+        return out
+    parts = _split_title_subtitle_parts(title)
+    if parts:
+        out.append(parts[0])
+    else:
+        out.append(title)
+    return out
+
+
+def _desired_matches_edition_title(
+    work_key: str,
+    desired: str,
+    *,
+    agent: str,
+) -> bool:
+    """True when *desired* already matches a full edition title form for the work.
+
+    Full form means ``title: subtitle`` (or dash) when the edition has a subtitle;
+    bare ``title`` only when there is no subtitle field / embedded subtitle.
+    Never treats a bare subtitle (e.g. ``Dragoneye Reborn``) as a full match, so
+    incomplete locals still enrich.
+    """
+    d = (desired or "").strip()
+    if not work_key or not d:
+        return False
+    d_norm = _subtitle_sep_normalized(d)
+    for ed in _fetch_work_editions(work_key, agent=agent):
+        title = (ed.get("title") or "").strip()
+        subtitle = (ed.get("subtitle") or "").strip()
+        if not title:
+            continue
+        forms: list[str] = []
+        embedded = _split_title_subtitle_parts(title)
+        if subtitle:
+            # Edition has an explicit subtitle — only joined forms count as complete.
+            forms.append(f"{title}: {subtitle}")
+            forms.append(f"{title} - {subtitle}")
+        elif embedded:
+            # Title already carries base + subtitle (e.g. "Eon: Dragoneye Reborn").
+            forms.append(title)
+            forms.append(f"{embedded[0]}: {embedded[1]}")
+            forms.append(f"{embedded[0]} - {embedded[1]}")
+        else:
+            forms.append(title)
+        for t in forms:
+            if not t:
+                continue
+            if _subtitle_sep_normalized(t) == d_norm:
+                return True
+            # Fuzz only when desired covers nearly all content tokens of the full
+            # form — otherwise bare subtitles match via token_set_ratio == 100.
+            t_toks = set(_subtitle_content_tokens(t))
+            d_toks = set(_subtitle_content_tokens(d))
+            if t_toks and (len(t_toks & d_toks) / len(t_toks)) < 0.9:
+                continue
+            if fuzz.token_set_ratio(t, d) / 100 >= 0.95 and fuzz.ratio(t, d) / 100 >= 0.85:
+                return True
+    return False
+
+
+def _best_matching_edition_base_title(
+    work_key: str,
+    naming_corpus: str,
+    *,
+    work_title: str,
+    prefer_local: str | None,
+    agent: str,
+) -> str:
+    """Pick the edition/work base closest to local naming for subtitle joins.
+
+    Regional alternate work titles (e.g. ``The Two Pearls of Wisdom``) lose to
+    edition titles like ``Eon`` when the local corpus / desired title prefers them.
+    Never uses a marketing subtitle alone (e.g. ``Dragoneye Reborn``) as the join base.
+    """
+    work = (work_title or "").strip()
+    local = (prefer_local or "").strip()
+    corpus = (naming_corpus or "").strip()
+    candidates: list[str] = []
+    seen: set[str] = set()
+    edition_bases: set[str] = set()
+    edition_subs: set[str] = set()
+
+    def _add(s: str) -> None:
+        s = (s or "").strip()
+        if not s:
+            return
+        key = s.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(s)
+
+    _add(work)
+    if local:
+        parts = _split_title_subtitle_parts(local)
+        if parts:
+            _add(parts[0])
+        # Unsplit local is added only if it is an edition/work base (below), not a
+        # bare marketing subtitle used as the sole local title.
+    if work_key:
+        for ed in _fetch_work_editions(work_key, agent=agent):
+            for base in _edition_base_title_candidates(ed):
+                _add(base)
+                edition_bases.add(base.casefold())
+            for sub in _edition_subtitle_candidates(ed):
+                edition_subs.add(sub.casefold())
+
+    if local and not _split_title_subtitle_parts(local):
+        # Allow unsplit local only when it matches a known edition/work base.
+        if local.casefold() in edition_bases or local.casefold() == work.casefold():
+            _add(local)
+
+    # Drop candidates that are edition subtitles but not bases (e.g. Dragoneye Reborn).
+    if edition_subs:
+        candidates = [
+            c
+            for c in candidates
+            if c.casefold() not in edition_subs or c.casefold() in edition_bases
+        ]
+
+    if not candidates:
+        return work
+
+    def _score(base: str) -> tuple[float, float, float, int]:
+        # Prefer bases attested in local corpus / closer to prefer_local.
+        corpus_hit = 1.0 if corpus and _subtitle_attested_locally(base, corpus, min_fraction=1.0) else 0.0
+        # Short bases like "Eon" need token presence, not full subtitle attestation.
+        if corpus and not corpus_hit:
+            corpus_tokens = set(re.findall(r"[a-z0-9]+", corpus.lower()))
+            btoks = _subtitle_content_tokens(base) or [
+                t for t in re.findall(r"[a-z0-9]+", base.lower()) if t
+            ]
+            if btoks and all(t in corpus_tokens for t in btoks):
+                corpus_hit = 1.0
+        local_token = fuzz.token_set_ratio(base, local) / 100 if local else 0.0
+        local_ratio = fuzz.ratio(base, local) / 100 if local else 0.0
+        # Prefer shorter bases when scores tie (Eon over The Two Pearls of Wisdom).
+        return (corpus_hit, local_token, local_ratio, -len(base))
+
+    return max(candidates, key=_score)
+
+
+def _best_matching_edition_subtitle(
+    work_key: str,
+    naming_corpus: str,
+    *,
+    base_title: str,
+    agent: str,
+    prefer_local: str | None = None,
+) -> str | None:
+    """Best edition subtitle attested in *naming_corpus* that adds to *base_title*.
+
+    When several candidates pass attestation, prefer the one closest to *prefer_local*
+    (e.g. source/desired title ``Dragoneye Reborn`` over an unattested alternate).
+    """
+    if not work_key or not (naming_corpus or "").strip():
+        return None
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for ed in _fetch_work_editions(work_key, agent=agent):
+        for sub in _edition_subtitle_candidates(ed):
+            key = sub.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if _title_contains_subtitle(base_title, sub):
+                continue
+            if not _subtitle_attested_locally(sub, naming_corpus):
+                continue
+            candidates.append(sub)
+    if not candidates:
+        return None
+    if prefer_local and prefer_local.strip():
+        return max(
+            candidates,
+            key=lambda s: (
+                fuzz.token_set_ratio(s, prefer_local) / 100,
+                fuzz.ratio(s, prefer_local) / 100,
+                len(s),
+            ),
+        )
+    return max(candidates, key=lambda s: (len(s), s.lower()))
+
+
+def _best_edition_title_score(work_key: str, query: str, *, agent: str) -> float:
+    """Best fuzz.ratio of *query* vs work editions' titles/subtitles (0..1)."""
+    if not work_key or not (query or "").strip():
+        return 0.0
+    best = 0.0
+    for ed in _fetch_work_editions(work_key, agent=agent):
+        for t in _edition_title_strings(ed):
+            ratio, token = _title_sim(query, t)
+            best = max(best, ratio, token)
+    return best
+
+
+def _boost_title_score_via_editions(
+    title: str,
+    matches: list[OpenLibrarySearchResult],
+    title_res: OpenLibrarySearchResult | None,
+    title_score: float,
+    author_score: float | None,
+    *,
+    agent: str,
+    max_works: int = 3,
+) -> float:
+    """If author is solid but work-title score is low, rescore via edition titles.
+
+    Returns the best score (original or edition-boosted). Does not change *title_res*.
+    """
+    if title_res is None or not title_res.get("key"):
+        return title_score
+    if title_score >= OL_MATCH_MIN:
+        return title_score
+    if author_score is None or author_score < OL_MATCH_MIN:
+        return title_score
+
+    # Prefer works already close by title similarity; always include the chosen match.
+    ranked = sorted(
+        matches,
+        key=lambda x: fuzz.ratio(title, x.get("title", "")),
+        reverse=True,
+    )
+    keys: list[str] = []
+    chosen = title_res.get("key") or ""
+    if chosen:
+        keys.append(chosen)
+    for m in ranked:
+        k = m.get("key") or ""
+        if k and k not in keys:
+            keys.append(k)
+        if len(keys) >= max_works:
+            break
+
+    best = title_score
+    for k in keys:
+        work_title = next((m.get("title", "") for m in matches if m.get("key") == k), "")
+        work_ratio, work_token = _title_sim(title, work_title)
+        ed_score = _best_edition_title_score(k, title, agent=agent)
+        best = max(best, work_ratio, work_token, ed_score)
+        if best >= OL_MATCH_MIN:
+            break
+    return best
+
+
 def _find_best_title(
     title: str,
     matches: list[OpenLibrarySearchResult],
@@ -573,6 +1017,20 @@ class OpenLibraryTitle:
         return f"https://openlibrary.org{self.key}" if self.key else ""
 
 
+def ol_match_band(ol: "OpenLibraryTitle | None") -> Literal["match", "low_confidence", "none", "skipped"]:
+    """Classify an OL title result for fix_metadata display / apply gating."""
+    if ol is None:
+        return "skipped"
+    if not ol.has_match:
+        return "none"
+    score = ol.score(fallback=0.0)
+    if score >= OL_MATCH_MIN:
+        return "match"
+    if score >= OL_LOW_CONFIDENCE_MIN:
+        return "low_confidence"
+    return "none"
+
+
 def open_library_lookup_title(
     title: str,
     *,
@@ -634,8 +1092,47 @@ def open_library_lookup_title(
                 matches.extend([OpenLibrarySearchResult(**d) for d in data.get("docs", [])])
                 found += data["numFound"]
 
+        # Structured title= often misses edition subtitles / alt marketing titles
+        # (e.g. "Dragoneye Reborn" → work titled "Eon"). Fall back to free-text q=.
+        if not matches:
+            for t in list(set([title_lower, title_no_periods, title_no_punctuation, title_unchunked])):
+                urls = (
+                    [
+                        f"https://openlibrary.org/search.json?q={urllib.parse.quote_plus(t)}&author={urllib.parse.quote_plus(a)}"
+                        for a in authors
+                    ]
+                    if authors
+                    else [f"https://openlibrary.org/search.json?q={urllib.parse.quote_plus(t)}"]
+                )
+                for url in urls:
+                    response = requests.get(url, headers={"User-Agent": agent_string}, timeout=30)
+                    response.raise_for_status()
+                    data = response.json()
+                    matches.extend([OpenLibrarySearchResult(**d) for d in data.get("docs", [])])
+                    found += data.get("numFound") or 0
+
+        title_res, title_score, author_score, author_kind = _find_best_title(
+            title, matches, author=author, narrator=narrator, method=method
+        )
+        # Author resolved onto the query counts as enough confidence to try editions,
+        # even when per-doc author_score is missing/weak.
+        author_gate = author_score
+        if author_gate is None or author_gate < OL_MATCH_MIN:
+            if authors:
+                author_gate = OL_MATCH_MIN
+        title_score = _boost_title_score_via_editions(
+            title,
+            matches,
+            title_res,
+            title_score,
+            author_gate,
+            agent=agent_string,
+        )
         return OpenLibraryTitle(
-            *_find_best_title(title, matches, author=author, narrator=narrator, method=method),
+            title_res,
+            title_score,
+            author_score,
+            author_kind,
             original_author=author,
             original_narrator=narrator,
         )
