@@ -550,7 +550,7 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
                     Tinta()
                     .dark_grey("│ ", sep="")
                     .grey("Link: ", sep="")
-                    .grey(plan.ol_url, sep="")
+                    .purple(plan.ol_url, sep="")
                     .to_str()
                 )
         _framed_footer(style="light_grey")
