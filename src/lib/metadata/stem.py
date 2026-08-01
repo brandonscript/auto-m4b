@@ -6,7 +6,10 @@ import re
 
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import is_author_only_name
+from src.lib.cleaners import (
+    is_author_only_name,
+    title_case_ol_title,
+)
 from src.lib.fs_utils import safe_filename
 
 _YEAR_SUFFIX = re.compile(r"\s*\((\d{4})\)\s*$")
@@ -36,6 +39,18 @@ def preserve_original_year_in_stem(stem: str, *originals: str) -> str:
         if suffix:
             return f"{s}{suffix}"
     return s
+
+
+def near_match_ol_filename_stem(
+    local_title: str, ol_title: str, *originals: str, threshold: float = 90
+) -> str:
+    """Return a cleaned OL filename stem when titles are nearly identical."""
+    local = (local_title or "").strip()
+    ol = (ol_title or "").strip()
+    if not local or not ol or fuzz.ratio(local.casefold(), ol.casefold()) < threshold:
+        return ""
+    stem = safe_filename(title_case_ol_title(ol))
+    return preserve_original_year_in_stem(stem, *originals)
 
 
 def _stem_matches_book_title(stem: str, title: str, author: str = "") -> bool:

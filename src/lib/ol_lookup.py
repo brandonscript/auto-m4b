@@ -9,6 +9,7 @@ import requests
 import requests_cache
 from rapidfuzz import fuzz
 
+from src.lib.cleaners import strip_leading_articles
 from src.lib.misc import max_if, re_group
 from src.lib.term import print_debug
 from src.lib.config import cfg
@@ -1073,10 +1074,21 @@ def open_library_lookup_title(
         title_no_periods = title_lower.replace(".", "")
         title_no_punctuation = junk_chars_title_pattern.sub("", title_lower)
         title_unchunked = title_chunk_pattern.sub("", title_lower)
+        title_no_leading_article = strip_leading_articles(title_lower)
+        search_titles = list(
+            {
+                title_lower,
+                title_no_periods,
+                title_no_punctuation,
+                title_unchunked,
+                title_no_leading_article,
+            }
+            - {""}
+        )
 
         matches = []
         found = 0
-        for t in list(set([title_lower, title_no_periods, title_no_punctuation, title_unchunked])):
+        for t in search_titles:
             urls = (
                 [
                     f"https://openlibrary.org/search.json?title={urllib.parse.quote_plus(t)}&author={urllib.parse.quote_plus(a)}"
@@ -1095,7 +1107,7 @@ def open_library_lookup_title(
         # Structured title= often misses edition subtitles / alt marketing titles
         # (e.g. "Dragoneye Reborn" → work titled "Eon"). Fall back to free-text q=.
         if not matches:
-            for t in list(set([title_lower, title_no_periods, title_no_punctuation, title_unchunked])):
+            for t in search_titles:
                 urls = (
                     [
                         f"https://openlibrary.org/search.json?q={urllib.parse.quote_plus(t)}&author={urllib.parse.quote_plus(a)}"

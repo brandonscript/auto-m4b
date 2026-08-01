@@ -106,9 +106,7 @@ Ctrl+C quits cleanly (no traceback).
 
 ## Dates / years
 
-Folder trailing `(YYYY)` is the local prior for large mismatches (e.g. polluted id3 `2017` vs folder `2008`). When folder and existing id3 only differ by **one** year (publication vs audiobook/edition noise), the existing id3 date is left alone — no rewrite.
-
-Once Open Library is attached, if **any two of** filesystem / id3 / OL agree on a year, that consensus wins (e.g. id3+OL `1997` over folder `2007`). Forced OL (`--ol` / `o` / `m`) still applies OL tags directly.
+Filesystem year comes from the trailing `(YYYY)` in the book folder and/or source/current filename. Without Open Library, the older available filesystem/ID3 year wins, including one-year near ties. With Open Library, an exact two-of-three match wins; a near pair wins with the older year when the third is at least two years away; otherwise a high-confidence all-divergent match uses OL and low-confidence all-divergent results fall back to filesystem versus ID3. Forced OL (`--ol` / `o` / `m`) still applies OL tags directly.
 
 Filesystem / id3 / OL date colors are judged against **desired** date (what would be written): match = mint, mismatch = amber. When FS is wrong and id3 is right, id3 is mint (not grey) so the pair never reads as grey+amber.
 

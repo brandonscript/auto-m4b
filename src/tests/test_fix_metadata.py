@@ -20,6 +20,9 @@ from src.fix_metadata import (
     _id3_already_correct_style,
     _truth_props,
 )
+from src.lib.metadata.apply import apply_fix
+
+
 def _touch(path: Path, size: int = 10) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x" * size)
@@ -211,3 +214,30 @@ def test_truth_props_prefers_desired_when_ol_year_differs(tmp_path: Path):
     )
     assert _truth_props(plan)["date"] == "2008"
     assert _id3_already_correct_style("2008", "2008", is_date=True) == "light_grey"
+
+
+def test_apply_fix_does_not_create_missing_description(tmp_path: Path):
+    m4b = _touch(tmp_path / "Children of Memory.m4b")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Children of Memory",
+        desired_author="Adrian Tchaikovsky",
+        desired_album="Children of Memory",
+        desired_date="2023",
+        desired_narrator="",
+        desired_stem="Children of Memory",
+        current=TagSnapshot(
+            title="Children of Memory",
+            artist="Adrian Tchaikovsky",
+            album="Children of Memory",
+            albumartist="Adrian Tchaikovsky",
+            date="2023",
+            path=m4b,
+        ),
+    )
+
+    apply_fix(plan, dry_run=False, quiet=True)
+
+    assert list(tmp_path.glob("*.txt")) == []

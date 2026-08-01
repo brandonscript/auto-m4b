@@ -176,6 +176,9 @@ When the env var is absent or the placeholder text is left unchanged, the swap-d
 `verify_and_update_id3_tags()` is silently skipped and author/narrator are taken from the raw ID3
 scores only (which can be wrong for music-convention-tagged files).
 
+`CLEANUP_FILENAMES` defaults to `0`. Set it to `1` to opt into metadata-driven rename cleanup;
+when unset, conversion preserves the existing trusted GCS/passthrough filename behavior.
+
 ## Docker build workflow
 
 **Site-specific compose files are not in this repo.** On Phantom they live in

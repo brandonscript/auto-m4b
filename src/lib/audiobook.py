@@ -275,6 +275,23 @@ class Audiobook(BaseModel):
                     if _usable_rename_stem(stem, author):
                         return stem
 
+        if cfg.CLEANUP_FILENAMES:
+            from src.lib.metadata.sources import filename_gcs_context, source_common_filename
+
+            gcs_dir = self.merge_dir if self.merge_dir.exists() else self.inbox_dir
+            gcs_stem = source_common_filename(gcs_dir)
+            contextual_stem = (
+                filename_gcs_context(gcs_stem, self.inbox_dir, title)
+                if title and not self._is_garbage_output_title(title)
+                else ""
+            )
+            if _usable_rename_stem(contextual_stem, author):
+                return preserve_original_year_in_stem(
+                    safe_filename(contextual_stem),
+                    safe_filename(self.basename),
+                    self.basename,
+                )
+
         if title and not self._is_garbage_output_title(title):
             # Convert is always-minimalist for title-derived stems.
             cleaned = minimalist_title(title, author=author)

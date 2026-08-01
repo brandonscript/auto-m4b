@@ -188,6 +188,7 @@ All options are set via environment variables (`.env` file or shell environment)
 | `BACKUP`                      | `Y`           | Set to `N` to skip backing up source files                                                                                                        |
 | `CRASH_PROTECTION`            | `Y`           | Set to `N` to disable skipping books that previously failed                                                                                       |
 | `USE_FILENAMES_AS_CHAPTERS`   | `N`           | Set to `Y` to derive chapter titles from filenames instead of ID3 tags                                                                            |
+| `CLEANUP_FILENAMES`           | `N`           | Set to `Y` to opt into metadata-driven filename cleanup; the safe default preserves trusted GCS-derived names                                  |
 | `NO_CATS`                     | `N`           | Set to `Y` to suppress the ASCII cat art between loops                                                                                            |
 | `OPEN_LIBRARY_USER_AGENT`     | _(none)_      | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup))           |
 | `POST_CONVERT_SCRIPT`         | _(none)_      | Path to a Python (`.py`) or bash (`.sh`) script to run after each successful conversion (see [Post-conversion scripts](#post-conversion-scripts)) |
