@@ -100,8 +100,6 @@ def apply_fix(
                 print_green(f"  ✓ renamed m4b → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
     desc_out = plan.rename_desc_to or plan.desc_txt
-    if desc_out is None:
-        desc_out = target.with_name(f"{plan.desired_stem}.txt")
     if plan.desc_txt and plan.rename_desc_to and plan.desc_txt.exists():
         if plan.rename_desc_to.exists() and plan.rename_desc_to.resolve() != plan.desc_txt.resolve():
             _write_desc(plan, plan.rename_desc_to)
@@ -119,7 +117,7 @@ def apply_fix(
                     f"  ✓ renamed+rewrote desc → [[{plan.rename_desc_to.name}]]",
                     highlight_color=LIGHT_GREY_COLOR,
                 )
-    else:
+    elif desc_out is not None and desc_out.exists():
         _write_desc(plan, desc_out)
         if not quiet:
             print_green(f"  ✓ wrote desc → [[{desc_out.name}]]", highlight_color=LIGHT_GREY_COLOR)

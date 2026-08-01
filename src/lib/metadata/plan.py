@@ -10,12 +10,12 @@ from src.lib.cleaners import clean_string, minimalist_title
 from src.lib.fs_utils import ensure_audio_ext, safe_filename
 from src.lib.metadata.models import CliPaths, FixPlan, SourceResolutionError, TagSnapshot
 from src.lib.metadata.ol_attach import _attach_open_library
-from src.lib.metadata.pick import _pick_desired
-from src.lib.metadata.priors import filesystem_extracted
+from src.lib.metadata.pick import _filesystem_year, _pick_desired
 from src.lib.metadata.sources import (
     _QUALITY_TXT,
     _find_desc_txt,
     _find_source_and_m4b,
+    filename_gcs_context,
     _source_audio_file,
     resolve_source_dir,
     source_common_filename,
@@ -25,9 +25,46 @@ from src.lib.metadata.sources import (
 from src.lib.metadata.stem import (
     _stem_matches_book_title,
     _usable_rename_stem,
+    near_match_ol_filename_stem,
     preserve_original_year_in_stem,
 )
 from src.lib.metadata.apply import _desc_needs_rewrite
+
+
+def _apply_cleanup_filename(plan: FixPlan, local_title: str) -> None:
+    """Prefer a near-identical Open Library title for cleaned filenames."""
+    from src.lib.config import cfg
+
+    if not cfg.CLEANUP_FILENAMES:
+        return
+
+    cleanup_stem = near_match_ol_filename_stem(
+        local_title,
+        plan.ol_title,
+        plan.desired_stem,
+        plan.m4b.stem,
+    )
+    if not cleanup_stem or cleanup_stem == plan.desired_stem:
+        return
+
+    plan.reasons.append(
+        f"cleanup filename from near-match Open Library title "
+        f"{plan.desired_stem!r} → {cleanup_stem!r}"
+    )
+    plan.desired_stem = cleanup_stem
+    plan.rename_m4b_to = (
+        plan.m4b.with_name(ensure_audio_ext(cleanup_stem, ".m4b"))
+        if plan.m4b.stem != cleanup_stem
+        else None
+    )
+    if plan.desc_txt and plan.rename_m4b_to:
+        quality_match = _QUALITY_TXT.match(plan.desc_txt.name)
+        suffix = (
+            plan.desc_txt.name[len(quality_match.group(1)) :]
+            if quality_match
+            else ".txt"
+        )
+        plan.rename_desc_to = plan.desc_txt.with_name(f"{cleanup_stem}{suffix}")
 
 
 def plan_fix(
@@ -113,8 +150,8 @@ def plan_fix(
         book_dir, source_snap, current, minimalist=minimalist, cli=cli
     )
     # Local determinations (folder + source) before any Open Library override.
-    # fs_date is the folder (YYYY) prior, not the picked desired date.
-    folder_date = filesystem_extracted(book_dir, cli)[2]
+    # fs_date includes folder and source/current filename years, not the picked date.
+    folder_date = _filesystem_year(book_dir, source_snap, current)
     fs_title, fs_author, fs_date, fs_narrator = (
         title,
         author,
@@ -129,7 +166,7 @@ def plan_fix(
     # Rename stem = part-stripped GCS of source filenames (not the ID3 title).
     # Never emit an author-only stem — prefer the original source filename, then
     # title, then the current m4b name (minimalist or not).
-    raw_stem = filename_stem or title or m4b.stem
+    raw_stem = filename_gcs_context(filename_stem, book_dir, title) or title or m4b.stem
     stem = safe_filename(raw_stem) if raw_stem else ""
     title_stem = safe_filename(title) if title else ""
     original_stem = safe_filename(filename_stem) if filename_stem else ""
@@ -196,6 +233,12 @@ def plan_fix(
         reasons.append(f"keep year in filename {stem!r} → {yearful!r}")
         stem = yearful
 
+    # fix-metadata must not rename files unless explicit cleanup was enabled.
+    from src.lib.config import cfg
+
+    if not cfg.CLEANUP_FILENAMES:
+        stem = m4b.stem
+
     rename_to = m4b.with_name(ensure_audio_ext(stem, ".m4b")) if stem and m4b.stem != stem else None
     if rename_to == m4b:
         rename_to = None
@@ -239,6 +282,7 @@ def plan_fix(
         _attach_open_library(
             plan, ol_ref=ol_ref, apply_ol_tags=bool(ol_ref), minimalist=minimalist
         )
+        _apply_cleanup_filename(plan, title)
 
     if not plan.needs_work:
         return None

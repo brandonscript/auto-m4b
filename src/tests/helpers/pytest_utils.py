@@ -400,13 +400,18 @@ class testutils:
 
         out = capfd.readouterr().out
         next_cursor = len(term.PRINT_LOG)
-        if out:
-            cls._print_log_cursor = next_cursor
-            return cls.strip_ansi_codes(out)
         cursor = max(0, min(cls._print_log_cursor, next_cursor))
         cls._print_log_cursor = next_cursor
         raw = "".join(text + end for text, end in term.PRINT_LOG[cursor:])
-        return cls.strip_ansi_codes(raw)
+        if not raw.strip():
+            combined = out
+        elif not out.strip() or out in raw:
+            combined = raw
+        elif raw in out:
+            combined = out
+        else:
+            combined = out + raw
+        return cls.strip_ansi_codes(combined)
 
     @classmethod
     def is_divider(cls, line: str | None) -> bool:
@@ -687,6 +692,13 @@ class testutils:
 
         expect_num_loops = len(loops) if loops else None
         if expect_num_loops is not None:
+            if len(outs) != expect_num_loops:
+                loop_starts = [m.start() for m in re.finditer(r"Found \d+ books?", out)]
+                if len(loop_starts) == expect_num_loops:
+                    outs = [
+                        out[start:end]
+                        for start, end in zip(loop_starts, loop_starts[1:] + [len(out)])
+                    ]
             assert (
                 len(outs) == expect_num_loops
             ), f"Expected {pluralize_with_count(expect_num_loops, 'loop')}, got {len(outs)}"

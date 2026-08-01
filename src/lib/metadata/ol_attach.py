@@ -189,14 +189,42 @@ def _year_consensus(*years: str | None) -> str | None:
     return None
 
 
-def _apply_date_consensus(plan: FixPlan) -> None:
-    """If FS / id3 / OL agree 2-of-3 on a year, adopt that as desired_date.
+def resolve_date_consensus(
+    fs_year: str | None,
+    id3_year: str | None,
+    ol_year: str | None,
+    *,
+    ol_status: str = "",
+) -> str:
+    """Resolve filesystem, ID3, and OL years using the locked product policy."""
+    values = [_normalize_year(y) for y in (fs_year, id3_year, ol_year)]
+    fs_y, id3_y, ol_y = values
+    local = [int(y) for y in (fs_y, id3_y) if y]
+    if not ol_y or ol_status not in ("match", "low_confidence", "forced"):
+        return str(min(local)) if local else (fs_y or id3_y or "")
+    present = [int(y) for y in values if y]
+    counts: dict[int, int] = {}
+    for year in present:
+        counts[year] = counts.get(year, 0) + 1
+    majority = [year for year, count in counts.items() if count >= 2]
+    if majority:
+        return str(majority[0])
+    if len(present) == 3:
+        pairs = [(present[i], present[j]) for i in range(3) for j in range(i + 1, 3)]
+        near_pairs = [pair for pair in pairs if abs(pair[0] - pair[1]) <= 1]
+        if near_pairs:
+            pair = min(near_pairs, key=lambda p: abs(p[0] - p[1]))
+            outlier = next(year for year in present if year not in pair)
+            if abs(outlier - pair[0]) >= 2:
+                return str(min(pair))
+        if ol_status == "match":
+            return ol_y
+        return str(min(local)) if local else ol_y
+    return ol_y if ol_status == "match" and not local else (str(min(local)) if local else ol_y)
 
-    Local planning still prefers folder year (except ±1 near-tie). Once OL is
-    attached, a clear majority (e.g. id3+OL 1997 vs folder 2007) overrides the
-    folder prior so we don't churn a correct publication year toward an
-    audiobook/folder year.
-    """
+
+def _apply_date_consensus(plan: FixPlan) -> None:
+    """Apply the locked FS / ID3 / OL date policy."""
     if plan.ol_status not in ("match", "low_confidence"):
         return
     ol_y = _normalize_year(plan.ol_year)
@@ -204,9 +232,7 @@ def _apply_date_consensus(plan: FixPlan) -> None:
         return
     fs_y = _normalize_year(plan.fs_date)
     id3_y = _normalize_year(plan.current.date)
-    winner = _year_consensus(fs_y, id3_y, ol_y)
-    if not winner:
-        return
+    winner = resolve_date_consensus(fs_y, id3_y, ol_y, ol_status=plan.ol_status)
     cur = _normalize_year(plan.desired_date)
     if winner == cur:
         return

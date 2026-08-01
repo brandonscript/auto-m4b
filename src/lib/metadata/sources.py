@@ -18,6 +18,7 @@ _OUTPUT_EXTS = {".m4b"}
 _AUDIO_EXTS = _SOURCE_EXTS | _OUTPUT_EXTS
 
 _QUALITY_TXT = re.compile(r"^(.+?)\s+\[.+kbps.+\].txt$", re.I)
+_GENERIC_FILENAME = re.compile(r"^(?:track|audio|file|part|chapter)[ _-]?\d+$", re.I)
 
 
 def _is_ignored(name: str, ignore_globs: list[str]) -> bool:
@@ -249,6 +250,23 @@ def source_common_filename(source_dir: Path, ignore_globs: list[str] | None = No
     if not files:
         return ""
     return _clean_gcs_values([f.stem for f in files])
+
+
+def filename_gcs_context(filename_stem: str, book_dir: Path, title: str) -> str:
+    """Choose useful filename GCS with title-directory context when needed."""
+    stem = (filename_stem or "").strip()
+    if not stem or _GENERIC_FILENAME.fullmatch(stem):
+        return title.strip()
+    folder = book_dir.name.strip()
+    if folder and title and not _GENERIC_FILENAME.fullmatch(stem):
+        folder_core = re.sub(r"\s*\(\d{4}\)\s*$", "", folder).strip()
+        if (
+            folder_core
+            and folder_core.casefold() not in stem.casefold()
+            and (len(stem.split()) > 1 or stem[:1].isdigit())
+        ):
+            return f"{folder_core} - {stem}"
+    return stem
 
 
 def source_files_display(source_dir: Path, ignore_globs: list[str] | None = None) -> str:

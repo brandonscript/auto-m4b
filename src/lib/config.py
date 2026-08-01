@@ -1,7 +1,6 @@
 import argparse
 import functools
 import os
-import re
 import sys
 import tempfile
 import time
@@ -426,6 +425,13 @@ class Config:
         """
 
     COVER_OCR = _COVER_OCR
+
+    @env_property(typ=bool, default=False)
+    def _CLEANUP_FILENAMES(self):
+        """Enable metadata-driven output filename cleanup during conversion."""
+        ...
+
+    CLEANUP_FILENAMES = _CLEANUP_FILENAMES
 
     @env_property(
         typ=str,

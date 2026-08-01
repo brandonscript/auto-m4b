@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.lib.cleaners import minimalist_title
+from src.lib.config import cfg
 from src.lib.metadata import (
     CliPaths,
     FixPlan,
@@ -32,7 +33,8 @@ from src.lib.metadata import (
     _year_consensus,
 )
 from src.lib.metadata.priors import _is_cli_root, _loose_m4b_in_author_folder
-from src.lib.metadata.stem import _stem_matches_book_title
+from src.lib.metadata.ol_attach import resolve_date_consensus
+from src.lib.metadata.stem import _stem_matches_book_title, near_match_ol_filename_stem
 from src.lib.ol_lookup import (
     OL_LOW_CONFIDENCE_MIN,
     OL_MATCH_MIN,
@@ -367,8 +369,8 @@ def test_plan_fix_minimalist_dark_days_club(tmp_path: Path, monkeypatch):
     assert plan is not None
     assert plan.desired_title == "The Dark Days Club"
     assert plan.fs_date == "2015"
-    assert plan.desired_date == "2016"  # near-tie: do not churn id3
-    assert not any("2016" in r and "2015" in r for r in plan.reasons)
+    assert plan.desired_date == "2015"  # locked policy chooses older local year
+    assert any("2016" in r and "2015" in r for r in plan.reasons)
     stem_l = plan.desired_stem.casefold()
     assert "trilogy" not in stem_l
     assert "unabridged" not in stem_l
@@ -427,6 +429,7 @@ def test_plan_fix_minimalist_never_renames_to_author(tmp_path: Path, monkeypatch
 @pytest.mark.non_minimalist
 def test_plan_fix_non_minimalist_keeps_full_source_stem(tmp_path: Path, monkeypatch):
     """Without minimalist, keep the full source filename (never author-only)."""
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
     converted = tmp_path / "converted"
     archive = tmp_path / "archive"
     folder = "Lady Helen 01 - The Dark Days Club (2015)"
@@ -764,6 +767,7 @@ def test_plan_fix_keeps_searcher_dash_stem_not_glued_archive(
 
 def test_plan_fix_preserves_year_from_archive_filename_stem(tmp_path: Path, monkeypatch):
     """Yearless m4b + yearful archive stem → desired_stem keeps (YYYY) under minimalist."""
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
     converted = tmp_path / "converted"
     archive = tmp_path / "archive"
     folder = "Tiny Little Thing"
@@ -796,6 +800,70 @@ def test_plan_fix_preserves_year_from_archive_filename_stem(tmp_path: Path, monk
     assert plan.desired_stem == "Tiny Little Thing (2015)"
     if plan.rename_m4b_to is not None:
         assert "(2015)" in plan.rename_m4b_to.name
+
+
+def test_cleanup_filename_prefers_near_match_ol_title(
+    tmp_path: Path, monkeypatch
+):
+    converted = tmp_path / "converted"
+    archive = tmp_path / "archive"
+    book = converted / "Jonathan Stroud" / "Heroes of the Valley (2009)"
+    arch = archive / "Jonathan Stroud" / "Heroes of the Valley (2009)"
+    _touch(book / "Heroes of the Valley (2009).m4b", size=50)
+    _touch(arch / "01 - heros of the valley (2009).mp3", size=80)
+
+    def fake_from_file(cls, path: Path) -> TagSnapshot:
+        return TagSnapshot(
+            title="heros of the valley",
+            artist="Jonathan Stroud",
+            album="heros of the valley",
+            albumartist="Jonathan Stroud",
+            date="2009",
+            path=path,
+        )
+
+    def fake_attach(plan, **kwargs):
+        plan.ol_title = "Heroes of the Valley"
+        plan.ol_status = "match"
+        plan.desired_title = "Heroes of the Valley"
+
+    monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
+    monkeypatch.setattr("src.lib.metadata.plan._attach_open_library", fake_attach)
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
+    cli = CliPaths(converted=converted, archive=archive, inbox=tmp_path / "inbox")
+
+    plan = plan_fix(
+        book,
+        cli=cli,
+        scope_root=converted / "Jonathan Stroud",
+        require_source=True,
+        lookup_ol=True,
+        minimalist=False,
+    )
+
+    assert plan is not None
+    assert plan.desired_stem == "Heroes of the Valley (2009)"
+    assert plan.rename_m4b_to is None
+
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", False)
+    disabled_plan = plan_fix(
+        book,
+        cli=cli,
+        scope_root=converted / "Jonathan Stroud",
+        require_source=True,
+        lookup_ol=True,
+        minimalist=False,
+    )
+    assert disabled_plan is not None
+    assert disabled_plan.desired_stem == "Heroes of the Valley (2009)"
+    assert disabled_plan.rename_m4b_to is None
+
+
+def test_cleanup_filename_preserves_leading_article():
+    assert (
+        near_match_ol_filename_stem("the hollow boy", "The Hollow Boy")
+        == "The Hollow Boy"
+    )
 
 
 def test_source_common_title_strips_parts(tmp_path: Path, monkeypatch):
@@ -902,6 +970,7 @@ def test_plan_fix_rename_stem_from_filename_gcs(tmp_path: Path, monkeypatch):
 
 def test_plan_fix_rename_stem_from_filename_gcs_when_junk(tmp_path: Path, monkeypatch):
     """Junk m4b stem still renames to author-prefixed filename GCS."""
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
     converted = tmp_path / "converted"
     archive = tmp_path / "archive"
     book = converted / "Goodman, Alison" / "Dragoneye Reborn (2008)"
@@ -1471,4 +1540,17 @@ def test_apply_date_consensus_skips_when_no_majority(tmp_path: Path):
         ol_year="2010",
     )
     _apply_date_consensus(plan)
-    assert plan.desired_date == "2008"
+    assert plan.desired_date == "2010"
+
+
+@pytest.mark.parametrize(
+    ("fs", "id3", "ol", "status", "expected"),
+    [
+        ("2015", "2016", "", "", "2015"),
+        ("2015", "2018", "2016", "match", "2015"),
+        ("2015", "2018", "2019", "low_confidence", "2018"),
+        ("2015", "2018", "2020", "match", "2020"),
+    ],
+)
+def test_resolve_date_consensus_locked_policy(fs, id3, ol, status, expected):
+    assert resolve_date_consensus(fs, id3, ol, ol_status=status) == expected

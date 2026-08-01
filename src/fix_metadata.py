@@ -64,6 +64,7 @@ from src.lib.metadata.ol_attach import (
 )
 from src.lib.metadata.priors import _is_cli_root, _loose_m4b_in_author_folder
 from src.lib.metadata.sources import _has_audio, _is_under
+from src.lib.metadata.plan import _apply_cleanup_filename
 from src.lib.metadata.stem import _stem_matches_book_title
 from src.lib.parsers import get_year_from_date
 from src.lib.term import (
@@ -1079,6 +1080,7 @@ def main(argv: list[str] | None = None) -> int:
         kept: list[FixPlan] = []
         for plan in plans:
             _attach_open_library(plan, apply_ol_tags=False, minimalist=minimalist)
+            _apply_cleanup_filename(plan, plan.fs_title)
             if plan.needs_work:
                 kept.append(plan)
         plans = kept
@@ -1128,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
                     _attach_open_library(
                         plan, ol_ref=ref, apply_ol_tags=True, minimalist=minimalist
                     )
+                    _apply_cleanup_filename(plan, plan.fs_title)
                     if plan.ol_status != "forced":
                         print_orange("  Could not apply that Open Library ref; try again or skip.")
                     continue

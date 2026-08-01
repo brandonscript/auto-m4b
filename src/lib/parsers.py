@@ -226,12 +226,22 @@ def startswith_partno(s: str, s2: str | None = None) -> bool:
 
 def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
     from src.lib.cleaners import strip_part_number
+    from src.lib.config import cfg
 
-    dir_title = re_group(book_title_pattern.search(book.basename), "book_title")
-    dir_author = parse_author(book.basename, "fs", fallback="")
-    dir_nlp_people, dir_nlp_titles = spaCy_extract(book.basename)
-    dir_year = re_group(year_pattern.search(book.basename), "year")
-    dir_narrator = parse_narrator(book.basename, "fs", fallback="")
+    try:
+        resolved_book = book.path.resolve()
+        pipeline_root = any(
+            resolved_book == root.resolve()
+            for root in (cfg.inbox_dir, cfg.converted_dir, cfg.archive_dir)
+        )
+    except OSError:
+        pipeline_root = False
+
+    dir_title = "" if pipeline_root else re_group(book_title_pattern.search(book.basename), "book_title")
+    dir_author = "" if pipeline_root else parse_author(book.basename, "fs", fallback="")
+    dir_nlp_people, dir_nlp_titles = ([], []) if pipeline_root else spaCy_extract(book.basename)
+    dir_year = "" if pipeline_root else re_group(year_pattern.search(book.basename), "year")
+    dir_narrator = "" if pipeline_root else parse_narrator(book.basename, "fs", fallback="")
 
     # remove suffix/extension from files
     files = [f.path.stem for f in book.tree.files_recursive]
@@ -258,7 +268,7 @@ def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
     if file_author and (n := get_nlp_names(file_author)):
         author_candidates.extend(n)
     author_candidates = sorted(author_candidates, key=lambda x: x[2], reverse=True)
-    best_author = next(iter(author_candidates), ("", "UNKNOWN", 0))[0]
+    best_author = file_author or next(iter(author_candidates), ("", "UNKNOWN", 0))[0]
 
     narrator_candidates: list[tuple[str, str, float]] = n if dir_narrator and (n := get_nlp_names(dir_narrator)) else []
     narrator_candidates = sorted(narrator_candidates, key=lambda x: x[2], reverse=True)
@@ -1056,6 +1066,13 @@ def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = Non
     """Parses an author name from a string, using the given target and fallback.
     If the author name is longer than max_chars, only from 0-max_chars will be used.
     """
+    if target == "fs":
+        normalized = s.replace("_", " ")
+        prefix = re.match(r"^\s*(.+?)\s+[-–—]\s+", normalized)
+        if prefix:
+            candidate = prefix.group(1).strip()
+            if len(candidate.split()) >= 2:
+                return candidate
     return parse_names(s, target, fallback=fallback, max_chars=max_chars).author or fallback or ""
 
 

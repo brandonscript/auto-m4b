@@ -1,8 +1,8 @@
 import pytest
 
 from src.lib.audiobook import Audiobook
+from src.lib.config import cfg
 from src.lib.inbox_state import InboxState
-from src.tests.helpers.pytest_dumps import TEST_DIRS
 
 
 def test_orig_file_type(house_on_the_cliff__flat_mp3: Audiobook):
@@ -98,3 +98,15 @@ class test_safe_filename_in_audiobook_paths:
         book.title = "3"
         assert book.output_filename_stem == "Crescent City Fae [Boxed Set]"
         assert book.build_file.name == "Crescent City Fae [Boxed Set].m4b"
+
+    def test_cleanup_filenames_uses_filename_gcs_when_enabled(self, tmp_path, monkeypatch):
+        from src.lib.books_tree.books_tree import BooksTree
+
+        folder = tmp_path / "A Sensible Book Title"
+        folder.mkdir()
+        (folder / "BookName-cd1.mp3").write_bytes(b"x")
+        (folder / "BookName-cd2.mp3").write_bytes(b"x")
+        book = Audiobook(BooksTree(folder))
+        book.title = "Canonical Book Title"
+        monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
+        assert book.output_filename_stem == "BookName"

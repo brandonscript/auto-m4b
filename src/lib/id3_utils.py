@@ -22,8 +22,10 @@ from src.lib.cleaners import (
 )
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim
+from src.lib.metadata.ol_attach import resolve_date_consensus
 from src.lib.ol_lookup import (
     id3_prefer_colon_separator,
+    ol_match_band,
     open_library_lookup_author,
     open_library_lookup_title,
 )
@@ -324,6 +326,53 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
     ]
     ol_title = open_library_lookup_title(book.title, author=book.author, narrator=book.narrator, method="similarity")
+    ol_status = ol_match_band(ol_title)
+    shared_ol_title = ""
+    if ol_status in ("match", "low_confidence") and not book.path.is_file():
+        from src.lib.config import cfg
+        from src.lib.metadata.models import FixPlan, TagSnapshot
+        from src.lib.metadata.ol_attach import _attach_open_library
+
+        shared_plan = FixPlan(
+            book_dir=book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent,
+            m4b=m4b_to_check,
+            source=None,
+            desired_title=book.title,
+            desired_author=book.author,
+            desired_album=book.album,
+            desired_date=book.date,
+            desired_narrator=book.narrator,
+            desired_stem=book.output_filename_stem,
+            current=TagSnapshot(
+                title=book_to_check.id3_title,
+                artist=book_to_check.id3_artist,
+                album=book_to_check.id3_album,
+                albumartist=book_to_check.id3_albumartist,
+                composer=book_to_check.id3_composer,
+                date=book_to_check.id3_date,
+                path=m4b_to_check,
+            ),
+            fs_title=book.fs_title,
+            fs_author=book.fs_author,
+            fs_date=book.fs_year,
+            fs_files=book.orig_file_name,
+        )
+        if cfg.OPEN_LIBRARY_USER_AGENT:
+            _attach_open_library(shared_plan, minimalist=True)
+            if shared_plan.ol_status in ("match", "low_confidence", "forced"):
+                shared_ol_title = shared_plan.desired_title
+                if shared_plan.desired_author:
+                    book.artist = book.albumartist = shared_plan.desired_author
+                if shared_plan.desired_date:
+                    book.date = shared_plan.desired_date
+    resolved_year = resolve_date_consensus(
+        book.fs_year,
+        book.id3_date,
+        ol_title.date if ol_title and ol_status in ("match", "low_confidence") else "",
+        ol_status=ol_status,
+    )
+    if resolved_year:
+        book.date = resolved_year
     ol_author, author_prop = next(
         (
             c
@@ -348,11 +397,11 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         author_for_title = book.artist or book.author or ""
         if bool(ol_title):
             if ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
-                new_title = _normalize_ol_title(NotNone(ol_title).title)
-                # Shared Phase-3 transforms (colon subtitle + always-minimalist).
-                # Date consensus (_apply_date_consensus) is intentionally not
-                # wired here yet — see docs/metadata-conflicts.md.
+                new_title = shared_ol_title or _normalize_ol_title(NotNone(ol_title).title)
+                # Shared transforms (colon subtitle, always-minimalist, and
+                # edition enrichment when Open Library is configured).
                 new_title = _finalize_convert_title(new_title, author=author_for_title)
+                new_title = title_case_ol_title(new_title)
                 # If book.title already matches the words, prefer it only when it
                 # is at least as "Title-Cased" as the normalized OL title (more/equal
                 # capitals). That keeps intentional casing like brand names while
@@ -360,7 +409,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
                 if book.title and new_title.lower() == book.title.lower():
                     book_caps = sum(1 for c in book.title if c.isupper())
                     new_caps = sum(1 for c in new_title if c.isupper())
-                    if book_caps >= new_caps:
+                    if book_caps > new_caps:
                         new_title = (
                             strip_leading_the(book.title) if id3_tag == "sortalbum" else book.title
                         )
@@ -460,15 +509,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         nonlocal date_needs_updating, new_tags
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
         tags_years_match = get_year_from_date(tag_value) == get_year_from_date(book.date)
-        ol_years_match = (
-            bool(ol_title) and ol_title.has_match and get_year_from_date(ol_title.date) == get_year_from_date(book.date)
-        )
-        if ol_title and not ol_years_match and ol_title.score(fallback=0) > 0.75:
-            date_needs_updating = True
-            new_date = ol_title.date
-            updates.append(lambda: _print_needs_updating(prop, tag_value, new_date))
-            new_tags[id3_tag] = new_date
-        elif book.date and not tags_years_match:
+        if book.date and not tags_years_match:
             date_needs_updating = True
             updates.append(lambda: _print_needs_updating(prop, tag_value, book.date))
             new_tags[id3_tag] = book.date
@@ -553,6 +594,8 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     # ", Version 3" etc. after _check_title cleaned new_tags.
     if book.title:
         book.title = _strip_ol_edition_suffix(book.title)
+        if ol_title and ol_title.has_match:
+            book.title = title_case_ol_title(book.title)
     if book.album:
         book.album = _strip_ol_edition_suffix(book.album)
     ensure_title_and_album(book)
@@ -589,6 +632,16 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
     else:
         smart_print(Tinta().mint(" ✓\n").to_str())
+
+    if m4b_to_check.suffix.lower() in (".m4b", ".m4a"):
+        from mutagen.mp4 import MP4
+
+        try:
+            output = MP4(m4b_to_check)
+            output["\xa9too"] = ["brandonscript/auto-m4b"]
+            output.save()
+        except Exception as e:
+            print_debug(f"Could not stamp encoder tag on {m4b_to_check.name}: {e}")
 
     nl()
 
@@ -1325,6 +1378,13 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # the Hive" → OL confirms title and author rather than guessing).
     ol_match = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
     ol_resolved = ol_match is not None
+    if ol_resolved:
+        if re.search(r"\s{2,}", book.basename):
+            folder_title = re.split(r"\s{2,}", book.basename, maxsplit=1)[-1].strip()
+            if len(folder_title) > len(book.title):
+                book.title = folder_title
+                book.album = folder_title
+                book.sortalbum = strip_leading_articles(folder_title)
 
     id3_score = MetadataScore(book, sample_audio2_tags)  # type: ignore
 
@@ -1368,6 +1428,14 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # Never leave Title/Album blank — Plex shows "[Unknown Album]" otherwise.
     # Falls back through ID3 → fs_title → folder/file basename.
     ensure_title_and_album(book)
+    if re.search(r"\s{2,}", book.basename):
+        folder_title = re.split(r"\s{2,}", book.basename, maxsplit=1)[-1].strip()
+        if len(folder_title) > len(book.title):
+            book.title = folder_title
+            book.album = folder_title
+            book.sortalbum = strip_leading_articles(folder_title)
+    if sample_audio2_tags.albumartist:
+        book.albumartist = sample_audio2_tags.albumartist
 
     # Phase 3: shared colon + always-minimalist transforms on the resolved
     # title/album. Selection stays OCR / MetadataScore / OL-early for now;

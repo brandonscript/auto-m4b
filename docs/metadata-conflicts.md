@@ -21,11 +21,11 @@ Domain tests: [`src/tests/test_metadata_plan.py`](../src/tests/test_metadata_pla
 | **Minimalist (id3 titles)** | Convert **always** `minimalist_title` on resolved titles via `_finalize_convert_title`. | CLI: `minimalist` / `CLI_MINIMALIST` / `--no-minimalist`. | `adopt_shared` (convert) + `mode_flag` (CLI) |
 | **Minimalist (passthrough stems)** | Single-file m4b/m4a/aac **passthrough** stems skip minimalist strip (keeps Book N in filename). | CLI rename stems are minimalist-cleaned when mode on. | `keep_convert_adapter` |
 | **Stem refuse author-only** | `_usable_rename_stem` / `is_author_only_name`. | Same helpers. | `adopt_shared` |
-| **Dates (±1 / consensus)** | Scorer earlier-of(id3, fs); OL may overwrite; **no** `_apply_date_consensus` in verify yet. | Folder ±1 near-tie; 2-of-3 consensus after OL. | `pending_review` |
-| **Stem (GCS vs title)** | Prefers resolved **title** (or passthrough). | Prefers source **GCS**, keep if matches title. | `pending_review` |
-| **OL edition enrich** | Work title only (no edition subtitle join). | Edition base+subtitle when locally attested. | `pending_review` |
-| **Folder priors** | spaCy inbox basename. | `#plex` / parent-author / loose author-dir / cli-root clamp. | `pending_review` |
-| **OL auto-write** | Auto-applies OL on extract + verify. | Display-only unless forced. | `pending_review` (intentional product fork for now) |
+| **Dates (±1 / consensus)** | Shared resolver uses FS folder/filename + ID3; OL exact-majority, near-pair, and confidence rules. | Same resolver. | `adopt_shared` |
+| **Stem (GCS vs title)** | `CLEANUP_FILENAMES=0` keeps trusted GCS; opt-in cleanup rejects generic tracks and uses title/dir context. | Shared GCS with the same generic-track safeguards. | `adopt_shared` |
+| **OL edition enrich** | Shared edition base+subtitle enrichment when `OPEN_LIBRARY_USER_AGENT` is set. | Edition base+subtitle when locally attested. | `adopt_shared` |
+| **Folder priors** | Pipeline roots are clamped using configured paths. | `#plex` / parent-author / loose author-dir / cli-root clamp. | `adopt_shared` |
+| **OL auto-write** | Auto-applies shared OL title/author/date when the user agent is configured. | Display-only unless forced. | `keep_convert_adapter` |
 
 ## Non-minimalist tests (`@pytest.mark.non_minimalist`)
 
@@ -37,13 +37,12 @@ Tagged in `test_metadata_plan.py` for Phase 4 triage:
 
 **Interim decision:** keep as **CLI-only** coverage of `--no-minimalist` / `minimalist=False`. Convert does not run these paths. No mass rewrite.
 
-## Still needs operator decision
+## Locked implementation notes
 
-1. Wire `_apply_date_consensus` into convert verify?
-2. Unify rename stem on GCS vs title (or keep `stem_source` modes)?
-3. Bring edition-subtitle enrichment into convert OL path?
-4. Use shared folder priors when inbox/converted layout is `#plex`-shaped?
-5. Keep OL auto-write on convert forever, or move toward display-only + explicit accept?
+- `CLEANUP_FILENAMES=0` is the safe default: tags are updated without metadata-driven renames.
+- `CLEANUP_FILENAMES=1` handles useful flat stems such as `BookName-cd1`, rejects generic stems such as
+  `Track01`, and combines a sensible book directory with a useful file fragment when both are needed.
+- Single-file passthrough keeps its original filename while tags may still be updated.
 
 ## Phase 3 notes
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from rapidfuzz import fuzz
@@ -14,7 +15,6 @@ from src.lib.cleaners import (
 )
 from src.lib.metadata.models import CliPaths, TagSnapshot
 from src.lib.metadata.priors import (
-    _FOLDER_YEAR,
     _loose_m4b_in_author_folder,
     folder_narrator_hint,
     folder_title_hint,
@@ -48,6 +48,25 @@ def resolve_minimalist(*, flag_on: bool = False, flag_off: bool = False) -> bool
     if flag_on:
         return True
     return _env_truthy("CLI_MINIMALIST")
+
+
+def _filesystem_year(book_dir: Path, source: TagSnapshot | None, current: TagSnapshot) -> str:
+    """Return the oldest year present in the book folder or audio filenames."""
+    candidates: list[int] = []
+    for name in (
+        book_dir.name,
+        source.path.name if source and source.path else "",
+        current.path.name if current.path else "",
+    ):
+        if match := re.search(r"\((\d{4})\)", name or ""):
+            candidates.append(int(match.group(1)))
+    return str(min(candidates)) if candidates else ""
+
+
+def resolve_local_date(fs_year: str, id3_year: str) -> str:
+    """Apply the locked no-OL rule: choose the older available local year."""
+    years = [int(y) for y in (fs_year, id3_year) if y and y.isdigit()]
+    return str(min(years)) if years else (fs_year or id3_year or "")
 
 
 def _pick_desired(
@@ -195,30 +214,14 @@ def _pick_desired(
 
     album = title
 
-    folder_year = ""
-    ym = _FOLDER_YEAR.search(book_dir.name)
-    if ym:
-        folder_year = ym.group(1)
-
-    date = ""
-    if folder_year:
-        cur_y = get_year_from_date(current.date)
-        src_y = get_year_from_date(source.date) if source and source.date else ""
-        # ±1 year near-tie (publication vs audiobook/edition): leave id3 alone.
-        if cur_y and abs(int(cur_y) - int(folder_year)) == 1:
-            date = cur_y
-        else:
-            date = folder_year
-            if cur_y and cur_y != folder_year:
-                reasons.append(f"date {cur_y} → {folder_year}")
-            elif src_y and src_y != folder_year:
-                reasons.append(f"date from folder ({folder_year}) over source {src_y}")
-    elif source and source.date:
-        date = source.date
-        if get_year_from_date(current.date) and get_year_from_date(current.date) != get_year_from_date(date):
-            reasons.append(f"date {get_year_from_date(current.date)} → {get_year_from_date(date)}")
-    elif current.date:
-        date = current.date
+    fs_year = _filesystem_year(book_dir, source, current)
+    cur_y = get_year_from_date(current.date)
+    src_y = get_year_from_date(source.date) if source and source.date else ""
+    date = resolve_local_date(fs_year, cur_y or src_y)
+    if date and cur_y and date != cur_y:
+        reasons.append(f"date {cur_y} → {date}")
+    elif date and src_y and date != src_y:
+        reasons.append(f"date {src_y} → {date}")
 
     narrator = ""
     if folder_narr and fuzz.token_set_ratio(folder_narr, author) / 100 < 0.5:

@@ -4,8 +4,7 @@ Locks shared-side behavior for known conflict rows. Phase 3 wires convert
 through shared colon/minimalist/stem helpers; remaining divergences
 (dates, GCS stem, folder priors, OL enrich/auto-write) stay documented.
 
-Review inventory: ``docs/metadata-conflicts.md`` (mixed statuses; see
-``PENDING_REVIEW_CONCERNS``).
+Review inventory: ``docs/metadata-conflicts.md`` (locked statuses).
 """
 
 from __future__ import annotations
@@ -43,14 +42,8 @@ CONFLICT_CONCERNS = (
     "OL auto-write",
 )
 
-# Rows still marked pending_review after Phase 3 adopt_shared / mode_flag wires.
-PENDING_REVIEW_CONCERNS = (
-    "dates",
-    "stem",
-    "OL enrich",
-    "folder priors",
-    "OL auto-write",
-)
+# All previously pending rows are now locked by the implementation plan.
+PENDING_REVIEW_CONCERNS = ()
 
 
 def _touch(path: Path, size: int = 10) -> Path:
@@ -80,7 +73,7 @@ def test_conflict_log_lists_pending_review_rows():
     log = Path(__file__).resolve().parents[2] / "docs" / "metadata-conflicts.md"
     assert log.is_file(), f"missing conflict log: {log}"
     text = log.read_text(encoding="utf-8")
-    # Legend definition + one backtick status per pending table row.
+    # Legend definition remains for future review items; locked rows use other statuses.
     assert text.count("`pending_review`") >= 1 + len(PENDING_REVIEW_CONCERNS)
     for concern in (
         "Colon",
@@ -142,8 +135,8 @@ def test_contract_shared_prefers_colon_subtitle(tmp_path: Path, monkeypatch):
 # ── Dates (±1 near-tie) ───────────────────────────────────────────────────────
 
 
-def test_contract_shared_near_tie_keeps_id3_year(tmp_path: Path):
-    """Shared: |folder−id3|==1 → leave id3. Convert scorer has no near-tie."""
+def test_contract_shared_near_tie_chooses_older_year(tmp_path: Path):
+    """Shared: |folder−id3|==1 → choose the older local year."""
     book_dir = tmp_path / "Lady Helen 01 - The Dark Days Club (2015)"
     book_dir.mkdir()
     m4b = book_dir / "The Dark Days Club.m4b"
@@ -164,15 +157,15 @@ def test_contract_shared_near_tie_keeps_id3_year(tmp_path: Path):
     _title, _author, _album, date, _narr, reasons = _pick_desired(
         book_dir, source, current, minimalist=True, cli=None
     )
-    assert date == "2016"
-    assert not any("2016" in r and "2015" in r for r in reasons)
+    assert date == "2015"
+    assert any("2016" in r and "2015" in r for r in reasons)
 
     # Convert MetadataScore.determine_date: when both years exist, prefer the
     # earlier one (id3 2016 vs fs 2015 → fs wins). Approximate without full scorer:
     id3_y, fs_y = 2016, 2015
     convert_date = str(id3_y) if id3_y < fs_y else str(fs_y)
     assert convert_date == "2015"
-    assert date != convert_date  # documented divergence (dates)
+    assert date == convert_date  # locked policy is shared
 
 
 def test_contract_shared_folder_year_when_not_near_tie(tmp_path: Path, monkeypatch):

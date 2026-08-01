@@ -6,6 +6,7 @@ from src.lib.metadata.ol_attach import (
     _apply_date_consensus,
     _apply_ol_fields_to_desired,
     _attach_open_library,
+    resolve_date_consensus,
     _year_consensus,
 )
 from src.lib.metadata.pick import resolve_minimalist
@@ -22,6 +23,7 @@ from src.lib.metadata.sources import (
     source_common_filename,
     source_common_title,
     source_files_display,
+    filename_gcs_context,
 )
 from src.lib.metadata.stem import (
     _looks_like_title,
@@ -48,6 +50,7 @@ __all__ = [
     "source_common_filename",
     "source_common_title",
     "source_files_display",
+    "filename_gcs_context",
     "_apply_date_consensus",
     "_apply_ol_fields_to_desired",
     "_attach_open_library",
@@ -55,6 +58,7 @@ __all__ = [
     "_stem_matches_book_title",
     "_usable_rename_stem",
     "_year_consensus",
+    "resolve_date_consensus",
     "preserve_original_year_in_stem",
     "year_suffix_from_stem",
 ]
