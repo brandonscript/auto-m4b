@@ -300,8 +300,13 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
     smart_print("\nVerifying id3 tags...", end="")
 
-    # Guarantee title/album before comparing — convert can leave them blank when
-    # source tags + fs parse both fail (e.g. boxed-set folders with Books1-3 names).
+    # Strip edition-only suffixes before comparing. Convert can leave title/album
+    # blank when source tags + fs parse both fail (e.g. boxed-set folders with
+    # Books1-3 names).
+    if book.title:
+        book.title = _strip_ol_edition_suffix(book.title)
+        if book.album:
+            book.album = _strip_ol_edition_suffix(book.album)
     ensure_title_and_album(book)
 
     book_to_check = Audiobook(m4b_to_check).extract_metadata()
@@ -395,38 +400,35 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         nonlocal title_needs_updating, new_tags
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
         author_for_title = book.artist or book.author or ""
-        if bool(ol_title):
-            if ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
-                new_title = shared_ol_title or _normalize_ol_title(NotNone(ol_title).title)
-                # Shared transforms (colon subtitle, always-minimalist, and
-                # edition enrichment when Open Library is configured).
-                new_title = _finalize_convert_title(new_title, author=author_for_title)
-                new_title = title_case_ol_title(new_title)
-                # If book.title already matches the words, prefer it only when it
-                # is at least as "Title-Cased" as the normalized OL title (more/equal
-                # capitals). That keeps intentional casing like brand names while
-                # still upgrading sentence-cased book.title values from OL.
-                if book.title and new_title.lower() == book.title.lower():
-                    book_caps = sum(1 for c in book.title if c.isupper())
-                    new_caps = sum(1 for c in new_title if c.isupper())
-                    if book_caps > new_caps:
-                        new_title = (
-                            strip_leading_the(book.title) if id3_tag == "sortalbum" else book.title
-                        )
-                # Skip only when the tag already has the exact desired value
-                # (including casing). Sentence-case tags must still be upgraded.
-                if new_title == (tag_value or ""):
-                    return
-                title_needs_updating = True
-                updates.append(lambda: _print_needs_updating(orop, tag_value, new_title))
-                new_tags[id3_tag] = new_title
-                new_tags["sortalbum"] = strip_leading_the(new_title)
-                # Keep book.* in sync so the final ensure_title_and_album pass
-                # does not clobber Title-Cased OL values with sentence-cased book.title.
-                if id3_tag in ("title", "album"):
-                    book.title = new_title
-                    book.album = new_title
-                    book.sortalbum = strip_leading_the(new_title)
+        if ol_title and ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
+            new_title = shared_ol_title or _normalize_ol_title(NotNone(ol_title).title)
+            # Shared transforms (colon subtitle, always-minimalist, and
+            # edition enrichment when Open Library is configured).
+            new_title = _finalize_convert_title(new_title, author=author_for_title)
+            new_title = title_case_ol_title(new_title)
+            # If book.title already matches the words, prefer it only when it
+            # is at least as "Title-Cased" as the normalized OL title (more/equal
+            # capitals). That keeps intentional casing like brand names while
+            # still upgrading sentence-cased book.title values from OL.
+            if book.title and new_title.lower() == book.title.lower():
+                book_caps = sum(1 for c in book.title if c.isupper())
+                new_caps = sum(1 for c in new_title if c.isupper())
+                if book_caps > new_caps:
+                    new_title = strip_leading_the(book.title) if id3_tag == "sortalbum" else book.title
+            # Skip only when the tag already has the exact desired value
+            # (including casing). Sentence-case tags must still be upgraded.
+            if new_title == (tag_value or ""):
+                return
+            title_needs_updating = True
+            updates.append(lambda: _print_needs_updating(orop, tag_value, new_title))
+            new_tags[id3_tag] = new_title
+            new_tags["sortalbum"] = strip_leading_the(new_title)
+            # Keep book.* in sync so the final ensure_title_and_album pass
+            # does not clobber Title-Cased OL values with sentence-cased book.title.
+            if id3_tag in ("title", "album"):
+                book.title = new_title
+                book.album = new_title
+                book.sortalbum = strip_leading_the(new_title)
         elif book.title:
             # Strip edition suffixes even when OL isn't configured —
             # source tags sometimes embed LibriVox/archive.org edition info

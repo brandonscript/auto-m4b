@@ -416,6 +416,13 @@ class Config:
 
     OPEN_LIBRARY_USER_AGENT = _OPEN_LIBRARY_USER_AGENT
 
+    @env_property(typ=float, default=30)
+    def _OPEN_LIBRARY_TIMEOUT(self):
+        """Seconds before an Open Library request times out. Default is 30."""
+        ...
+
+    OPEN_LIBRARY_TIMEOUT = _OPEN_LIBRARY_TIMEOUT
+
     @env_property(typ=bool, default=False)
     def _COVER_OCR(self):
         """Enable Tesseract OCR on cover art as a boost/veto for OL matching.

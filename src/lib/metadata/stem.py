@@ -13,6 +13,8 @@ from src.lib.cleaners import (
 from src.lib.fs_utils import safe_filename
 
 _YEAR_SUFFIX = re.compile(r"\s*\((\d{4})\)\s*$")
+_TRAILING_ARTICLE = re.compile(r"^(?P<body>.+?),\s*(?P<article>the|a|an)$", re.I)
+_LEADING_ARTICLE = re.compile(r"^(?P<article>the|a|an)\s+(?P<body>.+)$", re.I)
 
 
 def _usable_rename_stem(s: str, author: str = "") -> bool:
@@ -51,6 +53,18 @@ def near_match_ol_filename_stem(
         return ""
     stem = safe_filename(title_case_ol_title(ol))
     return preserve_original_year_in_stem(stem, *originals)
+
+
+def is_trailing_article_variant(local_title: str, ol_title: str) -> bool:
+    """True for ``Title, The`` versus Open Library's ``The Title`` form."""
+    local_match = _TRAILING_ARTICLE.match((local_title or "").strip())
+    ol_match = _LEADING_ARTICLE.match((ol_title or "").strip())
+    return bool(
+        local_match
+        and ol_match
+        and local_match.group("article").casefold() == ol_match.group("article").casefold()
+        and local_match.group("body").strip().casefold() == ol_match.group("body").strip().casefold()
+    )
 
 
 def _stem_matches_book_title(stem: str, title: str, author: str = "") -> bool:

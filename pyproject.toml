@@ -168,6 +168,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.scripts]
 app = "src:main"
 forever = "src:main"
+fixm4b = "src.fix_metadata:main"
 tests = "pytest:main"
 # fix-ffprobe = "./scripts/fix-ffprobe.sh"
 # install-docker-m4b-tool = "./scripts/install-docker-m4b-tool.sh"

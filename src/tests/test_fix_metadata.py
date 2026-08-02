@@ -7,17 +7,24 @@ from pathlib import Path
 import pytest
 
 from src.fix_metadata import (
+    CliPaths,
     FixPlan,
     TagSnapshot,
+    edit_plan,
     iter_book_dirs,
+    main,
     parse_apply_prompt,
+    prompt_apply,
+    prompt_ol_ref,
     resolve_cli_paths,
     resolve_target_paths,
+    _set_plan_filename,
     _banner_fixing_clause,
     _banner_missing_clause,
     _format_mode_banner,
     _format_planning_progress,
     _id3_already_correct_style,
+    _prompt_edit_value,
     _truth_props,
 )
 from src.lib.metadata.apply import apply_fix
@@ -36,6 +43,191 @@ def test_cli_accepts_short_o_for_ol():
     args = build_arg_parser().parse_args(["-o", "OL19765246W", "-i", "Author/Book"])
     assert args.ol_ref == "OL19765246W"
     assert args.interactive is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("e", "e"), ("edit", "e"), ("c", "c"), ("cancel", "c")],
+)
+def test_parse_apply_prompt_edit_and_cancel(raw: str, expected: str):
+    assert parse_apply_prompt(raw) == expected
+
+
+def test_edit_plan_uses_proposed_values_and_updates_filename(tmp_path: Path, monkeypatch):
+    m4b = _touch(tmp_path / "Current.m4b")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Proposed title",
+        desired_author="Proposed author",
+        desired_album="Proposed title",
+        desired_date="2020",
+        desired_narrator="",
+        desired_stem="Current",
+        current=TagSnapshot(path=m4b),
+    )
+    answers = iter(["Edited title", "Edited author", "2021", "Narrator", "Edited"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    edit_plan(plan)
+
+    assert plan.desired_title == "Edited title"
+    assert plan.desired_album == "Edited title"
+    assert plan.desired_author == "Edited author"
+    assert plan.desired_date == "2021"
+    assert plan.desired_narrator == "Narrator"
+    assert plan.desired_stem == "Edited"
+    assert plan.rename_m4b_to == tmp_path / "Edited.m4b"
+
+
+def test_edit_filename_rejects_extension(tmp_path: Path):
+    m4b = _touch(tmp_path / "Current.m4b")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Book",
+        desired_author="Author",
+        desired_album="Book",
+        desired_date="",
+        desired_narrator="",
+        desired_stem="Current",
+        current=TagSnapshot(path=m4b),
+    )
+
+    assert _set_plan_filename(plan, "Edited.m4b") is False
+
+
+def test_prompt_apply_exposes_cancel_for_manual_ol(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "c")
+    plan = FixPlan(
+        book_dir=Path("."),
+        m4b=Path("book.m4b"),
+        source=None,
+        desired_title="Book",
+        desired_author="Author",
+        desired_album="Book",
+        desired_date="",
+        desired_narrator="",
+        desired_stem="book",
+        current=TagSnapshot(),
+    )
+
+    assert prompt_apply(plan, manual_ol_pending=True) == "c"
+
+
+def _main_manual_ol_plan(tmp_path: Path) -> FixPlan:
+    m4b = _touch(tmp_path / "Book.m4b")
+    return FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Book",
+        desired_author="Author",
+        desired_album="Book",
+        desired_date="2020",
+        desired_narrator="",
+        desired_stem="Book",
+        current=TagSnapshot(title="Book", date="2020", path=m4b),
+    )
+
+
+def _stub_main_for_manual_ol(monkeypatch, tmp_path: Path, plan: FixPlan):
+    import src.fix_metadata as module
+
+    monkeypatch.setattr(module, "resolve_cli_paths", lambda: CliPaths())
+    monkeypatch.setattr(
+        module, "resolve_target_paths", lambda _paths, _cli: [tmp_path]
+    )
+    monkeypatch.setattr(
+        module, "iter_book_dirs", lambda _paths, recursive: [tmp_path]
+    )
+    monkeypatch.setattr(module, "plan_fix", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(module, "_apply_cleanup_filename", lambda *args: None)
+    monkeypatch.setattr(module, "_print_planning_progress", lambda *args: None)
+    monkeypatch.setattr(module, "_clear_planning_progress", lambda: None)
+    monkeypatch.setattr(module, "print_plan", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "print_ol_session_notice", lambda **kwargs: None)
+
+
+def test_manual_ol_can_be_edited_before_confirmation(tmp_path: Path, monkeypatch):
+    import src.fix_metadata as module
+
+    plan = _main_manual_ol_plan(tmp_path)
+    _stub_main_for_manual_ol(monkeypatch, tmp_path, plan)
+    applied: list[FixPlan] = []
+
+    def fake_attach(current_plan, **kwargs):
+        if kwargs.get("ol_ref"):
+            current_plan.ol_status = "forced"
+            current_plan.ol_title = "Open Library title"
+            current_plan.desired_title = "Open Library title"
+            current_plan.desired_album = "Open Library title"
+
+    monkeypatch.setattr(module, "_attach_open_library", fake_attach)
+    monkeypatch.setattr(module, "prompt_ol_ref", lambda: "OL123W")
+    monkeypatch.setattr(
+        module, "edit_plan", lambda current_plan: setattr(current_plan, "desired_title", "Edited title")
+    )
+    monkeypatch.setattr(module, "apply_fix", lambda current_plan, **kwargs: applied.append(current_plan))
+    choices = iter(["o", "e"])
+    monkeypatch.setattr(module, "prompt_apply", lambda *args, **kwargs: next(choices))
+
+    assert main(["-i", str(tmp_path)]) == 0
+    assert len(applied) == 1
+    assert applied[0].desired_title == "Edited title"
+
+
+def test_manual_ol_cancel_restores_original_proposal(tmp_path: Path, monkeypatch):
+    import src.fix_metadata as module
+
+    plan = _main_manual_ol_plan(tmp_path)
+    _stub_main_for_manual_ol(monkeypatch, tmp_path, plan)
+    shown_titles: list[str] = []
+    applied: list[FixPlan] = []
+
+    def fake_attach(current_plan, **kwargs):
+        if kwargs.get("ol_ref"):
+            current_plan.ol_status = "forced"
+            current_plan.ol_title = "Open Library title"
+            current_plan.desired_title = "Open Library title"
+            current_plan.desired_album = "Open Library title"
+
+    monkeypatch.setattr(module, "_attach_open_library", fake_attach)
+    monkeypatch.setattr(module, "prompt_ol_ref", lambda: "OL123W")
+    monkeypatch.setattr(
+        module,
+        "print_plan",
+        lambda current_plan, **kwargs: shown_titles.append(current_plan.desired_title),
+    )
+    choices = iter(["o", "c", "s"])
+    monkeypatch.setattr(module, "prompt_apply", lambda *args, **kwargs: next(choices))
+    monkeypatch.setattr(module, "apply_fix", lambda current_plan, **kwargs: applied.append(current_plan))
+
+    assert main(["-i", str(tmp_path)]) == 0
+    assert shown_titles == ["Book", "Open Library title", "Book"]
+    assert applied == []
+
+
+def test_edit_prompt_ctrl_c_propagates(monkeypatch):
+    def raise_interrupt(_prompt):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", raise_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        _prompt_edit_value("Title", "Proposed title")
+
+
+def test_open_library_ref_prompt_ctrl_c_propagates(monkeypatch):
+    def raise_interrupt(_prompt):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", raise_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        prompt_ol_ref()
 
 
 def test_cli_error_is_readable(capfd):

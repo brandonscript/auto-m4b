@@ -45,8 +45,18 @@ See the [Docker](#docker) section below for the full compose example and `docker
 ```bash
 git clone https://github.com/brandonscript/auto-m4b.git
 cd auto-m4b
-poetry install
+./install.sh
 ```
+
+`install.sh` uses its own location to find the Git checkout, so the repository
+can live anywhere. It installs the Poetry environment and links `fixm4b` into
+`~/.local/bin`; add that directory to `PATH` if needed:
+
+```bash
+fixm4b -i "Author, Name"
+```
+
+For an existing checkout, `poetry run fixm4b ...` is also available directly.
 
 ## Docker
 
@@ -191,6 +201,7 @@ All options are set via environment variables (`.env` file or shell environment)
 | `CLEANUP_FILENAMES`           | `N`           | Set to `Y` to opt into metadata-driven filename cleanup; the safe default preserves trusted GCS-derived names                                  |
 | `NO_CATS`                     | `N`           | Set to `Y` to suppress the ASCII cat art between loops                                                                                            |
 | `OPEN_LIBRARY_USER_AGENT`     | _(none)_      | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup))           |
+| `OPEN_LIBRARY_TIMEOUT`        | `30`          | Open Library request timeout in seconds                                                                                                           |
 | `POST_CONVERT_SCRIPT`         | _(none)_      | Path to a Python (`.py`) or bash (`.sh`) script to run after each successful conversion (see [Post-conversion scripts](#post-conversion-scripts)) |
 | `POST_CONVERT_SCRIPT_TIMEOUT` | `60`          | Seconds before the post-convert script is killed                                                                                                  |
 

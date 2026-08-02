@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import clean_string, minimalist_title
+from src.lib.cleaners import clean_string, minimalist_title, title_case_ol_title
 from src.lib.fs_utils import ensure_audio_ext, safe_filename
 from src.lib.metadata.models import CliPaths, FixPlan, SourceResolutionError, TagSnapshot
 from src.lib.metadata.ol_attach import _attach_open_library
@@ -25,6 +26,7 @@ from src.lib.metadata.sources import (
 from src.lib.metadata.stem import (
     _stem_matches_book_title,
     _usable_rename_stem,
+    is_trailing_article_variant,
     near_match_ol_filename_stem,
     preserve_original_year_in_stem,
 )
@@ -38,12 +40,60 @@ def _apply_cleanup_filename(plan: FixPlan, local_title: str) -> None:
     if not cfg.CLEANUP_FILENAMES:
         return
 
-    cleanup_stem = near_match_ol_filename_stem(
-        local_title,
-        plan.ol_title,
-        plan.desired_stem,
-        plan.m4b.stem,
-    )
+    article_variant = is_trailing_article_variant(local_title, plan.ol_title)
+    numeric_local_title = None
+    if plan.ol_title:
+        from src.lib.ol_lookup import _strip_boundary_number, _title_sim
+
+        numeric_local_title = _strip_boundary_number(local_title)
+        numeric_fallback = bool(
+            numeric_local_title
+            and _title_sim(numeric_local_title, plan.ol_title)[0] >= 0.9
+        )
+    else:
+        numeric_fallback = False
+    if article_variant:
+        canonical_title = title_case_ol_title(plan.ol_title)
+        if plan.desired_title != canonical_title:
+            plan.desired_title = canonical_title
+            plan.desired_album = canonical_title
+            plan.reasons.append(
+                f"use Open Library article ordering for tags "
+                f"{local_title!r} → {canonical_title!r}"
+            )
+        cleanup_stem = preserve_original_year_in_stem(
+            safe_filename(title_case_ol_title(local_title)),
+            plan.desired_stem,
+            plan.m4b.stem,
+        )
+    elif numeric_fallback:
+        def _filename_has_boundary_number(value: str) -> bool:
+            stem = Path(value).stem
+            return bool(
+                re.match(r"^\s*#?\d+\b", stem)
+                or re.search(r"(?:^|[\s._-])#?\d+\s*[\])]?$", stem)
+            )
+
+        original_filename_has_number = any(
+            _filename_has_boundary_number(value)
+            for value in (plan.m4b.stem, plan.fs_files)
+            if value
+        )
+        if original_filename_has_number:
+            cleanup_stem = safe_filename(title_case_ol_title(local_title))
+        else:
+            cleanup_stem = near_match_ol_filename_stem(
+                plan.m4b.stem,
+                plan.ol_title,
+                plan.m4b.stem,
+            )
+    else:
+        cleanup_stem = near_match_ol_filename_stem(
+            local_title,
+            plan.ol_title,
+            plan.desired_stem,
+            plan.m4b.stem,
+        )
     if not cleanup_stem or cleanup_stem == plan.desired_stem:
         return
 

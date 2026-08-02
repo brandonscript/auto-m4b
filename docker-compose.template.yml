@@ -22,6 +22,7 @@ services:
       # - OVERWRITE_EXISTING=N
       # - ON_COMPLETE=archive
       # - CLEANUP_FILENAMES=N
+      # - OPEN_LIBRARY_TIMEOUT=30
       # - MAX_BITRATE=64
       # - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
       # - POST_CONVERT_SCRIPT_TIMEOUT=30

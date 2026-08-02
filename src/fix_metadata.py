@@ -31,6 +31,7 @@ Host CLI paths (set in shell; mirror compose var names)::
 from __future__ import annotations
 
 import argparse
+import copy
 import os
 import shutil
 import sys
@@ -64,9 +65,11 @@ from src.lib.metadata.ol_attach import (
 )
 from src.lib.metadata.priors import _is_cli_root, _loose_m4b_in_author_folder
 from src.lib.metadata.sources import _has_audio, _is_under
+from src.lib.metadata.sources import _QUALITY_TXT
 from src.lib.metadata.plan import _apply_cleanup_filename
 from src.lib.metadata.stem import _stem_matches_book_title
 from src.lib.parsers import get_year_from_date
+from src.lib.fs_utils import ensure_audio_ext, safe_filename
 from src.lib.term import (
     LIGHT_GREY_COLOR,
     border,
@@ -79,6 +82,7 @@ from src.lib.term import (
     print_grey,
     print_mint,
     print_orange,
+    print_pink,
     print_red,
     smart_print,
     tint_path,
@@ -342,6 +346,7 @@ def _print_framed_prop(
 def _print_proposed_block(
     tag_rows: list[tuple[str, str | None, str | None, bool]],
     rename: tuple[str, str] | None = None,
+    description_update: bool = False,
 ) -> None:
     """Print Proposed fixes with aligned tag columns; rename on its own line.
 
@@ -351,7 +356,7 @@ def _print_proposed_block(
     """
     from tinta import Tinta
 
-    if not tag_rows and not rename:
+    if not tag_rows and not rename and not description_update:
         return
 
     # Precompute displays for alignment (only rows that show an arrow/change pair)
@@ -410,6 +415,13 @@ def _print_proposed_block(
             .mint(new_name, sep="")
         )
         smart_print(s.to_str())
+    if description_update:
+        smart_print(
+            Tinta()
+            .banana("│ ", sep="")
+            .grey("Conversion log needs updating", sep="")
+            .to_str()
+        )
     _framed_footer(style="banana")
 
 
@@ -555,21 +567,40 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
                 )
         _framed_footer(style="light_grey")
 
+    artist_diff = not _prop_equal(cur.artist, plan.desired_author)
+    albumartist_diff = not _prop_equal(cur.albumartist, plan.desired_author)
+    if artist_diff:
+        author_display = cur.artist
+    elif albumartist_diff:
+        author_display = cur.albumartist
+    else:
+        author_display = cur.albumartist or cur.artist
+    title_diff = not _prop_equal(cur.title, plan.desired_title)
+    album_diff = not _prop_equal(cur.album, plan.desired_album)
+    title_display = cur.title if title_diff or not album_diff else cur.album
     tag_rows: list[tuple[str, str | None, str | None, bool]] = [
-        ("Title", cur.title, plan.desired_title, False),
-        ("Author", cur.albumartist or cur.artist, plan.desired_author, False),
-        (
-            "Date",
-            get_year_from_date(cur.date) or cur.date,
-            get_year_from_date(plan.desired_date) or plan.desired_date,
-            True,
-        ),
-        ("Narrator", cur.composer, plan.desired_narrator, False),
+        ("Title", title_display, plan.desired_title, False),
+        ("Author", author_display, plan.desired_author, False),
     ]
+    tag_rows.extend(
+        [
+            (
+                "Date",
+                get_year_from_date(cur.date) or cur.date,
+                get_year_from_date(plan.desired_date) or plan.desired_date,
+                True,
+            ),
+            ("Narrator", cur.composer, plan.desired_narrator, False),
+        ]
+    )
     rename = None
     if plan.rename_m4b_to:
         rename = (plan.m4b.name, plan.rename_m4b_to.name)
-    _print_proposed_block(tag_rows, rename=rename)
+    _print_proposed_block(
+        tag_rows,
+        rename=rename,
+        description_update=plan.needs_desc_rewrite,
+    )
 
 
 def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None) -> None:
@@ -590,7 +621,7 @@ def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None
 
 
 def parse_apply_prompt(raw: str) -> str:
-    """Normalize an interactive prompt response to y/s/o/m/q (default s)."""
+    """Normalize an interactive prompt response to y/s/e/o/m/c/q (default s)."""
     s = (raw or "").strip().lower()
     if not s:
         return "s"
@@ -602,18 +633,147 @@ def parse_apply_prompt(raw: str) -> str:
         return "o"
     if s in ("m", "match", "use match"):
         return "m"
+    if s in ("e", "edit"):
+        return "e"
+    if s in ("c", "cancel"):
+        return "c"
     if s in ("q", "quit"):
         return "q"
-    if len(s) == 1 and s in ("y", "s", "o", "m", "q", "n"):
+    if len(s) == 1 and s in ("y", "s", "o", "m", "e", "c", "q", "n"):
         return "s" if s == "n" else s
     return "s"
 
 
-def prompt_apply(plan: FixPlan) -> str:
+def _prompt_edit_value(
+    label: str,
+    current: str,
+    *,
+    can_clear: bool = True,
+    filename: bool = False,
+    input_default: str | None = None,
+) -> str:
+    """Prompt for one proposed value, prefilling it when readline is available."""
+    from tinta import Tinta
+
+    input_default = current if input_default is None else input_default
+    prompt = (
+        Tinta()
+        .banana(label, sep="")
+        .banana(" [", sep="")
+        .dark_grey(current, sep="")
+        .banana("]: ", sep="")
+        .to_str()
+    )
+    try:
+        import readline
+    except ImportError:
+        readline = None
+
+    try:
+        if readline is not None and sys.stdin.isatty():
+            readline.set_startup_hook(lambda: readline.insert_text(input_default))
+        raw = input(prompt)
+    except EOFError:
+        smart_print("")
+        return current
+    except KeyboardInterrupt:
+        smart_print("")
+        raise
+    finally:
+        if readline is not None:
+            readline.set_startup_hook()
+
+    if not raw.strip():
+        return input_default
+    if raw.strip() == "_":
+        if filename:
+            print_orange("  Filename cannot be blank.")
+            return current
+        return "" if can_clear else current
+    return raw.strip()
+
+
+def _set_plan_filename(plan: FixPlan, value: str) -> bool:
+    """Set a proposed filename and its companion description rename."""
+    name = Path(value.strip()).name
+    if not name or name in (".", ".."):
+        print_orange("  Filename cannot be blank.")
+        return False
+    if Path(name).suffix:
+        print_orange("  Filename must not include an extension.")
+        return False
+    stem = name
+    stem = safe_filename(stem)
+    if not stem:
+        print_orange("  Filename is not usable.")
+        return False
+    target = plan.m4b.with_name(ensure_audio_ext(stem, ".m4b"))
+    plan.desired_stem = target.stem
+    plan.rename_m4b_to = None if target == plan.m4b else target
+    plan.rename_desc_to = None
+    if plan.desc_txt and plan.rename_m4b_to:
+        quality_match = _QUALITY_TXT.match(plan.desc_txt.name)
+        suffix = (
+            plan.desc_txt.name[len(quality_match.group(1)) :]
+            if quality_match
+            else ".txt"
+        )
+        plan.rename_desc_to = plan.desc_txt.with_name(f"{stem}{suffix}")
+    return True
+
+
+def edit_plan(plan: FixPlan) -> None:
+    """Edit proposed metadata fields in display order."""
+    smart_print("")
+    print_pink("Edit:")
+    print_dark_grey("Type _ to clear, [Return] to accept, Ctrl+C to quit")
+    smart_print("")
+    plan.desired_title = _prompt_edit_value("Title", plan.desired_title)
+    plan.desired_album = plan.desired_title
+    plan.desired_author = _prompt_edit_value("Author", plan.desired_author)
+    plan.desired_date = _prompt_edit_value("Date", plan.desired_date)
+    plan.desired_narrator = _prompt_edit_value("Narrator", plan.desired_narrator)
+    filename = plan.rename_m4b_to.name if plan.rename_m4b_to else plan.m4b.name
+    while True:
+        edited_filename = _prompt_edit_value(
+            "Filename",
+            filename,
+            can_clear=False,
+            filename=True,
+            input_default=Path(filename).stem,
+        )
+        if _set_plan_filename(plan, edited_filename):
+            break
+
+
+def _save_interactive_plan(
+    plan: FixPlan, *, cli: CliPaths, index: int, total: int
+) -> None:
+    """Write one interactive plan using the standard saving/Done display."""
+    print()
+    apply_fix(
+        plan,
+        dry_run=False,
+        cli=cli,
+        quiet=True,
+        progress=_print_status_line,
+    )
+    from tinta import Tinta
+
+    _finish_status_line(
+        Tinta().light_grey("Done ", sep="").mint("✓", sep="").to_str()
+    )
+    print()
+    if index < total - 1:
+        divider()
+
+
+def prompt_apply(plan: FixPlan, *, manual_ol_pending: bool = False) -> str:
     """Ask whether to apply *plan*.
 
     Returns ``y``, ``s`` (skip), ``o`` (open library), ``m`` (use low-confidence
-    match), ``q`` (quit), or ``interrupt`` (Ctrl+C).
+    match), ``e`` (edit), ``c`` (cancel manual OL), ``q`` (quit), or
+    ``interrupt`` (Ctrl+C).
     """
     try:
         from tinta import Tinta
@@ -659,13 +819,32 @@ def prompt_apply(plan: FixPlan) -> str:
         smart_print(
             Tinta()
             .dark_grey("  ", sep="")
+            .amber("e", sep="")
+            .dark_grey("  ", sep="")
+            .light_grey("edit proposed values", sep="")
+            .to_str()
+        )
+        if manual_ol_pending:
+            smart_print(
+                Tinta()
+                .dark_grey("  ", sep="")
+                .amber("c", sep="")
+                .dark_grey("  ", sep="")
+                .light_grey("cancel manual openlibrary lookup", sep="")
+                .to_str()
+            )
+        smart_print(
+            Tinta()
+            .dark_grey("  ", sep="")
             .amber("q", sep="")
             .dark_grey("  ", sep="")
             .light_grey("quit", sep="")
             .to_str()
         )
         smart_print("")
-        choice_keys = "y/S/m/o/q" if plan.ol_status == "low_confidence" else "y/S/o/q"
+        choice_keys = "y/S/m/o/e/c/q" if manual_ol_pending else (
+            "y/S/m/o/e/q" if plan.ol_status == "low_confidence" else "y/S/o/e/q"
+        )
         t = Tinta().dark_grey("[", sep="")
         for ch in choice_keys:
             if ch == "/":
@@ -683,12 +862,12 @@ def prompt_apply(plan: FixPlan) -> str:
 
 
 def prompt_ol_ref() -> str | None:
-    """Ask for an Open Library URL or id. Empty / Ctrl+C → None."""
+    """Ask for an Open Library URL or id. Empty → None; Ctrl+C quits the CLI."""
     try:
         from tinta import Tinta
 
         smart_print("")
-        print_amber("Open Library override")
+        print_amber("Open Library matching")
         smart_print("")
         print_dark_grey("Paste a work/edition URL or id, then press Enter.")
         print_dark_grey("Examples:")
@@ -698,8 +877,8 @@ def prompt_ol_ref() -> str | None:
         smart_print(Tinta().dark_grey("  ").to_str() + tint_path("OL45804W"))
         print_dark_grey("Leave blank to cancel.")
         smart_print("")
-        raw = input(Tinta().amber("OL ref ").dark_grey(": ").to_str()).strip()
-    except (EOFError, KeyboardInterrupt):
+        raw = input(Tinta().amber("Url or ID").dark_grey(": ").to_str()).strip()
+    except EOFError:
         smart_print("")
         return None
     return raw or None
@@ -1105,9 +1284,12 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         if interactive:
+            manual_ol_snapshot: FixPlan | None = None
             while True:
                 print_plan(plan, label="propose", cli=cli)
-                choice = prompt_apply(plan)
+                choice = prompt_apply(
+                    plan, manual_ol_pending=manual_ol_snapshot is not None
+                )
                 if choice in ("q", "interrupt"):
                     # smart_print collapses consecutive empties; force a blank gap
                     print()
@@ -1122,11 +1304,28 @@ def main(argv: list[str] | None = None) -> int:
                     print_dark_grey("(skipped)")
                     last_book_printed_done = False
                     break
+                if choice == "c":
+                    if manual_ol_snapshot is None:
+                        print_orange("  No manual Open Library lookup to cancel.")
+                        continue
+                    plan = manual_ol_snapshot
+                    manual_ol_snapshot = None
+                    print_dark_grey("  (manual Open Library lookup cancelled)")
+                    continue
+                if choice == "e":
+                    edit_plan(plan)
+                    _save_interactive_plan(
+                        plan, cli=cli, index=i, total=len(plans)
+                    )
+                    last_book_printed_done = i == len(plans) - 1
+                    break
                 if choice == "o":
                     ref = prompt_ol_ref()
                     if not ref:
                         print_dark_grey("  (cancelled — showing proposal again)")
                         continue
+                    if manual_ol_snapshot is None:
+                        manual_ol_snapshot = copy.deepcopy(plan)
                     _attach_open_library(
                         plan, ol_ref=ref, apply_ol_tags=True, minimalist=minimalist
                     )
@@ -1143,20 +1342,10 @@ def main(argv: list[str] | None = None) -> int:
                     print_mint("  Using Open Library match", highlight_color=LIGHT_GREY_COLOR)
                     continue
                 if choice == "y":
-                    # smart_print collapses consecutive empties; match conversion spacing
-                    print()
-                    _print_status_line("Saving tags...")
-                    apply_fix(plan, dry_run=False, cli=cli, quiet=True)
-                    from tinta import Tinta
-
-                    _finish_status_line(
-                        Tinta().light_grey("Done ", sep="").mint("✓", sep="").to_str()
+                    _save_interactive_plan(
+                        plan, cli=cli, index=i, total=len(plans)
                     )
                     last_book_printed_done = i == len(plans) - 1
-                    print()  # single blank after Done
-                    if i < len(plans) - 1:
-                        # print_plan leads with one blank; do not add another here
-                        divider()
                     break
             continue
 

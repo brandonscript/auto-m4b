@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "$SOURCE" ]]; do
+    SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+FIXM4B="$REPO_ROOT/.venv/bin/fixm4b"
+
+if [[ ! -x "$FIXM4B" ]]; then
+    printf 'fixm4b is not installed for %s\n' "$REPO_ROOT" >&2
+    printf 'Run %s/install.sh first.\n' "$REPO_ROOT" >&2
+    exit 1
+fi
+
+exec "$FIXM4B" "$@"

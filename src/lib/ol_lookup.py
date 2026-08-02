@@ -220,6 +220,60 @@ OL_MATCH_MIN = 0.5
 # Drop pure noise from free-text q= fallback; keep edition-subtitle hits (~0.2).
 OL_LOW_CONFIDENCE_MIN = 0.15
 
+_BOUNDARY_NUMBER_PREFIX = re.compile(
+    r"^\s*(?:#\s*)?(?P<number>\d+)(?:\s*[-:._)]\s*|\s+)(?P<rest>.+?)\s*$"
+)
+_BOUNDARY_NUMBER_SUFFIX = re.compile(
+    r"^\s*(?P<rest>.+?)\s+[-:._(#]*\s*(?:#\s*)?(?P<number>\d+)\s*[\])]?\s*$"
+)
+_NUMBERED_TITLE_MARKER = re.compile(
+    r"(?:^|[\s([#])(?:book|bk|vol(?:ume)?|part|pt\.?|chapter|ch\.?)?\s*#?\s*\d+\b"
+    r"|(?:^|[\s([#])#\s*\d+\b",
+    re.I,
+)
+
+
+def _strip_boundary_number(title: str) -> str | None:
+    """Return a meaningful title with one leading/trailing number removed."""
+    value = (title or "").strip()
+    if not value:
+        return None
+
+    for pattern in (_BOUNDARY_NUMBER_PREFIX, _BOUNDARY_NUMBER_SUFFIX):
+        match = pattern.match(value)
+        if not match:
+            continue
+        stripped = match.group("rest").strip(" -:._()[]")
+        if stripped and re.search(r"[^\W\d_]", stripped, re.UNICODE):
+            return stripped
+    return None
+
+
+def _has_numbered_title_marker(title: str) -> bool:
+    """True when a title contains a recognizable numbered-book marker."""
+    return bool(_NUMBERED_TITLE_MARKER.search(title or ""))
+
+
+def _safe_numeric_fallback_matches(
+    matches: list[OpenLibrarySearchResult],
+) -> list[OpenLibrarySearchResult]:
+    """Remove ambiguous numbered results from a stripped-title fallback.
+
+    A base-title lookup must not select ``Series #2`` merely because the local
+    title had a trailing ``01``. Prefer an unnumbered work when one is present;
+    if the fallback only returns numbered variants, reject it.
+    """
+    if not matches:
+        return []
+
+    unnumbered = [m for m in matches if not _has_numbered_title_marker(m.get("title", ""))]
+    if unnumbered:
+        return unnumbered
+
+    # A numbered-only fallback is unsafe: the original query did not establish
+    # that this is the same numbered work.
+    return []
+
 
 def _edition_title_strings(edition: dict) -> list[str]:
     """Work/edition title variants for similarity scoring."""
@@ -243,7 +297,7 @@ def _fetch_work_editions(work_key: str, *, agent: str) -> list[dict]:
     key = work_key if work_key.startswith("/") else f"/works/{work_key}"
     try:
         url = f"https://openlibrary.org{key}/editions.json"
-        response = requests.get(url, headers={"User-Agent": agent}, timeout=30)
+        response = requests.get(url, headers={"User-Agent": agent}, timeout=cfg.OPEN_LIBRARY_TIMEOUT)
         response.raise_for_status()
         entries = response.json().get("entries") or []
     except Exception as e:
@@ -834,7 +888,9 @@ def open_library_lookup_author(
         found = 0
         for name in list(set([author_lower, author_no_periods, author_period_spaces])):
             url = f"https://openlibrary.org/search/authors.json?q={urllib.parse.quote_plus(name)}"
-            response = requests.get(url, headers={"User-Agent": agent_string})
+            response = requests.get(
+                url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+            )
             response.raise_for_status()
             data = response.json()
             matches.extend(
@@ -1071,75 +1127,116 @@ def open_library_lookup_title(
 
     try:
         title_lower = title.lower().strip()
-        title_no_periods = title_lower.replace(".", "")
-        title_no_punctuation = junk_chars_title_pattern.sub("", title_lower)
-        title_unchunked = title_chunk_pattern.sub("", title_lower)
-        title_no_leading_article = strip_leading_articles(title_lower)
-        search_titles = list(
-            {
-                title_lower,
-                title_no_periods,
-                title_no_punctuation,
-                title_unchunked,
-                title_no_leading_article,
-            }
-            - {""}
-        )
+        numeric_fallback = _strip_boundary_number(title_lower)
 
-        matches = []
-        found = 0
-        for t in search_titles:
-            urls = (
-                [
-                    f"https://openlibrary.org/search.json?title={urllib.parse.quote_plus(t)}&author={urllib.parse.quote_plus(a)}"
-                    for a in authors
-                ]
-                if authors
-                else [f"https://openlibrary.org/search.json?title={urllib.parse.quote_plus(t)}"]
+        def _search_titles(base: str) -> list[str]:
+            title_no_periods = base.replace(".", "")
+            title_no_punctuation = junk_chars_title_pattern.sub("", base)
+            title_unchunked = title_chunk_pattern.sub("", base)
+            title_no_leading_article = strip_leading_articles(base)
+            return list(
+                dict.fromkeys(
+                    value
+                    for value in (
+                        base,
+                        title_no_periods,
+                        title_no_punctuation,
+                        title_unchunked,
+                        title_no_leading_article,
+                    )
+                    if value
+                )
             )
-            for url in urls:
-                response = requests.get(url, headers={"User-Agent": agent_string})
-                response.raise_for_status()
-                data = response.json()
-                matches.extend([OpenLibrarySearchResult(**d) for d in data.get("docs", [])])
-                found += data["numFound"]
 
-        # Structured title= often misses edition subtitles / alt marketing titles
-        # (e.g. "Dragoneye Reborn" → work titled "Eon"). Fall back to free-text q=.
-        if not matches:
+        def _search_family(base: str) -> list[OpenLibrarySearchResult]:
+            search_titles = _search_titles(base)
+            family_matches: list[OpenLibrarySearchResult] = []
+
             for t in search_titles:
                 urls = (
                     [
-                        f"https://openlibrary.org/search.json?q={urllib.parse.quote_plus(t)}&author={urllib.parse.quote_plus(a)}"
+                        f"https://openlibrary.org/search.json?title={urllib.parse.quote_plus(t)}&author={urllib.parse.quote_plus(a)}"
                         for a in authors
                     ]
                     if authors
-                    else [f"https://openlibrary.org/search.json?q={urllib.parse.quote_plus(t)}"]
+                    else [f"https://openlibrary.org/search.json?title={urllib.parse.quote_plus(t)}"]
                 )
                 for url in urls:
-                    response = requests.get(url, headers={"User-Agent": agent_string}, timeout=30)
+                    response = requests.get(
+                        url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+                    )
                     response.raise_for_status()
                     data = response.json()
-                    matches.extend([OpenLibrarySearchResult(**d) for d in data.get("docs", [])])
-                    found += data.get("numFound") or 0
+                    family_matches.extend([OpenLibrarySearchResult(**d) for d in data.get("docs", [])])
 
-        title_res, title_score, author_score, author_kind = _find_best_title(
-            title, matches, author=author, narrator=narrator, method=method
-        )
+            # Structured title= often misses edition subtitles / alt marketing
+            # titles (e.g. "Dragoneye Reborn" → work titled "Eon"). Fall back
+            # to free-text q= for this family only when title= found nothing.
+            if not family_matches:
+                for t in search_titles:
+                    urls = (
+                        [
+                            f"https://openlibrary.org/search.json?q={urllib.parse.quote_plus(t)}&author={urllib.parse.quote_plus(a)}"
+                            for a in authors
+                        ]
+                        if authors
+                        else [f"https://openlibrary.org/search.json?q={urllib.parse.quote_plus(t)}"]
+                    )
+                    for url in urls:
+                        response = requests.get(
+                            url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        family_matches.extend([OpenLibrarySearchResult(**d) for d in data.get("docs", [])])
+
+            return list({m["key"]: m for m in family_matches}.values())
+
+        def _evaluate(
+            query: str, family_matches: list[OpenLibrarySearchResult]
+        ) -> tuple[OpenLibrarySearchResult | None, float, float | None, Literal["author", "narrator"] | None]:
+            title_res, title_score, author_score, author_kind = _find_best_title(
+                query, family_matches, author=author, narrator=narrator, method=method
+            )
+            author_gate = author_score
+            if author_gate is None or author_gate < OL_MATCH_MIN:
+                if authors:
+                    author_gate = OL_MATCH_MIN
+            title_score = _boost_title_score_via_editions(
+                query,
+                family_matches,
+                title_res,
+                title_score,
+                author_gate,
+                agent=agent_string,
+            )
+            return title_res, title_score, author_score, author_kind
+
+        original_matches = _search_family(title_lower)
+        original_candidate = _evaluate(title_lower, original_matches) if original_matches else (None, 0.0, None, None)
+
+        fallback_candidate = (None, 0.0, None, None)
+        if numeric_fallback:
+            fallback_matches = _safe_numeric_fallback_matches(_search_family(numeric_fallback))
+            if fallback_matches:
+                fallback_candidate = _evaluate(numeric_fallback, fallback_matches)
+
+        # Prefer a confident match from the original title. The stripped
+        # fallback is only allowed to win when it is the stronger confident
+        # result, which handles "Elantris 01" without downgrading real numeric
+        # titles that Open Library knows.
+        if (
+            original_candidate[0] is not None
+            and original_candidate[1] >= OL_MATCH_MIN
+        ) or fallback_candidate[0] is None:
+            title_res, title_score, author_score, author_kind = original_candidate
+        elif fallback_candidate[1] >= OL_MATCH_MIN:
+            title_res, title_score, author_score, author_kind = fallback_candidate
+        else:
+            title_res, title_score, author_score, author_kind = original_candidate
+
         # Author resolved onto the query counts as enough confidence to try editions,
         # even when per-doc author_score is missing/weak.
-        author_gate = author_score
-        if author_gate is None or author_gate < OL_MATCH_MIN:
-            if authors:
-                author_gate = OL_MATCH_MIN
-        title_score = _boost_title_score_via_editions(
-            title,
-            matches,
-            title_res,
-            title_score,
-            author_gate,
-            agent=agent_string,
-        )
         return OpenLibraryTitle(
             title_res,
             title_score,
@@ -1220,7 +1317,7 @@ def open_library_fetch_by_ref(
     try:
         # Search by key — returns author_name / title in one round-trip.
         url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(f'key:{key}')}"
-        response = requests.get(url, headers={"User-Agent": agent_string}, timeout=30)
+        response = requests.get(url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT)
         response.raise_for_status()
         docs = response.json().get("docs") or []
         match = next((d for d in docs if d.get("key") == key), None)
@@ -1229,7 +1326,9 @@ def open_library_fetch_by_ref(
         if match is None:
             # Fallback: direct works/books JSON (title only; authors may be keys)
             direct = f"https://openlibrary.org{key}.json"
-            response = requests.get(direct, headers={"User-Agent": agent_string}, timeout=30)
+            response = requests.get(
+                direct, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+            )
             response.raise_for_status()
             data = response.json()
             title = data.get("title") or ""
@@ -1243,7 +1342,7 @@ def open_library_fetch_by_ref(
                     ar = requests.get(
                         f"https://openlibrary.org{akey}.json",
                         headers={"User-Agent": agent_string},
-                        timeout=30,
+                        timeout=cfg.OPEN_LIBRARY_TIMEOUT,
                     )
                     if ar.ok:
                         author_names.append(ar.json().get("name") or "")
