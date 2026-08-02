@@ -83,6 +83,7 @@ When `OPEN_LIBRARY_USER_AGENT` is set, proposals show an OL match + link (**disp
 | Force (CLI) | `--ol URL_OR_ID` | Single-book only; applies OL title/author/year |
 | Force (interactive) | `o` at the prompt | Paste URL or `OL…W` / `OL…M`, re-show proposal |
 | Accept low-confidence | `m` at the prompt | Only when OL shows a low-confidence candidate |
+| Edit proposed values | `e` at the prompt | Edit Title, Author, Date, Narrator, and filename one at a time |
 
 Auto lookup uses structured `title=` first, then free-text `q=` if that misses (edition subtitles / alt titles). **Dual title query:** every auto lookup always tries the full desired title **and** the minimalist-stripped core (even when minimalist mode is off), so marketing junk like *The Lady Helen Trilogy, Book 1 (Unabridged)* does not block a match on *The Dark Days Club*. When the work title scores below 0.5 but author confidence is solid (≥ 0.5, or the author was resolved onto the query), editions are fetched and titles/subtitles are scored so marketing titles (e.g. *Eon: Dragoneye Reborn*) can promote the match. Score ≥ 0.5 → confident match (display only for author/date); 0.15–0.5 → low-confidence (amber; use `m` to adopt). Below that → no match.
 
@@ -98,7 +99,16 @@ Interactive prompt:
 - `s` — skip (default)  
 - `m` — use this openlibrary match (only when low-confidence)  
 - `o` — provide an Open Library id or url  
+- `e` — edit the proposed Title, Author, Date, Narrator, and filename
+- `c` — cancel a pending manual Open Library lookup
 - `q` — quit  
+
+Edit mode uses the proposed values as defaults. Press Enter to keep a value,
+enter `_` to clear a metadata field, or enter a replacement filename. A
+filename cannot be cleared. When readline is available, values are pre-filled
+and editable; otherwise the prompts start blank and Enter keeps the proposal.
+After `o`, the lookup is provisional until `y` confirms it; `e` can revise it
+and `c` restores the proposal from before the lookup.
 
 Review layout: nested Reviewing book box, then Filesystem / id3 tags / optional Open Library blocks (mint = correct, amber = wrong/low-confidence OL, grey = missing, light grey = already correct), then a yellow Proposed fixes rail. Session-level Open Library skip/disable notice prints once under auto-recursive.
 

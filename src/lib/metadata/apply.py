@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from src.lib.id3_utils import write_id3_tags_mutagen
@@ -66,7 +67,12 @@ Size: {size}
 
 
 def apply_fix(
-    plan: FixPlan, *, dry_run: bool = True, cli: CliPaths | None = None, quiet: bool = False
+    plan: FixPlan,
+    *,
+    dry_run: bool = True,
+    cli: CliPaths | None = None,
+    quiet: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> None:
     tags = {
         "title": plan.desired_title,
@@ -85,11 +91,15 @@ def apply_fix(
 
     target = plan.m4b
     if plan.needs_tag_write:
+        if progress:
+            progress("Writing tags...")
         write_id3_tags_mutagen(target, tags)
         if not quiet:
             print_green(f"  ✓ wrote tags → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
 
     if plan.rename_m4b_to:
+        if progress:
+            progress("Renaming file...")
         if plan.rename_m4b_to.exists() and plan.rename_m4b_to.resolve() != target.resolve():
             print_orange(f"  ⚠ SKIP rename, target exists: [[{plan.rename_m4b_to.name}]]")
         else:

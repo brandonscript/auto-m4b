@@ -34,7 +34,12 @@ from src.lib.metadata import (
 )
 from src.lib.metadata.priors import _is_cli_root, _loose_m4b_in_author_folder
 from src.lib.metadata.ol_attach import resolve_date_consensus
-from src.lib.metadata.stem import _stem_matches_book_title, near_match_ol_filename_stem
+from src.lib.metadata.plan import _apply_cleanup_filename
+from src.lib.metadata.stem import (
+    _stem_matches_book_title,
+    is_trailing_article_variant,
+    near_match_ol_filename_stem,
+)
 from src.lib.ol_lookup import (
     OL_LOW_CONFIDENCE_MIN,
     OL_MATCH_MIN,
@@ -632,6 +637,97 @@ def test_archive_mirror_source(tmp_path: Path):
     assert src == arch_book.resolve()
 
 
+def _numeric_ol_match():
+    match = MagicMock()
+    match.title = "Elantris"
+    match.author = "Brandon Sanderson"
+    match.date = "2005"
+    match.key = "/works/OL5738147W"
+    match.url = "https://openlibrary.org/works/OL5738147W"
+    match.score = MagicMock(return_value=0.95)
+    match.has_match = True
+    return match
+
+
+def _numeric_ol_plan(tmp_path: Path, *, current: TagSnapshot) -> FixPlan:
+    m4b = _touch(tmp_path / "Elantis.m4b")
+    return FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Elantris 01",
+        desired_author="Brandon Sanderson",
+        desired_album="Elantris 01",
+        desired_date="2005",
+        desired_narrator="",
+        desired_stem="Elantris 01",
+        current=current,
+        fs_title="Elantris 01",
+    )
+
+
+def test_auto_ol_numeric_fallback_promotes_canonical_title_when_id3_supports_it(
+    tmp_path: Path, monkeypatch
+):
+    match = _numeric_ol_match()
+    monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
+    monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
+    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    plan = _numeric_ol_plan(
+        tmp_path,
+        current=TagSnapshot(title="Elantis", artist="Brandon Sanderson"),
+    )
+
+    _attach_open_library(plan, apply_ol_tags=False)
+
+    assert plan.desired_title == "Elantris"
+    assert plan.desired_album == "Elantris"
+    assert plan.desired_stem == "Elantris 01"
+
+
+def test_auto_ol_numeric_fallback_keeps_filesystem_title_without_id3_support(
+    tmp_path: Path, monkeypatch
+):
+    match = _numeric_ol_match()
+    monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
+    monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
+    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    plan = _numeric_ol_plan(
+        tmp_path,
+        current=TagSnapshot(title="Unrelated title", artist="Unrelated author"),
+    )
+
+    _attach_open_library(plan, apply_ol_tags=False)
+
+    assert plan.desired_title == "Elantris 01"
+    assert plan.desired_album == "Elantris 01"
+
+
+def test_auto_ol_promotes_author_when_id3_author_field_supports_it(
+    tmp_path: Path, monkeypatch
+):
+    match = _numeric_ol_match()
+    monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
+    monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
+    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    plan = _numeric_ol_plan(
+        tmp_path,
+        current=TagSnapshot(
+            title="Unrelated title",
+            artist="Narrator Name",
+            composer="Brandon Sanderson",
+        ),
+    )
+    plan.desired_title = "Unrelated 01"
+    plan.desired_album = "Unrelated 01"
+    plan.desired_author = "Brandon Sandersonn"
+
+    _attach_open_library(plan, apply_ol_tags=False)
+
+    assert plan.desired_author == "Brandon Sanderson"
+    assert plan.desired_title == "Unrelated 01"
+
+
 def test_missing_archive_raises(tmp_path: Path):
     converted = tmp_path / "converted"
     archive = tmp_path / "archive"
@@ -864,6 +960,90 @@ def test_cleanup_filename_preserves_leading_article():
         near_match_ol_filename_stem("the hollow boy", "The Hollow Boy")
         == "The Hollow Boy"
     )
+
+
+def test_numeric_title_cleanup_does_not_import_folder_number_into_filename(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
+    m4b = _touch(tmp_path / "Elantis.m4b")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Elantris",
+        desired_author="Brandon Sanderson",
+        desired_album="Elantris",
+        desired_date="2005",
+        desired_narrator="",
+        desired_stem="Elantris 01",
+        current=TagSnapshot(path=m4b),
+        fs_files="",
+        ol_title="Elantris",
+        ol_status="match",
+    )
+
+    _apply_cleanup_filename(plan, "Elantris 01")
+
+    assert plan.desired_stem == "Elantris"
+
+
+def test_numeric_title_cleanup_preserves_number_from_original_filename(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
+    m4b = _touch(tmp_path / "Elantis 01.m4b")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Elantris",
+        desired_author="Brandon Sanderson",
+        desired_album="Elantris",
+        desired_date="2005",
+        desired_narrator="",
+        desired_stem="Elantis 01",
+        current=TagSnapshot(path=m4b),
+        fs_files="",
+        ol_title="Elantris",
+        ol_status="match",
+    )
+
+    _apply_cleanup_filename(plan, "Elantris 01")
+
+    assert plan.desired_stem == "Elantris 01"
+
+
+def test_cleanup_filename_keeps_trailing_article_but_canonicalizes_id3_title(
+    tmp_path: Path, monkeypatch
+):
+    m4b = _touch(tmp_path / "Tiger Catcher, The (2019).m4b")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Tiger Catcher, The",
+        desired_author="Paullina Simons",
+        desired_album="Tiger Catcher, The",
+        desired_date="2019",
+        desired_narrator="",
+        desired_stem="Tiger Catcher, The (2019)",
+        current=TagSnapshot(
+            title="",
+            artist="Paullina Simons",
+            album="",
+            albumartist="Paullina Simons",
+            date="2019",
+            path=m4b,
+        ),
+        ol_title="The Tiger Catcher",
+        ol_status="match",
+    )
+    monkeypatch.setattr(cfg, "CLEANUP_FILENAMES", True)
+
+    assert is_trailing_article_variant("Tiger Catcher, The", "The Tiger Catcher")
+    _apply_cleanup_filename(plan, "Tiger Catcher, The")
+
+    assert plan.desired_title == "The Tiger Catcher"
+    assert plan.desired_album == "The Tiger Catcher"
+    assert plan.desired_stem == "Tiger Catcher, The (2019)"
+    assert plan.rename_m4b_to is None
 
 
 def test_source_common_title_strips_parts(tmp_path: Path, monkeypatch):

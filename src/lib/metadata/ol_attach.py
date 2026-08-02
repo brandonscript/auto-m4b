@@ -27,6 +27,8 @@ def _attach_open_library(
         ol_title_uses_dash_separator,
         open_library_fetch_by_ref,
         open_library_lookup_title,
+        _strip_boundary_number,
+        _title_sim,
     )
 
     try:
@@ -89,6 +91,7 @@ def _attach_open_library(
 
     plan.ol_title = title_case_ol_title(ol.title) if ol and ol.title else ""
     plan.ol_author = ol.author if ol else ""
+    plan.ol_narrator = ol.narrator if ol else ""
     plan.ol_year = ol.date if ol else ""
     plan.ol_key = ol.key if ol else ""
     plan.ol_url = ol.url if ol else ""
@@ -161,6 +164,74 @@ def _attach_open_library(
                     plan.desired_album = enriched
                     plan.ol_title = enriched
                     plan.reasons.append(f"title + OL subtitle ({sub!r})")
+
+    if plan.ol_status == "match" and plan.ol_author:
+        id3_author_support = max(
+            (
+                _title_sim(plan.ol_author, value)[0]
+                for value in (
+                    plan.current.artist,
+                    plan.current.albumartist,
+                    plan.current.composer,
+                )
+                if value
+            ),
+            default=0.0,
+        )
+        if id3_author_support >= 0.9 and plan.desired_author != plan.ol_author:
+            local_author = plan.desired_author
+            plan.desired_author = plan.ol_author
+            plan.reasons.append(
+                f"use Open Library author for ID3-supported local author "
+                f"{local_author!r} → {plan.ol_author!r}"
+            )
+        if plan.ol_narrator:
+            id3_narrator_support = max(
+                (
+                    _title_sim(plan.ol_narrator, value)[0]
+                    for value in (
+                        plan.current.artist,
+                        plan.current.albumartist,
+                        plan.current.composer,
+                    )
+                    if value
+                ),
+                default=0.0,
+            )
+            if id3_narrator_support >= 0.9 and plan.desired_narrator != plan.ol_narrator:
+                local_narrator = plan.desired_narrator or "(unknown)"
+                plan.desired_narrator = plan.ol_narrator
+                plan.reasons.append(
+                    f"use Open Library narrator for ID3-supported local narrator "
+                    f"{local_narrator!r} → {plan.ol_narrator!r}"
+                )
+
+    if (
+        not apply_ol_tags
+        and plan.ol_status == "match"
+        and plan.ol_title
+        and (numeric_title := _strip_boundary_number(plan.desired_title))
+        and _title_sim(numeric_title, plan.ol_title)[0] >= 0.9
+    ):
+        local_numeric_title = plan.desired_title
+        id3_values = (
+            plan.current.title,
+            plan.current.album,
+            plan.current.artist,
+            plan.current.albumartist,
+            plan.current.composer,
+        )
+        id3_support = max(
+            (_title_sim(plan.ol_title, value)[0] for value in id3_values if value),
+            default=0.0,
+        )
+        if id3_support >= 0.9:
+            plan.desired_title = plan.ol_title
+            plan.desired_album = plan.ol_title
+            plan.reasons.append(
+                f"use Open Library title for numeric local variant "
+                f"{local_numeric_title!r} → {plan.ol_title!r}"
+            )
 
     if apply_ol_tags and plan.ol_status == "forced":
         _apply_ol_fields_to_desired(plan)
@@ -249,6 +320,9 @@ def _apply_ol_fields_to_desired(plan: FixPlan) -> None:
     if plan.ol_author:
         plan.desired_author = plan.ol_author
         plan.reasons.append(f"author from Open Library ({plan.ol_author!r})")
+    if plan.ol_narrator:
+        plan.desired_narrator = plan.ol_narrator
+        plan.reasons.append(f"narrator from Open Library ({plan.ol_narrator!r})")
     if plan.ol_year:
         if get_year_from_date(plan.desired_date) != get_year_from_date(str(plan.ol_year)):
             plan.reasons.append(f"date from Open Library ({plan.ol_year})")

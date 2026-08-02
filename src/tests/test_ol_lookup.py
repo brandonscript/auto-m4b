@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from urllib.parse import unquote_plus
 from unittest.mock import MagicMock, patch
 
 from src.lib.ol_lookup import (
@@ -15,11 +16,13 @@ from src.lib.ol_lookup import (
     _desired_matches_edition_title,
     _edition_title_strings,
     _find_best_title,
+    _strip_boundary_number,
     _subtitle_attested_locally,
     _title_sim,
     id3_prefer_colon_separator,
     join_title_subtitle,
     ol_title_uses_dash_separator,
+    open_library_lookup_title,
 )
 
 
@@ -30,6 +33,111 @@ def test_author_name_sim_handles_list():
     assert _author_name_sim("", ["Tana French"]) == 0.0
     # String form still works
     assert _author_name_sim("Tana French", "Tana French") == 1.0
+
+
+def _ol_doc(key: str, title: str) -> dict:
+    return {
+        "key": key,
+        "title": title,
+        "name": title,
+        "author_name": ["Brandon Sanderson"],
+        "author_key": ["OL1A"],
+        "work_count": 10,
+        "edition_count": 1,
+    }
+
+
+def _mock_title_search(titles: dict[str, list[dict]]):
+    def get(url: str, **_kwargs):
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        query = (
+            url.split("title=", 1)[-1].split("&", 1)[0]
+            if "title=" in url
+            else url.split("q=", 1)[-1].split("&", 1)[0]
+        )
+
+        docs = titles.get(unquote_plus(query), [])
+        response.json.return_value = {"numFound": len(docs), "docs": docs}
+        return response
+
+    return get
+
+
+def test_strip_boundary_number_keeps_meaningful_title_only():
+    assert _strip_boundary_number("Elantris 01") == "Elantris"
+    assert _strip_boundary_number("01 Elantris") == "Elantris"
+    assert _strip_boundary_number("1984") is None
+
+
+def test_numeric_title_lookup_uses_stripped_fallback():
+    with (
+        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch(
+            "src.lib.ol_lookup.requests.get",
+            side_effect=_mock_title_search({"elantris": [_ol_doc("/works/OL5738147W", "Elantris")]}),
+        ),
+    ):
+        result = open_library_lookup_title("Elantris 01")
+
+    assert result is not None
+    assert result.title == "Elantris"
+    assert result.key == "/works/OL5738147W"
+
+
+def test_leading_numeric_title_lookup_uses_stripped_fallback():
+    with (
+        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch(
+            "src.lib.ol_lookup.requests.get",
+            side_effect=_mock_title_search({"elantris": [_ol_doc("/works/OL5738147W", "Elantris")]}),
+        ),
+    ):
+        result = open_library_lookup_title("01 Elantris")
+
+    assert result is not None
+    assert result.title == "Elantris"
+
+
+def test_numeric_title_lookup_prefers_original_numbered_title():
+    with (
+        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch(
+            "src.lib.ol_lookup.requests.get",
+            side_effect=_mock_title_search(
+                {
+                    "the 100": [_ol_doc("/works/OL100W", "The 100")],
+                    "the": [_ol_doc("/works/OL101W", "The")],
+                }
+            ),
+        ),
+    ):
+        result = open_library_lookup_title("The 100")
+
+    assert result is not None
+    assert result.title == "The 100"
+    assert result.key == "/works/OL100W"
+
+
+def test_numeric_title_lookup_rejects_ambiguous_numbered_fallbacks():
+    with (
+        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch(
+            "src.lib.ol_lookup.requests.get",
+            side_effect=_mock_title_search(
+                {
+                    "elantris": [
+                        _ol_doc("/works/OL1W", "Elantris #1"),
+                        _ol_doc("/works/OL2W", "Elantris #2"),
+                    ]
+                }
+            ),
+        ),
+    ):
+        result = open_library_lookup_title("Elantris 01")
+
+    assert result is not None
+    assert not result.has_match
 
 
 def test_title_sim_returns_ratio_and_token_set():

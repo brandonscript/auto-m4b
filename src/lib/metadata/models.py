@@ -97,6 +97,7 @@ class FixPlan:
     # Open Library (display; tags only forced via --ol / interactive o)
     ol_title: str = ""
     ol_author: str = ""
+    ol_narrator: str = ""
     ol_year: str = ""
     ol_key: str = ""
     ol_url: str = ""
