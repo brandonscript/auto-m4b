@@ -23,6 +23,7 @@ from src.lib.cleaners import (
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim
 from src.lib.metadata.ol_attach import resolve_date_consensus
+from src.lib.metadata.providers import MetadataCandidate, lookup_metadata
 from src.lib.ol_lookup import (
     id3_prefer_colon_separator,
     ol_match_band,
@@ -332,6 +333,34 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     ]
     ol_title = open_library_lookup_title(book.title, author=book.author, narrator=book.narrator, method="similarity")
     ol_status = ol_match_band(ol_title)
+    goodreads_match = lookup_metadata(
+        book.title,
+        author=book.author,
+        narrator=book.narrator,
+        lookup_goodreads=True,
+        lookup_open_library=False,
+    ).selected
+    if goodreads_match and goodreads_match.status == "match":
+        if ol_title and (
+            _title_sim(goodreads_match.title, ol_title.title)[0] < 0.85
+            or _title_sim(goodreads_match.author, ol_title.author)[0] < 0.85
+            or (goodreads_match.year and ol_title.date and goodreads_match.year != ol_title.date)
+        ):
+            print_debug(
+                "Goodreads/Open Library disagreement during verification; "
+                f"preferring Goodreads {goodreads_match.title!r}"
+            )
+        book.title = _normalize_ol_title(goodreads_match.title)
+        book.album = book.title
+        if goodreads_match.author:
+            book.artist = book.albumartist = goodreads_match.author
+        if goodreads_match.year:
+            book.date = goodreads_match.year
+        # Existing checks use the OL result as the authoritative fallback.
+        # Goodreads is authoritative when it has a confident match.
+        ol_title = None
+        ol_author_candidates = []
+        ol_status = "none"
     shared_ol_title = ""
     if ol_status in ("match", "low_confidence") and not book.path.is_file():
         from src.lib.config import cfg
@@ -373,8 +402,10 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     resolved_year = resolve_date_consensus(
         book.fs_year,
         book.id3_date,
-        ol_title.date if ol_title and ol_status in ("match", "low_confidence") else "",
-        ol_status=ol_status,
+        goodreads_match.year
+        if goodreads_match and goodreads_match.status == "match"
+        else (ol_title.date if ol_title and ol_status in ("match", "low_confidence") else ""),
+        ol_status="match" if goodreads_match and goodreads_match.status == "match" else ol_status,
     )
     if resolved_year:
         book.date = resolved_year
@@ -1254,6 +1285,54 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     return best_ol
 
 
+def _goodreads_early_extraction(
+    book: "Audiobook",
+    tag1: Any,
+    tag2: Any,
+) -> MetadataCandidate | None:
+    """Try Goodreads as a canonical metadata source before heuristic scoring."""
+    from src.lib.config import cfg
+    from src.lib.ol_lookup import _title_sim
+
+    if not cfg.GOODSCRAPS_USER_AGENT:
+        return None
+
+    title = (
+        (tag1.title or "").strip()
+        or (book.fs_title or "").strip()
+        or (tag1.album or "").strip()
+        or Path(book.basename).stem
+    )
+    author = (
+        (book.fs_author or "").strip()
+        or (tag1.albumartist or "").strip()
+        or (tag1.artist or "").strip()
+    )
+    narrator = (
+        (book.fs_narrator or "").strip()
+        or (getattr(tag2, "artist", None) or "").strip()
+        or (getattr(tag2, "composer", None) or "").strip()
+    )
+    if not title:
+        return None
+
+    result = lookup_metadata(
+        title,
+        author=author,
+        narrator=narrator,
+        lookup_goodreads=True,
+        lookup_open_library=False,
+    ).selected
+    if not result or result.status != "match" or not result.title:
+        return None
+
+    if author and _title_sim(author, result.author)[0] < _OL_AUTHOR_AGREE_MIN:
+        return None
+    if _title_sim(title, result.title)[0] < _OL_SOURCE_ANCHOR_MIN:
+        return None
+    return result
+
+
 def _narrator_from_remaining_tags(book: "Audiobook") -> str:
     """Post-OL narrator detection: once the author is known, scan ID3 fields for
     the narrator.  Handles cases the heuristic scorer misses, e.g. the artist
@@ -1373,14 +1452,32 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
         for s in _probe.get("streams", [])
     ) or bool(_extract_cover_art_mutagen(book.sample_audio1))
 
-    # ── OL-first extraction ────────────────────────────────────────────────────
-    # When OL is configured, ask it directly before heuristic scoring.
+    # ── Provider-first extraction ──────────────────────────────────────────────
+    # Query both enabled providers before heuristic scoring. Goodreads wins when
+    # confident; Open Library remains the fallback.
     # OL knows the canonical title/author, so a confident match avoids
     # misassigning fields (e.g. album="Laurie R. King", title="The God of
     # the Hive" → OL confirms title and author rather than guessing).
     ol_match = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
-    ol_resolved = ol_match is not None
-    if ol_resolved:
+    goodreads_match = _goodreads_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
+    provider_resolved = goodreads_match is not None or ol_match is not None
+    if goodreads_match:
+        if ol_match and (
+            _title_sim(goodreads_match.title, ol_match.title)[0] < 0.85
+            or _title_sim(goodreads_match.author, ol_match.author)[0] < 0.85
+            or (goodreads_match.year and ol_match.date and goodreads_match.year != ol_match.date)
+        ):
+            print_debug(
+                "Goodreads/Open Library disagreement; preferring Goodreads: "
+                f"{goodreads_match.title!r} vs {ol_match.title!r}"
+            )
+        book.title = _normalize_ol_title(goodreads_match.title)
+        book.album = book.title
+        book.sortalbum = strip_leading_articles(book.title)
+        if goodreads_match.author:
+            book.artist = goodreads_match.author
+            book.albumartist = goodreads_match.author
+    if provider_resolved:
         if re.search(r"\s{2,}", book.basename):
             folder_title = re.split(r"\s{2,}", book.basename, maxsplit=1)[-1].strip()
             if len(folder_title) > len(book.title):
@@ -1392,7 +1489,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     t3 = time.time()
 
-    if not ol_resolved:
+    if not provider_resolved:
         book.title = id3_score.determine_title(fallback=book.fs_title)
         book.album = book.title
         book.sortalbum = strip_leading_articles(book.title)
@@ -1403,7 +1500,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # When OL resolved the author, try the targeted post-OL helper first —
     # it handles explicit "read by …" prefixes that the scorer's _ar_but_no_aar
     # branch misses (it only awards points when there's a slash in the artist).
-    if ol_resolved:
+    if provider_resolved:
         book.narrator = _narrator_from_remaining_tags(book) or id3_score.determine_narrator(
             fallback=book.fs_narrator
         )
@@ -1420,7 +1517,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # Many rippers embed the folder/filename verbatim as the title tag.  Only strip when
     # the author appears at the very start followed by a dash separator so we don't
     # accidentally truncate legitimate subtitles like "Cat's Cradle - A Novel".
-    if not ol_resolved and book.title and book.artist:
+    if not provider_resolved and book.title and book.artist:
         _remainder = strip_leading_author_dash(book.title, book.artist)
         if _remainder != book.title and _remainder:
             book.title = _remainder
@@ -1475,7 +1572,8 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     # Use OL first-publish year when available; fall back to ID3 / filesystem.
     ol_year = ol_match.date if ol_match else ""
-    book.date = ol_year or id3_score.determine_date(book.fs_year)
+    provider_year = goodreads_match.year if goodreads_match else ol_year
+    book.date = provider_year or id3_score.determine_date(book.fs_year)
     if book.date:
         li(f"Date: {book.date}")
     # extract 4 digits from date
@@ -1487,7 +1585,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     if not book.has_id3_cover:
         li(f"No cover art")
 
-    # ── Open Library match summary ─────────────────────────────────────────────
+    # ── Provider match summary ────────────────────────────────────────────────
     if console:
         from src.lib.config import cfg
         if cfg.OPEN_LIBRARY_USER_AGENT:
@@ -1503,6 +1601,16 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
                     li(detail)
             else:
                 smart_print("Could not find a good match on openlibrary.org")
+        if cfg.GOODSCRAPS_USER_AGENT:
+            print()
+            if goodreads_match:
+                smart_print("Matched book on goodreads.com:")
+                li(f"Title: {goodreads_match.title}")
+                li(f"Author: {goodreads_match.author}")
+                if goodreads_match.year:
+                    li(f"First published: {goodreads_match.year}")
+            else:
+                smart_print("Could not find a good match on goodreads.com")
 
     t5 = time.time()
 

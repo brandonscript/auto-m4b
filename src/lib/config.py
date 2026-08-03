@@ -423,6 +423,24 @@ class Config:
 
     OPEN_LIBRARY_TIMEOUT = _OPEN_LIBRARY_TIMEOUT
 
+    @env_property(typ=str, default="")
+    def _GOODSCRAPS_USER_AGENT(self):
+        """User agent for the optional Goodreads metadata provider.
+
+        An empty value disables Goodreads lookups. Set this to an identifiable
+        application string when enabling the provider.
+        """
+        ...
+
+    GOODSCRAPS_USER_AGENT = _GOODSCRAPS_USER_AGENT
+
+    @env_property(typ=float, default=30)
+    def _GOODSCRAPS_TIMEOUT(self):
+        """Seconds before a Goodreads request times out. Default is 30."""
+        ...
+
+    GOODSCRAPS_TIMEOUT = _GOODSCRAPS_TIMEOUT
+
     @env_property(typ=bool, default=False)
     def _COVER_OCR(self):
         """Enable Tesseract OCR on cover art as a boost/veto for OL matching.

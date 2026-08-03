@@ -153,7 +153,8 @@ poetry run python -m src.fix_metadata -i "Author Name"
 poetry run python -m src.fix_metadata --apply "Author Name/Book Title (2020)"
 ```
 
-Full reference (path env vars, archive/`-s` source resolution, Open Library `--ol` / interactive `o`): **[docs/fix-metadata.md](docs/fix-metadata.md)**.
+Full reference (path env vars, archive/`-s` source resolution, Goodreads/Open Library
+controls, and interactive matching): **[docs/fix-metadata.md](docs/fix-metadata.md)**.
 
 ## Folder structure
 
@@ -202,8 +203,22 @@ All options are set via environment variables (`.env` file or shell environment)
 | `NO_CATS`                     | `N`           | Set to `Y` to suppress the ASCII cat art between loops                                                                                            |
 | `OPEN_LIBRARY_USER_AGENT`     | _(none)_      | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup))           |
 | `OPEN_LIBRARY_TIMEOUT`        | `30`          | Open Library request timeout in seconds                                                                                                           |
+| `GOODSCRAPS_USER_AGENT`       | _(none)_      | Identifiable user-agent string for optional Goodreads metadata lookups; setting it enables Goodreads-first comparison with Open Library             |
+| `GOODSCRAPS_TIMEOUT`          | `30`          | Goodreads request timeout in seconds                                                                                                               |
 | `POST_CONVERT_SCRIPT`         | _(none)_      | Path to a Python (`.py`) or bash (`.sh`) script to run after each successful conversion (see [Post-conversion scripts](#post-conversion-scripts)) |
 | `POST_CONVERT_SCRIPT_TIMEOUT` | `60`          | Seconds before the post-convert script is killed                                                                                                  |
+
+## Goodreads metadata
+
+Goodreads lookups are opt-in. Set `GOODSCRAPS_USER_AGENT` to an identifiable
+application string to enable them. When Goodreads and Open Library are both
+enabled, auto-m4b queries both, prefers a confident Goodreads match, and uses
+Open Library as a fallback. Confident disagreements are reported in diagnostics
+while Goodreads remains the selected source.
+
+The `fix_metadata` CLI also supports `--no-goodreads` and
+`--goodreads URL_OR_ID` for disabling automatic lookups or forcing a specific
+Goodreads book.
 
 ## Open Library setup
 

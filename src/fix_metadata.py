@@ -616,6 +616,63 @@ def print_plan(
                 )
         _framed_footer(style="light_grey")
 
+    if plan.goodreads_status in ("match", "forced", "none", "low_confidence", "error"):
+        header = "goodreads (forced)" if plan.goodreads_status == "forced" else "goodreads"
+        _framed_header(header, style="light_grey")
+        if plan.goodreads_status in ("none", "error"):
+            message = "(No matches found)" if plan.goodreads_status == "none" else "(lookup failed)"
+            smart_print(
+                Tinta()
+                .dark_grey("│ ", sep="")
+                .pink(message, sep="")
+                .to_str()
+            )
+        else:
+            low = plan.goodreads_status == "low_confidence"
+
+            def _goodreads_row(label: str, value: str, truth_val: str = "") -> None:
+                empty = not (value or "").strip()
+                display = value if not empty else "(missing)"
+                s = Tinta().dark_grey("│ ", sep="").grey(f"{label}: ", sep="")
+                if empty:
+                    s.dark_grey(display, sep="")
+                elif low and not _prop_equal(value, truth_val):
+                    s.amber(display, sep="")
+                elif _prop_equal(value, truth_val):
+                    s.mint(display, sep="")
+                else:
+                    s.amber(display, sep="")
+                smart_print(s.to_str())
+
+            _goodreads_row("Title", plan.goodreads_title, truth["title"])
+            _goodreads_row("Author", plan.goodreads_author, truth["author"])
+            _goodreads_row("Date", plan.goodreads_year, truth["date"])
+            if plan.goodreads_key:
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .grey("Book: ", sep="")
+                    .grey(plan.goodreads_key, sep="")
+                    .to_str()
+                )
+            if plan.goodreads_url:
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .grey("Link: ", sep="")
+                    .purple(plan.goodreads_url, sep="")
+                    .to_str()
+                )
+        if plan.provider_conflicts:
+            for conflict in plan.provider_conflicts:
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .amber(f"Comparison: {conflict}", sep="")
+                    .to_str()
+                )
+        _framed_footer(style="light_grey")
+
     _print_proposed_plan(plan, show_rename=show_rename)
 
 
@@ -976,14 +1033,18 @@ def prompt_ol_ref() -> str | None:
 
 
 
-def print_ol_session_notice(*, no_ol: bool = False) -> None:
-    """Session-level Open Library status (below auto-recursive, once)."""
+def print_ol_session_notice(*, no_ol: bool = False, no_goodreads: bool = False) -> None:
+    """Session-level metadata provider status (below auto-recursive, once)."""
     if no_ol:
         print_dark_grey("openlibrary  (disabled via --no-ol)")
         return
     ua = (os.environ.get("OPEN_LIBRARY_USER_AGENT") or "").strip()
     if not ua:
         print_dark_grey("openlibrary unavailable (set OPEN_LIBRARY_USER_AGENT to enable)")
+    if no_goodreads:
+        print_dark_grey("goodreads  (disabled via --no-goodreads)")
+    elif not (os.environ.get("GOODSCRAPS_USER_AGENT") or "").strip():
+        print_dark_grey("goodreads unavailable (set GOODSCRAPS_USER_AGENT to enable)")
 
 
 
@@ -1219,6 +1280,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Force Open Library work/edition (URL or OL…W / OL…M); requires a single book target",
     )
     parser.add_argument(
+        "-g",
+        "--goodreads",
+        dest="goodreads_ref",
+        default=None,
+        metavar="URL_OR_ID",
+        help="Force Goodreads book (URL or numeric ID); requires a single book target",
+    )
+    parser.add_argument(
         "--ignore",
         action="append",
         default=[],
@@ -1246,6 +1315,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--no-ol",
         action="store_true",
         help="Skip automatic Open Library lookup (still allows -o / interactive o)",
+    )
+    parser.add_argument(
+        "--no-goodreads",
+        action="store_true",
+        help="Skip automatic Goodreads lookup (still allows -g)",
     )
     parser.add_argument(
         "--minimalist",
@@ -1291,7 +1365,10 @@ def main(argv: list[str] | None = None) -> int:
         print_orange("No book folders found.")
         return 1
 
-    print_ol_session_notice(no_ol=bool(args.no_ol))
+    print_ol_session_notice(
+        no_ol=bool(args.no_ol),
+        no_goodreads=bool(args.no_goodreads),
+    )
 
     source_root = args.source.resolve() if args.source else None
     if source_root is not None and not source_root.exists():
@@ -1299,9 +1376,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     ol_ref = args.ol_ref
+    goodreads_ref = args.goodreads_ref
     if ol_ref and len(book_dirs) != 1:
         print_red(
             f"-o/--ol requires a single book target, but {len(book_dirs)} book dir(s) were selected"
+        )
+        return 1
+    if goodreads_ref and len(book_dirs) != 1:
+        print_red(
+            f"-g/--goodreads requires a single book target, but {len(book_dirs)} book dir(s) were selected"
         )
         return 1
 
@@ -1310,6 +1393,7 @@ def main(argv: list[str] | None = None) -> int:
     # Interactive (without forced -o): local scan first; OL attaches per book on review.
     defer_ol = interactive and not bool(ol_ref)
     lookup_ol_upfront = (not args.no_ol or bool(ol_ref)) and not defer_ol
+    lookup_goodreads_upfront = not args.no_goodreads or bool(goodreads_ref)
 
     plans: list[FixPlan] = []
     failures: list[SourceResolutionError] = []
@@ -1328,6 +1412,8 @@ def main(argv: list[str] | None = None) -> int:
                 require_source=require_source,
                 ol_ref=ol_ref,
                 lookup_ol=lookup_ol_upfront,
+                goodreads_ref=goodreads_ref,
+                lookup_goodreads=lookup_goodreads_upfront,
                 minimalist=minimalist,
             )
         except SourceResolutionError as e:

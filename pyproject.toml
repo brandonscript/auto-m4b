@@ -123,7 +123,7 @@ humanize = "^4.12.3"
 ffmpeg-python = "^0.2.0"
 numpy = { version = "<2", platform = "*" }
 pydantic = "^2.11.5"
-tinta = "1.0.0"
+tinta = "^1.1.0"
 python-dotenv = "^1.1.0"
 columnar = "^1.4.1"
 # python-ffmpeg = "^1.0.17" # No!
@@ -149,6 +149,7 @@ protobuf = "^6.31.1"
 sentencepiece = "^0.2.0"
 watchdog = ">=4.0"
 titlecase = "^2.4.1"
+goodscraps = "^0.1.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"

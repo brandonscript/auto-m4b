@@ -26,6 +26,8 @@ Domain tests: [`src/tests/test_metadata_plan.py`](../src/tests/test_metadata_pla
 | **OL edition enrich** | Shared edition base+subtitle enrichment when `OPEN_LIBRARY_USER_AGENT` is set. | Edition base+subtitle when locally attested. | `adopt_shared` |
 | **Folder priors** | Pipeline roots are clamped using configured paths. | `#plex` / parent-author / loose author-dir / cli-root clamp. | `adopt_shared` |
 | **OL auto-write** | Auto-applies shared OL title/author/date when the user agent is configured. | Display-only unless forced. | `keep_convert_adapter` |
+| **Goodreads selection** | When enabled, queries both providers and prefers a confident Goodreads result; Open Library remains fallback. | Queries both providers and displays comparison; forced `--goodreads` applies the selected book. | `adopt_shared` |
+| **Provider disagreements** | Reports Goodreads/Open Library field conflicts and continues with Goodreads selected. | Reports field conflicts without blocking a dry-run or automatic plan. | `adopt_shared` |
 
 ## Non-minimalist tests (`@pytest.mark.non_minimalist`)
 

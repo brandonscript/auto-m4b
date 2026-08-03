@@ -93,6 +93,24 @@ Dry-run / non-interactive `--apply` report the count of low-confidence OL matche
 
 Accepted refs: full `openlibrary.org/works/…` or `/books/…` URLs, or bare `OL123W` / `OL123M`.
 
+## Goodreads
+
+Goodreads is opt-in through `GOODSCRAPS_USER_AGENT`. When both providers are
+enabled, the CLI queries both and displays both results for comparison.
+Confident Goodreads matches are selected first; Open Library is used when
+Goodreads has no usable match. If both confident results disagree, the CLI
+reports the field-level disagreement and continues with Goodreads selected.
+
+| Mode | Flag | Behavior |
+| ---- | ---- | -------- |
+| Auto | (default) | Query Goodreads when `GOODSCRAPS_USER_AGENT` is set |
+| Skip auto | `--no-goodreads` | Disable automatic Goodreads lookup |
+| Force | `--goodreads URL_OR_ID` | Single-book only; apply the Goodreads book metadata |
+
+Goodreads accepts a numeric book ID or a Goodreads book URL. The provider uses
+the local title and author to rank search results before fetching the selected
+book record.
+
 Interactive prompt:
 
 - `y` — yes  

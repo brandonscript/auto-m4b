@@ -103,6 +103,16 @@ class FixPlan:
     ol_url: str = ""
     ol_score: float = 0.0
     ol_status: str = ""  # match | low_confidence | none | skipped | forced
+    # Goodreads / provider comparison
+    goodreads_title: str = ""
+    goodreads_author: str = ""
+    goodreads_year: str = ""
+    goodreads_key: str = ""
+    goodreads_url: str = ""
+    goodreads_score: float = 0.0
+    goodreads_status: str = ""  # match | low_confidence | none | skipped | forced
+    selected_provider: str = ""
+    provider_conflicts: list[str] = field(default_factory=list)
 
     @property
     def needs_tag_write(self) -> bool:
