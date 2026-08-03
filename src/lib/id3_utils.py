@@ -407,7 +407,10 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         else (ol_title.date if ol_title and ol_status in ("match", "low_confidence") else ""),
         ol_status="match" if goodreads_match and goodreads_match.status == "match" else ol_status,
     )
-    if resolved_year:
+    if goodreads_match and goodreads_match.status == "match" and goodreads_match.year:
+        # Goodreads publication years are treated as authoritative when present.
+        book.date = goodreads_match.year
+    elif resolved_year:
         book.date = resolved_year
     ol_author, author_prop = next(
         (
