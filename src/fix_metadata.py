@@ -1391,7 +1391,11 @@ def main(argv: list[str] | None = None) -> int:
     # Interactive and forced-OL can retag from folder/m4b alone (no archive source).
     require_source = not (interactive or bool(ol_ref))
     # Interactive (without forced -o): local scan first; OL attaches per book on review.
-    defer_ol = interactive and not bool(ol_ref)
+    # When Goodreads is enabled, query both providers during planning so
+    # provider ties can be resolved before interactive review.
+    defer_ol = interactive and not bool(ol_ref) and not bool(
+        (os.environ.get("GOODSCRAPS_USER_AGENT") or "").strip()
+    )
     lookup_ol_upfront = (not args.no_ol or bool(ol_ref)) and not defer_ol
     lookup_goodreads_upfront = not args.no_goodreads or bool(goodreads_ref)
 
