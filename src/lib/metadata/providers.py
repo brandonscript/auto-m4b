@@ -82,8 +82,9 @@ def _goodreads_lookup(
             user_agent=cfg.GOODSCRAPS_USER_AGENT,
         ) as client:
             if ref:
-                best = None
                 score = 1.0
+                best = None
+                book = client.book(normalized_ref)
             else:
                 matches = client.search(title, limit=10)
                 if not matches and minimalist_title(title, author=author) != title:
@@ -91,14 +92,24 @@ def _goodreads_lookup(
                 if not matches:
                     return MetadataCandidate(provider="goodreads", status="none")
 
-                def match_score(item) -> float:
+                def scored_match(item) -> tuple[float, float, float]:
                     title_score = _similarity(title, item.title)
                     author_score = _similarity(author, item.author_name or "") if author else title_score
-                    return title_score * 0.7 + author_score * 0.3
+                    return title_score * 0.7 + author_score * 0.3, author_score, title_score
 
-                best = max(matches, key=match_score)
-                score = match_score(best)
-            book = client.book(normalized_ref or best.book_id)
+                scored = [(item, *scored_match(item)) for item in matches]
+                author_matches = [row for row in scored if row[2] >= 0.5] if author else []
+                if author_matches:
+                    best, score, _author_score, _title_score = max(
+                        author_matches,
+                        key=lambda row: (row[2], row[3], row[1]),
+                    )
+                else:
+                    best, score, _author_score, _title_score = max(
+                        scored,
+                        key=lambda row: row[1],
+                    )
+                book = client.book(best.book_id)
             primary = book.author_primary or (book.authors[0] if book.authors else None)
             canonical_author = primary.name if primary else (best.author_name if best else "")
             return MetadataCandidate(
