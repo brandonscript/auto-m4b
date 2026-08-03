@@ -12,6 +12,7 @@ from src.lib.fs_utils import ensure_audio_ext, safe_filename
 from src.lib.metadata.models import CliPaths, FixPlan, SourceResolutionError, TagSnapshot
 from src.lib.metadata.ol_attach import _attach_open_library
 from src.lib.metadata.pick import _filesystem_year, _pick_desired
+from src.lib.metadata.providers import MetadataComparison, lookup_metadata
 from src.lib.metadata.sources import (
     _QUALITY_TXT,
     _find_desc_txt,
@@ -117,6 +118,57 @@ def _apply_cleanup_filename(plan: FixPlan, local_title: str) -> None:
         plan.rename_desc_to = plan.desc_txt.with_name(f"{cleanup_stem}{suffix}")
 
 
+def _attach_provider_comparison(
+    plan: FixPlan,
+    comparison: MetadataComparison,
+    *,
+    apply_goodreads: bool = False,
+    minimalist: bool = False,
+) -> None:
+    """Attach both provider results while preserving OL's existing enrichments."""
+    goodreads = comparison.candidates.get("goodreads")
+    open_library = comparison.candidates.get("openlibrary")
+    if goodreads:
+        plan.goodreads_title = goodreads.title
+        plan.goodreads_author = goodreads.author
+        plan.goodreads_year = goodreads.year
+        plan.goodreads_key = goodreads.ref
+        plan.goodreads_url = goodreads.url
+        plan.goodreads_score = goodreads.score
+        plan.goodreads_status = goodreads.status
+    if open_library:
+        plan.ol_title = open_library.title
+        plan.ol_author = open_library.author
+        plan.ol_year = open_library.year
+        plan.ol_key = open_library.ref
+        plan.ol_url = open_library.url
+        plan.ol_score = open_library.score
+        plan.ol_status = open_library.status
+    plan.provider_conflicts.extend(comparison.conflicts)
+    for conflict in comparison.conflicts:
+        plan.reasons.append(f"provider disagreement ({conflict})")
+
+    selected = comparison.selected
+    if not selected:
+        return
+    plan.selected_provider = selected.provider
+    if selected.provider == "openlibrary":
+        _attach_open_library(plan, apply_ol_tags=False, minimalist=minimalist)
+        return
+    if selected.provider != "goodreads" or not apply_goodreads:
+        return
+
+    if selected.title:
+        plan.desired_title = selected.title
+        plan.desired_album = selected.title
+        plan.reasons.append("use Goodreads title (forced)")
+    if selected.author:
+        plan.desired_author = selected.author
+        plan.reasons.append("use Goodreads author (forced)")
+    if selected.year:
+        plan.desired_date = selected.year
+
+
 def plan_fix(
     book_dir: Path,
     ignore_globs: list[str] | None = None,
@@ -128,6 +180,8 @@ def plan_fix(
     require_source: bool = True,
     ol_ref: str | None = None,
     lookup_ol: bool = True,
+    goodreads_ref: str | None = None,
+    lookup_goodreads: bool | None = None,
     minimalist: bool = False,
 ) -> FixPlan | None:
     """Build a fix plan for one book dir.
@@ -328,10 +382,38 @@ def plan_fix(
         if "update description txt contents" not in plan.reasons:
             plan.reasons.append("update description txt contents")
 
-    if ol_ref or lookup_ol:
+    from src.lib.config import cfg
+
+    if lookup_goodreads is None:
+        lookup_goodreads = bool(cfg.GOODSCRAPS_USER_AGENT)
+    if goodreads_ref and not lookup_goodreads:
+        lookup_goodreads = True
+
+    if ol_ref:
         _attach_open_library(
-            plan, ol_ref=ol_ref, apply_ol_tags=bool(ol_ref), minimalist=minimalist
+            plan, ol_ref=ol_ref, apply_ol_tags=True, minimalist=minimalist
         )
+    elif goodreads_ref or (lookup_goodreads and cfg.GOODSCRAPS_USER_AGENT):
+        comparison = lookup_metadata(
+            title,
+            author=author,
+            narrator=narrator,
+            lookup_goodreads=lookup_goodreads,
+            lookup_open_library=lookup_ol,
+            goodreads_ref=goodreads_ref,
+        )
+        _attach_provider_comparison(
+            plan,
+            comparison,
+            apply_goodreads=bool(goodreads_ref),
+            minimalist=minimalist,
+        )
+    elif lookup_ol:
+        _attach_open_library(
+            plan, apply_ol_tags=False, minimalist=minimalist
+        )
+
+    if plan.ol_title:
         _apply_cleanup_filename(plan, title)
 
     if not plan.needs_work:

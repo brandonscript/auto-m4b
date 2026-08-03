@@ -23,6 +23,8 @@ services:
       # - ON_COMPLETE=archive
       # - CLEANUP_FILENAMES=N
       # - OPEN_LIBRARY_TIMEOUT=30
+      # - GOODSCRAPS_USER_AGENT=auto-m4b/1.0 (you@example.com)
+      # - GOODSCRAPS_TIMEOUT=30
       # - MAX_BITRATE=64
       # - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
       # - POST_CONVERT_SCRIPT_TIMEOUT=30
