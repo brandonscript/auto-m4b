@@ -165,6 +165,27 @@ def _attach_open_library(
                     plan.ol_title = enriched
                     plan.reasons.append(f"title + OL subtitle ({sub!r})")
 
+    # A case typo should not make an otherwise unanimous title lose to the
+    # local spelling. When filesystem, ID3, and OL agree case-insensitively,
+    # use OL's canonical casing for the tags.
+    if plan.ol_status in ("match", "forced") and plan.ol_title:
+        local_titles = (plan.fs_title, plan.current.title, plan.desired_title)
+        ol_title_key = plan.ol_title.strip().casefold()
+        all_local_titles_present = all(value.strip() for value in local_titles)
+        all_local_titles_match = all(
+            value.strip().casefold() == ol_title_key for value in local_titles
+        )
+        if all_local_titles_present and all_local_titles_match:
+            canonical_title = title_case_ol_title(plan.ol_title)
+            if plan.desired_title != canonical_title:
+                local_title = plan.desired_title
+                plan.desired_title = canonical_title
+                plan.desired_album = canonical_title
+                plan.reasons.append(
+                    f"use Open Library title casing for unanimous local title "
+                    f"{local_title!r} → {canonical_title!r}"
+                )
+
     if plan.ol_status == "match" and plan.ol_author:
         id3_author_support = max(
             (

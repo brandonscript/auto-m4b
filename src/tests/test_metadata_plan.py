@@ -703,6 +703,35 @@ def test_auto_ol_numeric_fallback_keeps_filesystem_title_without_id3_support(
     assert plan.desired_album == "Elantris 01"
 
 
+def test_auto_ol_uses_canonical_casing_for_unanimous_case_insensitive_title(
+    tmp_path: Path, monkeypatch
+):
+    match = _numeric_ol_match()
+    match.title = "The Litigators"
+    monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
+    monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
+    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    m4b = _touch(tmp_path / "The LItigators.m4b")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="The LItigators",
+        desired_author="John Grisham",
+        desired_album="The LItigators",
+        desired_date="2011",
+        desired_narrator="",
+        desired_stem="The LItigators",
+        current=TagSnapshot(title="The LItigators", path=m4b),
+        fs_title="The LItigators",
+    )
+
+    _attach_open_library(plan, apply_ol_tags=False)
+
+    assert plan.desired_title == "The Litigators"
+    assert plan.desired_album == "The Litigators"
+
+
 def test_auto_ol_promotes_author_when_id3_author_field_supports_it(
     tmp_path: Path, monkeypatch
 ):

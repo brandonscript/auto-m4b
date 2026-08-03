@@ -21,10 +21,12 @@ from src.fix_metadata import (
     _set_plan_filename,
     _banner_fixing_clause,
     _banner_missing_clause,
+    _can_reassign_author_to_narrator,
     _format_mode_banner,
     _format_planning_progress,
     _id3_already_correct_style,
     _prompt_edit_value,
+    _save_interactive_tags_only,
     _truth_props,
 )
 from src.lib.metadata.apply import apply_fix
@@ -45,12 +47,30 @@ def test_cli_accepts_short_o_for_ol():
     assert args.interactive is True
 
 
+def test_cli_accepts_tags_only_option():
+    from src.fix_metadata import build_arg_parser
+
+    args = build_arg_parser().parse_args(["-t", "Author/Book"])
+
+    assert args.tags_only is True
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [("e", "e"), ("edit", "e"), ("c", "c"), ("cancel", "c")],
 )
 def test_parse_apply_prompt_edit_and_cancel(raw: str, expected: str):
     assert parse_apply_prompt(raw) == expected
+
+
+def test_parse_apply_prompt_reassigns_author_to_narrator():
+    assert parse_apply_prompt("r") == "r"
+    assert parse_apply_prompt("reassign") == "s"
+
+
+def test_parse_apply_prompt_tags_only():
+    assert parse_apply_prompt("t") == "t"
+    assert parse_apply_prompt("tags only") == "s"
 
 
 def test_edit_plan_uses_proposed_values_and_updates_filename(tmp_path: Path, monkeypatch):
@@ -115,6 +135,148 @@ def test_prompt_apply_exposes_cancel_for_manual_ol(monkeypatch):
     )
 
     assert prompt_apply(plan, manual_ol_pending=True) == "c"
+
+
+def test_prompt_apply_exposes_author_to_narrator_reassignment(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "r")
+    plan = FixPlan(
+        book_dir=Path("."),
+        m4b=Path("book.m4b"),
+        source=None,
+        desired_title="Book",
+        desired_author="Philippa Gregory",
+        desired_album="Book",
+        desired_date="",
+        desired_narrator="",
+        desired_stem="book",
+        current=TagSnapshot(artist="Bianca Amato"),
+    )
+
+    assert prompt_apply(plan) == "r"
+    assert _can_reassign_author_to_narrator(plan)
+
+
+def test_prompt_apply_does_not_offer_reassignment_with_existing_narrator(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "r")
+    plan = FixPlan(
+        book_dir=Path("."),
+        m4b=Path("book.m4b"),
+        source=None,
+        desired_title="Book",
+        desired_author="Philippa Gregory",
+        desired_album="Book",
+        desired_date="",
+        desired_narrator="",
+        desired_stem="book",
+        current=TagSnapshot(artist="Bianca Amato", composer="Existing narrator"),
+    )
+
+    assert not _can_reassign_author_to_narrator(plan)
+
+
+def test_save_interactive_tags_only_suppresses_renames(tmp_path: Path, monkeypatch):
+    import src.fix_metadata as module
+
+    m4b = _touch(tmp_path / "Current.m4b")
+    desc = _touch(tmp_path / "Current [128].txt")
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=m4b,
+        source=None,
+        desired_title="Book",
+        desired_author="Author",
+        desired_album="Book",
+        desired_date="2020",
+        desired_narrator="Narrator",
+        desired_stem="Book",
+        current=TagSnapshot(path=m4b),
+        desc_txt=desc,
+        rename_m4b_to=tmp_path / "Book.m4b",
+        rename_desc_to=tmp_path / "Book [128].txt",
+    )
+    applied: list[FixPlan] = []
+    monkeypatch.setattr(module, "apply_fix", lambda current_plan, **kwargs: applied.append(current_plan))
+    monkeypatch.setattr(module, "_finish_status_line", lambda _final: None)
+    monkeypatch.setattr(module, "divider", lambda: None)
+
+    _save_interactive_tags_only(plan, cli=CliPaths(), index=0, total=1)
+
+    assert len(applied) == 1
+    assert applied[0].rename_m4b_to is None
+    assert applied[0].rename_desc_to is None
+    assert plan.rename_m4b_to == tmp_path / "Book.m4b"
+
+
+def test_tags_only_cli_suppresses_renames(tmp_path: Path, monkeypatch):
+    import src.fix_metadata as module
+
+    plan = _main_manual_ol_plan(tmp_path)
+    plan.rename_m4b_to = tmp_path / "Renamed.m4b"
+    plan.rename_desc_to = tmp_path / "Renamed.txt"
+    _stub_main_for_manual_ol(monkeypatch, tmp_path, plan)
+    applied: list[FixPlan] = []
+    monkeypatch.setattr(module, "apply_fix", lambda current_plan, **kwargs: applied.append(current_plan))
+
+    assert main(["--tags-only", "--no-ol", str(tmp_path)]) == 0
+    assert len(applied) == 1
+    assert applied[0].rename_m4b_to is None
+    assert applied[0].rename_desc_to is None
+    assert plan.rename_m4b_to == tmp_path / "Renamed.m4b"
+
+
+def test_interactive_tags_only_skips_rename_only_plans(tmp_path: Path, monkeypatch):
+    import src.fix_metadata as module
+
+    plan = _main_manual_ol_plan(tmp_path)
+    plan.current = TagSnapshot(
+        title="Book",
+        artist="Author",
+        album="Book",
+        albumartist="Author",
+        date="2020",
+    )
+    plan.rename_m4b_to = tmp_path / "Renamed.m4b"
+    _stub_main_for_manual_ol(monkeypatch, tmp_path, plan)
+    monkeypatch.setattr(
+        module,
+        "prompt_apply",
+        lambda *args, **kwargs: pytest.fail("rename-only plan should be skipped"),
+    )
+
+    assert main(["-it", "--no-ol", str(tmp_path)]) == 0
+
+
+def test_interactive_reassignment_updates_proposal_and_is_one_shot(
+    tmp_path: Path, monkeypatch
+):
+    import src.fix_metadata as module
+
+    plan = FixPlan(
+        book_dir=tmp_path,
+        m4b=_touch(tmp_path / "Book.m4b"),
+        source=None,
+        desired_title="Book",
+        desired_author="Philippa Gregory",
+        desired_album="Book",
+        desired_date="2020",
+        desired_narrator="",
+        desired_stem="Book",
+        current=TagSnapshot(title="Book", artist="Bianca Amato", date="2020"),
+    )
+    _stub_main_for_manual_ol(monkeypatch, tmp_path, plan)
+    monkeypatch.setattr(module, "_attach_open_library", lambda *args, **kwargs: None)
+    prompt_kwargs: list[bool] = []
+    choices = iter(["r", "s"])
+
+    def fake_prompt(_plan, **kwargs):
+        prompt_kwargs.append(kwargs["allow_author_to_narrator"])
+        return next(choices)
+
+    monkeypatch.setattr(module, "prompt_apply", fake_prompt)
+
+    assert main(["-i", "--no-ol", str(tmp_path)]) == 0
+    assert plan.desired_narrator == "Bianca Amato"
+    assert prompt_kwargs == [True, False]
 
 
 def _main_manual_ol_plan(tmp_path: Path) -> FixPlan:
