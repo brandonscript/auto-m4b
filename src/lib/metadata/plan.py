@@ -156,8 +156,13 @@ def _attach_provider_comparison(
         _attach_open_library(plan, apply_ol_tags=False, minimalist=minimalist)
         return
     if selected.provider != "goodreads" or not apply_goodreads:
+        if selected.provider == "goodreads" and selected.status in ("match", "forced") and selected.year:
+            plan.desired_date = selected.year
+            plan.reasons.append("prefer Goodreads publication year")
         return
 
+    if selected.year:
+        plan.desired_date = selected.year
     if selected.title:
         plan.desired_title = selected.title
         plan.desired_album = selected.title
@@ -165,8 +170,6 @@ def _attach_provider_comparison(
     if selected.author:
         plan.desired_author = selected.author
         plan.reasons.append("use Goodreads author (forced)")
-    if selected.year:
-        plan.desired_date = selected.year
 
 
 def plan_fix(
