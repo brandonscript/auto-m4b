@@ -148,6 +148,28 @@ def _attach_provider_comparison(
     for conflict in comparison.conflicts:
         plan.reasons.append(f"provider disagreement ({conflict})")
 
+    if goodreads and open_library and goodreads.status in ("match", "forced") and open_library.status == "match":
+        local_titles = [plan.fs_title.strip(), plan.current.title.strip()]
+        provider_titles = [goodreads.title.strip(), open_library.title.strip()]
+        if all(local_titles) and all(provider_titles):
+            local_similarity = fuzz.token_set_ratio(*local_titles) / 100
+            provider_similarity = fuzz.token_set_ratio(*provider_titles) / 100
+            local_provider_similarity = max(
+                fuzz.token_set_ratio(local_titles[0], provider_titles[0]),
+                fuzz.token_set_ratio(local_titles[0], provider_titles[1]),
+                fuzz.partial_ratio(local_titles[0], provider_titles[0]),
+                fuzz.partial_ratio(local_titles[0], provider_titles[1]),
+            ) / 100
+            if (
+                local_similarity >= 0.95
+                and provider_similarity >= 0.85
+                and local_provider_similarity >= 0.65
+                and local_titles[0].casefold() != provider_titles[0].casefold()
+            ):
+                plan.desired_title = goodreads.title
+                plan.desired_album = goodreads.title
+                plan.reasons.append("resolve 2–2 title tie with Goodreads")
+
     selected = comparison.selected
     if not selected:
         return

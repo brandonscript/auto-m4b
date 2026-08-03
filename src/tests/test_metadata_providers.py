@@ -159,3 +159,40 @@ def test_main_extraction_accepts_confident_goodreads_candidate(monkeypatch):
 
     assert result is not None
     assert result.provider == "goodreads"
+
+
+def test_provider_titles_break_a_two_two_local_tie():
+    plan = SimpleNamespace(
+        fs_title="Lord of Emperors: Sarantine Mosaic 02",
+        current=SimpleNamespace(title="Lord of Emperors - Sarantine Mosaic 02"),
+        desired_title="Lord of Emperors: Sarantine Mosaic 02",
+        desired_album="Lord of Emperors: Sarantine Mosaic 02",
+        reasons=[],
+        provider_conflicts=[],
+    )
+    comparison = providers.MetadataComparison(
+        candidates={
+            "goodreads": providers.MetadataCandidate(
+                provider="goodreads",
+                title="Lord of Emperors",
+                status="match",
+            ),
+            "openlibrary": providers.MetadataCandidate(
+                provider="openlibrary",
+                title="Lord of Emperors",
+                status="match",
+            ),
+        },
+        selected=providers.MetadataCandidate(
+            provider="goodreads",
+            title="Lord of Emperors",
+            status="match",
+        ),
+    )
+
+    from src.lib.metadata.plan import _attach_provider_comparison
+
+    _attach_provider_comparison(plan, comparison)
+
+    assert plan.desired_title == "Lord of Emperors"
+    assert "resolve 2–2 title tie with Goodreads" in plan.reasons
