@@ -39,6 +39,44 @@ class _FakeGoodscraps:
         )
 
 
+class _AuthorAwareGoodscraps(_FakeGoodscraps):
+    def search(self, _query, *, limit):
+        assert limit == 10
+        return [
+            SimpleNamespace(
+                book_id=99,
+                title="The Sword of Summer",
+                author_name="Rick Riordan",
+                url="https://www.goodreads.com/book/show/99",
+            ),
+            SimpleNamespace(
+                book_id=100,
+                title="By the Sword",
+                author_name="Mercedes Lackey",
+                url="https://www.goodreads.com/book/show/100",
+            ),
+        ]
+
+    def book(self, book_id):
+        if str(book_id) == "100":
+            return SimpleNamespace(
+                book_id=100,
+                title="By the Sword",
+                author_primary=SimpleNamespace(name="Mercedes Lackey"),
+                authors=[],
+                first_published_year=1991,
+                url="https://www.goodreads.com/book/show/100",
+            )
+        return SimpleNamespace(
+            book_id=99,
+            title="The Sword of Summer",
+            author_primary=SimpleNamespace(name="Rick Riordan"),
+            authors=[],
+            first_published_year=2015,
+            url="https://www.goodreads.com/book/show/99",
+        )
+
+
 def test_goodreads_lookup_normalizes_and_scores(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _FakeGoodscraps)
     monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
@@ -52,6 +90,17 @@ def test_goodreads_lookup_normalizes_and_scores(monkeypatch):
     assert result.year == "1937"
     assert result.ref == "42"
     assert result.score == 1.0
+
+
+def test_goodreads_prefers_a_similar_author_over_top_title(monkeypatch):
+    monkeypatch.setattr(providers, "Goodscraps", _AuthorAwareGoodscraps)
+    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+
+    result = providers._goodreads_lookup("By the Sword", "Mercedes Lackey", "")
+
+    assert result.title == "By the Sword"
+    assert result.author == "Mercedes Lackey"
+    assert result.year == "1991"
 
 
 def test_goodreads_forced_lookup_skips_search(monkeypatch):
