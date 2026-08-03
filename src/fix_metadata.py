@@ -37,6 +37,9 @@ import shutil
 import sys
 from pathlib import Path
 from collections.abc import Iterable
+from typing import NoReturn
+
+from rapidfuzz import fuzz
 
 from src.lib.cleaners import minimalist_title
 from src.lib.metadata import (
@@ -425,12 +428,58 @@ def _print_proposed_block(
     _framed_footer(style="banana")
 
 
-def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = None) -> None:
+def _print_proposed_plan(plan: FixPlan, *, show_rename: bool = True) -> None:
+    """Print the consolidated proposed-fixes block for a plan."""
+    cur = plan.current
+    artist_diff = not _prop_equal(cur.artist, plan.desired_author)
+    albumartist_diff = not _prop_equal(cur.albumartist, plan.desired_author)
+    if artist_diff:
+        author_display = cur.artist
+    elif albumartist_diff:
+        author_display = cur.albumartist
+    else:
+        author_display = cur.albumartist or cur.artist
+    title_diff = not _prop_equal(cur.title, plan.desired_title)
+    album_diff = not _prop_equal(cur.album, plan.desired_album)
+    title_display = cur.title if title_diff or not album_diff else cur.album
+    tag_rows: list[tuple[str, str | None, str | None, bool]] = [
+        ("Title", title_display, plan.desired_title, False),
+        ("Author", author_display, plan.desired_author, False),
+        (
+            "Date",
+            get_year_from_date(cur.date) or cur.date,
+            get_year_from_date(plan.desired_date) or plan.desired_date,
+            True,
+        ),
+        ("Narrator", cur.composer, plan.desired_narrator, False),
+    ]
+    rename = None
+    if show_rename and plan.rename_m4b_to:
+        rename = (plan.m4b.name, plan.rename_m4b_to.name)
+    _print_proposed_block(
+        tag_rows,
+        rename=rename,
+        description_update=plan.needs_desc_rewrite,
+    )
+
+
+def print_plan(
+    plan: FixPlan,
+    *,
+    label: str = "dry-run",
+    cli: CliPaths | None = None,
+    proposed_only: bool = False,
+    show_rename: bool = True,
+) -> None:
     """Print review blocks + consolidated proposed fixes (mockup layout)."""
     from tinta import Tinta
 
     del label, cli  # layout is the same for propose / dry-run
     truth = _truth_props(plan)
+
+    if proposed_only:
+        _print_proposed_plan(plan, show_rename=show_rename)
+        return
 
     smart_print("")
     _print_reviewing_box(plan.book_dir.name)
@@ -567,40 +616,7 @@ def print_plan(plan: FixPlan, *, label: str = "dry-run", cli: CliPaths | None = 
                 )
         _framed_footer(style="light_grey")
 
-    artist_diff = not _prop_equal(cur.artist, plan.desired_author)
-    albumartist_diff = not _prop_equal(cur.albumartist, plan.desired_author)
-    if artist_diff:
-        author_display = cur.artist
-    elif albumartist_diff:
-        author_display = cur.albumartist
-    else:
-        author_display = cur.albumartist or cur.artist
-    title_diff = not _prop_equal(cur.title, plan.desired_title)
-    album_diff = not _prop_equal(cur.album, plan.desired_album)
-    title_display = cur.title if title_diff or not album_diff else cur.album
-    tag_rows: list[tuple[str, str | None, str | None, bool]] = [
-        ("Title", title_display, plan.desired_title, False),
-        ("Author", author_display, plan.desired_author, False),
-    ]
-    tag_rows.extend(
-        [
-            (
-                "Date",
-                get_year_from_date(cur.date) or cur.date,
-                get_year_from_date(plan.desired_date) or plan.desired_date,
-                True,
-            ),
-            ("Narrator", cur.composer, plan.desired_narrator, False),
-        ]
-    )
-    rename = None
-    if plan.rename_m4b_to:
-        rename = (plan.m4b.name, plan.rename_m4b_to.name)
-    _print_proposed_block(
-        tag_rows,
-        rename=rename,
-        description_update=plan.needs_desc_rewrite,
-    )
+    _print_proposed_plan(plan, show_rename=show_rename)
 
 
 def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None) -> None:
@@ -621,7 +637,7 @@ def print_source_failure(err: SourceResolutionError, cli: CliPaths | None = None
 
 
 def parse_apply_prompt(raw: str) -> str:
-    """Normalize an interactive prompt response to y/s/e/o/m/c/q (default s)."""
+    """Normalize an interactive prompt response to y/t/r/s/e/o/m/c/q (default s)."""
     s = (raw or "").strip().lower()
     if not s:
         return "s"
@@ -639,9 +655,22 @@ def parse_apply_prompt(raw: str) -> str:
         return "c"
     if s in ("q", "quit"):
         return "q"
-    if len(s) == 1 and s in ("y", "s", "o", "m", "e", "c", "q", "n"):
+    if len(s) == 1 and s in ("y", "t", "r", "s", "o", "m", "e", "c", "q", "n"):
         return "s" if s == "n" else s
     return "s"
+
+
+def _can_reassign_author_to_narrator(plan: FixPlan) -> bool:
+    """Whether the current ID3 author plausibly belongs in the narrator field."""
+    current_author = (plan.current.artist or "").strip()
+    desired_author = (plan.desired_author or "").strip()
+    return bool(
+        current_author
+        and desired_author
+        and not (plan.current.composer or "").strip()
+        and not _prop_equal(current_author, desired_author)
+        and fuzz.token_set_ratio(current_author, desired_author) / 100 < 0.7
+    )
 
 
 def _prompt_edit_value(
@@ -768,16 +797,54 @@ def _save_interactive_plan(
         divider()
 
 
-def prompt_apply(plan: FixPlan, *, manual_ol_pending: bool = False) -> str:
+def _save_interactive_tags_only(
+    plan: FixPlan, *, cli: CliPaths, index: int, total: int
+) -> None:
+    """Write tags and the existing description without renaming either file."""
+    tags_only_plan = _tags_only_plan(plan)
+    print()
+    apply_fix(
+        tags_only_plan,
+        dry_run=False,
+        cli=cli,
+        quiet=True,
+        progress=_print_status_line,
+    )
+    from tinta import Tinta
+
+    _finish_status_line(
+        Tinta().light_grey("Done ", sep="").mint("✓", sep="").to_str()
+    )
+    print()
+    if index < total - 1:
+        divider()
+
+
+def _tags_only_plan(plan: FixPlan) -> FixPlan:
+    """Return a writable plan with both file renames disabled."""
+    tags_only_plan = copy.copy(plan)
+    tags_only_plan.rename_m4b_to = None
+    tags_only_plan.rename_desc_to = None
+    return tags_only_plan
+
+
+def prompt_apply(
+    plan: FixPlan,
+    *,
+    manual_ol_pending: bool = False,
+    allow_author_to_narrator: bool = True,
+    show_tags_only: bool = True,
+) -> str:
     """Ask whether to apply *plan*.
 
-    Returns ``y``, ``s`` (skip), ``o`` (open library), ``m`` (use low-confidence
-    match), ``e`` (edit), ``c`` (cancel manual OL), ``q`` (quit), or
-    ``interrupt`` (Ctrl+C).
+    Returns ``y``, ``t`` (tags only), ``s`` (skip), ``o`` (open library),
+    ``m`` (use low-confidence match), ``e`` (edit), ``r`` (reassign current author to narrator),
+    ``c`` (cancel manual OL), ``q`` (quit), or ``interrupt`` (Ctrl+C).
     """
     try:
         from tinta import Tinta
 
+        can_reassign = allow_author_to_narrator and _can_reassign_author_to_narrator(plan)
         smart_print("")
         print_amber("Apply this fix?")
         smart_print("")
@@ -790,6 +857,24 @@ def prompt_apply(plan: FixPlan, *, manual_ol_pending: bool = False) -> str:
             .light_grey("yes", sep="")
             .to_str()
         )
+        if show_tags_only:
+            smart_print(
+                Tinta()
+                .dark_grey("  ", sep="")
+                .amber("t", sep="")
+                .dark_grey("  ", sep="")
+                .light_grey("yes, tags only", sep="")
+                .to_str()
+            )
+        if can_reassign:
+            smart_print(
+                Tinta()
+                .dark_grey("  ", sep="")
+                .amber("r", sep="")
+                .dark_grey("  ", sep="")
+                .light_grey("assign author to narrator", sep="")
+                .to_str()
+            )
         smart_print(
             Tinta()
             .dark_grey("  ", sep="")
@@ -845,6 +930,12 @@ def prompt_apply(plan: FixPlan, *, manual_ol_pending: bool = False) -> str:
         choice_keys = "y/S/m/o/e/c/q" if manual_ol_pending else (
             "y/S/m/o/e/q" if plan.ol_status == "low_confidence" else "y/S/o/e/q"
         )
+        if show_tags_only:
+            choice_keys = choice_keys.replace("y/", "y/t/")
+        if can_reassign:
+            choice_keys = choice_keys.replace("y/", "y/t/r/")
+            if not show_tags_only:
+                choice_keys = choice_keys.replace("y/t/r/", "y/r/")
         t = Tinta().dark_grey("[", sep="")
         for ch in choice_keys:
             if ch == "/":
@@ -1068,7 +1159,7 @@ def _finish_status_line(final: str) -> None:
 class _FixMetadataParser(argparse.ArgumentParser):
     """Friendlier argparse errors — no usage wall, colored message."""
 
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         # Avoid stock "prog: error:" + full usage dump.
         smart_print("")
         msg = (message or "").strip()
@@ -1140,6 +1231,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Write tags / rename files (default is dry-run only)",
     )
     parser.add_argument(
+        "-t",
+        "--tags-only",
+        action="store_true",
+        help="Write tags and update description contents without renaming files",
+    )
+    parser.add_argument(
         "-i",
         "--interactive",
         action="store_true",
@@ -1168,7 +1265,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     interactive = bool(args.interactive)
-    dry_run = not (args.apply or interactive)
+    dry_run = not (args.apply or args.tags_only or interactive)
     minimalist = resolve_minimalist(flag_on=args.minimalist, flag_off=args.no_minimalist)
 
     cli = resolve_cli_paths()
@@ -1264,6 +1361,13 @@ def main(argv: list[str] | None = None) -> int:
                 kept.append(plan)
         plans = kept
 
+    if interactive and args.tags_only:
+        plans = [
+            plan
+            for plan in plans
+            if plan.needs_tag_write or plan.needs_desc_rewrite
+        ]
+
     if interactive:
         mode_label = "Interactive"
         mode_print = print_banana
@@ -1285,10 +1389,21 @@ def main(argv: list[str] | None = None) -> int:
 
         if interactive:
             manual_ol_snapshot: FixPlan | None = None
+            allow_author_to_narrator = True
+            show_plan_details = True
             while True:
-                print_plan(plan, label="propose", cli=cli)
+                print_plan(
+                    plan,
+                    label="propose",
+                    cli=cli,
+                    proposed_only=not show_plan_details,
+                    show_rename=not args.tags_only,
+                )
                 choice = prompt_apply(
-                    plan, manual_ol_pending=manual_ol_snapshot is not None
+                    plan,
+                    manual_ol_pending=manual_ol_snapshot is not None,
+                    allow_author_to_narrator=allow_author_to_narrator,
+                    show_tags_only=not args.tags_only,
                 )
                 if choice in ("q", "interrupt"):
                     # smart_print collapses consecutive empties; force a blank gap
@@ -1304,6 +1419,12 @@ def main(argv: list[str] | None = None) -> int:
                     print_dark_grey("(skipped)")
                     last_book_printed_done = False
                     break
+                if choice == "t":
+                    _save_interactive_tags_only(
+                        plan, cli=cli, index=i, total=len(plans)
+                    )
+                    last_book_printed_done = i == len(plans) - 1
+                    break
                 if choice == "c":
                     if manual_ol_snapshot is None:
                         print_orange("  No manual Open Library lookup to cancel.")
@@ -1312,11 +1433,35 @@ def main(argv: list[str] | None = None) -> int:
                     manual_ol_snapshot = None
                     print_dark_grey("  (manual Open Library lookup cancelled)")
                     continue
+                if choice == "r":
+                    if not (
+                        allow_author_to_narrator
+                        and _can_reassign_author_to_narrator(plan)
+                    ):
+                        print_orange("  Cannot reassign the current author to narrator.")
+                        continue
+                    plan.desired_narrator = plan.current.artist.strip()
+                    allow_author_to_narrator = False
+                    smart_print("")
+                    from tinta import Tinta
+
+                    smart_print(
+                        Tinta()
+                        .dark_grey("Switching ", sep="")
+                        .amber(plan.current.artist, sep="")
+                        .dark_grey(" to narrator", sep="")
+                        .to_str()
+                    )
+                    show_plan_details = False
+                    continue
                 if choice == "e":
                     edit_plan(plan)
-                    _save_interactive_plan(
-                        plan, cli=cli, index=i, total=len(plans)
+                    save_plan = (
+                        _save_interactive_tags_only
+                        if args.tags_only
+                        else _save_interactive_plan
                     )
+                    save_plan(plan, cli=cli, index=i, total=len(plans))
                     last_book_printed_done = i == len(plans) - 1
                     break
                 if choice == "o":
@@ -1342,15 +1487,19 @@ def main(argv: list[str] | None = None) -> int:
                     print_mint("  Using Open Library match", highlight_color=LIGHT_GREY_COLOR)
                     continue
                 if choice == "y":
-                    _save_interactive_plan(
-                        plan, cli=cli, index=i, total=len(plans)
+                    save_plan = (
+                        _save_interactive_tags_only
+                        if args.tags_only
+                        else _save_interactive_plan
                     )
+                    save_plan(plan, cli=cli, index=i, total=len(plans))
                     last_book_printed_done = i == len(plans) - 1
                     break
             continue
 
         print_mint(f"fixing [[{plan.book_dir.name}]]", highlight_color=LIGHT_GREY_COLOR)
-        apply_fix(plan, dry_run=False, cli=cli)
+        apply_plan = _tags_only_plan(plan) if args.tags_only else plan
+        apply_fix(apply_plan, dry_run=False, cli=cli)
 
     if dry_run and plans:
         smart_print("")

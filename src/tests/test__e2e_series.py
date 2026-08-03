@@ -351,6 +351,49 @@ class test_series:
             "Series tracker should grow to 6 dots after mid-flight addition"
         )
 
+    def test_series_children_added_after_first_run_keep_prior_outputs(
+        self,
+        enable_archiving,
+    ):
+        """A later sibling must not erase the first child's converted output."""
+        import os
+        import time
+
+        from src.lib.config import cfg
+
+        series_dir = TEST_DIRS.inbox / "Incremental Sanderson"
+        first_dir = series_dir / "3 - The Hero of Ages"
+        second_dir = series_dir / "4 - The Alloy of Law"
+        source = FIXTURES_ROOT / "basic_with_cover__standalone_mp3.mp3"
+
+        def add_book(book_dir):
+            book_dir.mkdir(parents=True, exist_ok=True)
+            for i in range(3):
+                shutil.copy(source, book_dir / f"Chapter {i + 1:02d}.mp3")
+            old = time.time() - (cfg.WAIT_TIME * 3 + 1)
+            for path in book_dir.iterdir():
+                os.utime(path, (old, old))
+            os.utime(book_dir, (old, old))
+
+        add_book(first_dir)
+        try:
+            testutils.set_match_filter("^(Incremental Sanderson)")
+            app(max_loops=1)
+            first_output = TEST_DIRS.converted / series_dir.name / first_dir.name
+            assert list(first_output.glob("*.m4b")), "first child should convert"
+
+            add_book(second_dir)
+            InboxState().reset_loop_counter()
+            app(max_loops=1)
+
+            assert list(first_output.glob("*.m4b")), (
+                "processing a later sibling must not remove the first child's output"
+            )
+            second_output = TEST_DIRS.converted / series_dir.name / second_dir.name
+            assert list(second_output.glob("*.m4b")), "later sibling should convert"
+        finally:
+            shutil.rmtree(series_dir, ignore_errors=True)
+
     def test_cleanup_series_dir_defers_when_audio_remains(
         self,
         Chanur_Series: list[Audiobook],

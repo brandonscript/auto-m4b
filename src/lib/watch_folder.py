@@ -36,6 +36,77 @@ class WatchFolder:
         return sum(1 for f in path.rglob("*") if f.is_file() and is_audio_file(f))
 
     @staticmethod
+    def _nested_audio_dirs(path: Path) -> list[Path]:
+        """Return immediate child directories containing at least two audio files."""
+        try:
+            children = sorted(
+                child
+                for child in path.iterdir()
+                if child.is_dir() and not WatchFolder._should_ignore(child)
+            )
+        except OSError:
+            return []
+        return [child for child in children if WatchFolder._audio_file_count(child) > 1]
+
+    @staticmethod
+    def _marker_children(source: Path) -> set[str] | None:
+        """Read nested child names recorded in a source marker."""
+        marker = source / _MARKER_NAME
+        try:
+            text = marker.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not text:
+            return None
+        return {line.strip() for line in text.splitlines() if line.strip()}
+
+    @staticmethod
+    def _nested_child_exists(source: Path, child: Path) -> bool:
+        """Whether a nested child has a usable destination state."""
+        from src.lib.config import cfg
+
+        inbox_child = cfg.inbox_dir / source.name / child.name
+        if inbox_child.exists():
+            return True
+
+        converted_child = cfg.converted_dir / source.name / child.name
+        if converted_child.is_dir() and any(converted_child.glob("*.m4b")):
+            return True
+
+        # An archived source alone is not proof of success: a conversion can
+        # archive its input after creating an empty output directory.  Let the
+        # next scan retry while the watch source still contains the child.
+        return False
+
+    @staticmethod
+    def _unhandled_nested_dirs(source: Path, children: list[Path]) -> list[Path]:
+        """Return child books added after the source was first copied."""
+        recorded = WatchFolder._marker_children(source)
+        if recorded is not None:
+            return [
+                child
+                for child in children
+                if child.name not in recorded
+                or not WatchFolder._nested_child_exists(source, child)
+            ]
+        return [
+            child
+            for child in children
+            if not WatchFolder._nested_child_exists(source, child)
+        ]
+
+    @staticmethod
+    def _write_marker(source: Path, children: list[Path]) -> None:
+        """Record nested child directories copied from *source*."""
+        try:
+            (source / _MARKER_NAME).write_text(
+                "\n".join(child.name for child in children),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass  # read-only share or permission denied — silent fallback
+
+    @staticmethod
     def is_stable(path: Path) -> bool:
         """
         Return True if *path* is safe to copy.
@@ -77,7 +148,10 @@ class WatchFolder:
         from src.lib.config import cfg
 
         if (source / _MARKER_NAME).exists():
-            return True
+            children = WatchFolder._nested_audio_dirs(source)
+            if not children:
+                return True
+            return not WatchFolder._unhandled_nested_dirs(source, children)
 
         name = source.name
         for root in (cfg.inbox_dir, cfg.converted_dir, cfg.archive_dir):
@@ -150,6 +224,22 @@ class WatchFolder:
                 print_debug(f"[watch_folder] not yet stable, skipping: {book.name!r}")
                 continue
             dest = cfg.inbox_dir / book.name
+            nested_children = WatchFolder._nested_audio_dirs(book)
+            marker = book / _MARKER_NAME
+            if marker.exists() and nested_children:
+                pending_children = WatchFolder._unhandled_nested_dirs(book, nested_children)
+                for child in pending_children:
+                    child_dest = dest / child.name
+                    ln = "Copying book to inbox → "
+                    smart_print(f"{ln}{tint_path(str(child))}")
+                    try:
+                        shutil.copytree(child, child_dest, dirs_exist_ok=True)
+                        copied.append(child_dest)
+                    except OSError as exc:
+                        print_warning(f"[watch_folder] copy failed for {child.name!r}: {exc}")
+                if pending_children:
+                    WatchFolder._write_marker(book, nested_children)
+                continue
             if dest.exists():
                 # Guard against a race where the book was just copied in the
                 # same scan pass (find_convertible_books already checks this on
@@ -165,10 +255,9 @@ class WatchFolder:
                 # Drop a marker so this source dir is recognised as already
                 # handled on the next scan, even if the user later removes
                 # the converted m4b or archive entry.
-                try:
-                    (book / _MARKER_NAME).write_text("")
-                except OSError:
-                    pass  # read-only share or permission denied — silent fallback
+                # Record nested children so later downloads in the same
+                # container can be copied independently.
+                WatchFolder._write_marker(book, nested_children)
             except OSError as exc:
                 print_warning(f"[watch_folder] copy failed for {book.name!r}: {exc}")
 

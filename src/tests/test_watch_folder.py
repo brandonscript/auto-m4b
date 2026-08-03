@@ -360,6 +360,47 @@ class TestScanAndCopy:
         assert second == []
         assert not (cfg.inbox_dir / "GoneFromInbox").exists()
 
+    def test_copies_new_nested_book_after_parent_was_marked(self, watch_dir: Path):
+        """A later download under a marked container is copied independently."""
+        container = watch_dir / "Brandon Sanderson"
+        first_book = container / "3-The Hero of Ages"
+        _make_audio_files(first_book, "ch1.mp3", "ch2.mp3")
+        _backdate(container)
+
+        first = WatchFolder.scan_and_copy()
+        assert first == [cfg.inbox_dir / container.name]
+        assert (container / ".auto-m4b").read_text(encoding="utf-8") == "3-The Hero of Ages"
+
+        second_book = container / "4-The Alloy of Law"
+        _make_audio_files(second_book, "ch1.mp3", "ch2.mp3")
+        _backdate(container)
+
+        second = WatchFolder.scan_and_copy()
+
+        assert second == [cfg.inbox_dir / container.name / second_book.name]
+        assert (cfg.inbox_dir / container.name / first_book.name).exists()
+        assert (cfg.inbox_dir / container.name / second_book.name).exists()
+        assert "4-The Alloy of Law" in (container / ".auto-m4b").read_text(encoding="utf-8")
+
+    def test_retries_nested_book_when_converted_output_is_empty(self, watch_dir: Path):
+        """An empty converted shell must not make a marked child permanently handled."""
+        container = watch_dir / "Retry Container"
+        child = container / "Book One"
+        _make_audio_files(child, "ch1.mp3", "ch2.mp3")
+        (container / ".auto-m4b").write_text(child.name, encoding="utf-8")
+        _backdate(container)
+
+        # Reproduce the bad state: an archive record exists, but the converted
+        # child directory exists without an .m4b output while the source remains
+        # available for retry.
+        (cfg.archive_dir / container.name / child.name).mkdir(parents=True)
+        (cfg.converted_dir / container.name / child.name).mkdir(parents=True)
+
+        copied = WatchFolder.scan_and_copy()
+
+        assert copied == [cfg.inbox_dir / container.name / child.name]
+        assert (cfg.inbox_dir / container.name / child.name / "ch1.mp3").exists()
+
     def test_no_op_without_watch_dir(self):
         prev = os.environ.pop("WATCH_FOLDER", None)
         try:
