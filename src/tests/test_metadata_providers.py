@@ -129,6 +129,38 @@ class _TitleCollisionGoodscraps(_FakeGoodscraps):
         )
 
 
+class _ItalianGirlGoodscraps(_FakeGoodscraps):
+    def search(self, _query, *, limit, resolve_canonical=False):
+        assert limit == 10
+        return [
+            SimpleNamespace(
+                book_id=40253222,
+                canonical_book_id=40253222,
+                title="Lucinda Riley Collection 6 Books Bundles",
+                author_name="Lucinda Riley",
+                url="https://www.goodreads.com/book/show/40253222",
+            ),
+            SimpleNamespace(
+                book_id=22057035,
+                canonical_book_id=22057035,
+                title="The Italian Girl",
+                author_name="Lucinda Edmonds",
+                url="https://www.goodreads.com/book/show/22057035",
+            ),
+        ]
+
+    def book(self, book_id):
+        assert str(book_id) == "22057035"
+        return SimpleNamespace(
+            book_id=22057035,
+            title="The Italian Girl",
+            author_primary=SimpleNamespace(name="Lucinda Edmonds"),
+            authors=[],
+            first_published_year=1996,
+            url="https://www.goodreads.com/book/show/22057035",
+        )
+
+
 class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -222,6 +254,17 @@ def test_goodreads_prefers_exact_title_over_longer_containing_title(monkeypatch)
     assert result.ref == "14014"
     assert result.title == "Arrow's Fall"
     assert result.year == "1988"
+
+
+def test_goodreads_prefers_exact_title_over_exact_author_collection(monkeypatch):
+    monkeypatch.setattr(providers, "Goodscraps", _ItalianGirlGoodscraps)
+    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+
+    result = providers._goodreads_lookup("The Italian Girl", "Lucinda Riley", "")
+
+    assert result.ref == "22057035"
+    assert result.title == "The Italian Girl"
+    assert result.year == "1996"
 
 
 def test_goodreads_falls_back_to_series_core_title(monkeypatch):
