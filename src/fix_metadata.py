@@ -69,7 +69,8 @@ from src.lib.metadata.ol_attach import (
 from src.lib.metadata.priors import _is_cli_root, _loose_m4b_in_author_folder
 from src.lib.metadata.sources import _has_audio, _is_under
 from src.lib.metadata.sources import _QUALITY_TXT
-from src.lib.metadata.plan import _apply_cleanup_filename
+from src.lib.metadata.plan import _apply_cleanup_filename, _attach_provider_comparison
+from src.lib.metadata.providers import lookup_metadata
 from src.lib.metadata.stem import _stem_matches_book_title
 from src.lib.parsers import get_year_from_date
 from src.lib.fs_utils import ensure_audio_ext, safe_filename
@@ -663,14 +664,6 @@ def print_plan(
                     .purple(plan.goodreads_url, sep="")
                     .to_str()
                 )
-        if plan.provider_conflicts:
-            for conflict in plan.provider_conflicts:
-                smart_print(
-                    Tinta()
-                    .dark_grey("│ ", sep="")
-                    .amber(f"Comparison: {conflict}", sep="")
-                    .to_str()
-                )
         _framed_footer(style="light_grey")
 
     _print_proposed_plan(plan, show_rename=show_rename)
@@ -704,6 +697,8 @@ def parse_apply_prompt(raw: str) -> str:
         return "s"
     if s in ("o", "ol", "openlibrary", "open library"):
         return "o"
+    if s in ("g", "gr", "goodreads"):
+        return "g"
     if s in ("m", "match", "use match"):
         return "m"
     if s in ("e", "edit"):
@@ -712,7 +707,7 @@ def parse_apply_prompt(raw: str) -> str:
         return "c"
     if s in ("q", "quit"):
         return "q"
-    if len(s) == 1 and s in ("y", "t", "r", "s", "o", "m", "e", "c", "q", "n"):
+    if len(s) == 1 and s in ("y", "t", "r", "s", "o", "g", "m", "e", "c", "q", "n"):
         return "s" if s == "n" else s
     return "s"
 
@@ -889,14 +884,16 @@ def prompt_apply(
     plan: FixPlan,
     *,
     manual_ol_pending: bool = False,
+    manual_goodreads_pending: bool = False,
     allow_author_to_narrator: bool = True,
     show_tags_only: bool = True,
 ) -> str:
     """Ask whether to apply *plan*.
 
     Returns ``y``, ``t`` (tags only), ``s`` (skip), ``o`` (open library),
+    ``g`` (Goodreads),
     ``m`` (use low-confidence match), ``e`` (edit), ``r`` (reassign current author to narrator),
-    ``c`` (cancel manual OL), ``q`` (quit), or ``interrupt`` (Ctrl+C).
+    ``c`` (cancel manual lookup), ``q`` (quit), or ``interrupt`` (Ctrl+C).
     """
     try:
         from tinta import Tinta
@@ -961,18 +958,26 @@ def prompt_apply(
         smart_print(
             Tinta()
             .dark_grey("  ", sep="")
+            .amber("g", sep="")
+            .dark_grey("  ", sep="")
+            .light_grey("provide a Goodreads id or url...", sep="")
+            .to_str()
+        )
+        smart_print(
+            Tinta()
+            .dark_grey("  ", sep="")
             .amber("e", sep="")
             .dark_grey("  ", sep="")
             .light_grey("edit proposed values", sep="")
             .to_str()
         )
-        if manual_ol_pending:
+        if manual_ol_pending or manual_goodreads_pending:
             smart_print(
                 Tinta()
                 .dark_grey("  ", sep="")
                 .amber("c", sep="")
                 .dark_grey("  ", sep="")
-                .light_grey("cancel manual openlibrary lookup", sep="")
+                .light_grey("cancel manual lookup", sep="")
                 .to_str()
             )
         smart_print(
@@ -984,8 +989,12 @@ def prompt_apply(
             .to_str()
         )
         smart_print("")
-        choice_keys = "y/S/m/o/e/c/q" if manual_ol_pending else (
-            "y/S/m/o/e/q" if plan.ol_status == "low_confidence" else "y/S/o/e/q"
+        choice_keys = (
+            "y/S/m/o/g/e/c/q"
+            if manual_ol_pending or manual_goodreads_pending
+            else "y/S/m/o/g/e/q"
+            if plan.ol_status == "low_confidence"
+            else "y/S/o/g/e/q"
         )
         if show_tags_only:
             choice_keys = choice_keys.replace("y/", "y/t/")
@@ -1023,6 +1032,30 @@ def prompt_ol_ref() -> str | None:
             Tinta().dark_grey("  ").to_str() + tint_path("https://openlibrary.org/works/OL45804W")
         )
         smart_print(Tinta().dark_grey("  ").to_str() + tint_path("OL45804W"))
+        print_dark_grey("Leave blank to cancel.")
+        smart_print("")
+        raw = input(Tinta().amber("Url or ID").dark_grey(": ").to_str()).strip()
+    except EOFError:
+        smart_print("")
+        return None
+    return raw or None
+
+
+def prompt_goodreads_ref() -> str | None:
+    """Ask for a Goodreads URL or id. Empty → None; Ctrl+C quits the CLI."""
+    try:
+        from tinta import Tinta
+
+        smart_print("")
+        print_amber("Goodreads matching")
+        smart_print("")
+        print_dark_grey("Paste a book URL or numeric id, then press Enter.")
+        print_dark_grey("Examples:")
+        smart_print(
+            Tinta().dark_grey("  ").to_str()
+            + tint_path("https://www.goodreads.com/book/show/176803")
+        )
+        smart_print(Tinta().dark_grey("  ").to_str() + tint_path("176803"))
         print_dark_grey("Leave blank to cancel.")
         smart_print("")
         raw = input(Tinta().amber("Url or ID").dark_grey(": ").to_str()).strip()
@@ -1479,6 +1512,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if interactive:
             manual_ol_snapshot: FixPlan | None = None
+            manual_goodreads_snapshot: FixPlan | None = None
             allow_author_to_narrator = True
             show_plan_details = True
             while True:
@@ -1492,6 +1526,7 @@ def main(argv: list[str] | None = None) -> int:
                 choice = prompt_apply(
                     plan,
                     manual_ol_pending=manual_ol_snapshot is not None,
+                    manual_goodreads_pending=manual_goodreads_snapshot is not None,
                     allow_author_to_narrator=allow_author_to_narrator,
                     show_tags_only=not args.tags_only,
                 )
@@ -1516,8 +1551,13 @@ def main(argv: list[str] | None = None) -> int:
                     last_book_printed_done = i == len(plans) - 1
                     break
                 if choice == "c":
+                    if manual_goodreads_snapshot is not None:
+                        plan = manual_goodreads_snapshot
+                        manual_goodreads_snapshot = None
+                        print_dark_grey("  (manual Goodreads lookup cancelled)")
+                        continue
                     if manual_ol_snapshot is None:
-                        print_orange("  No manual Open Library lookup to cancel.")
+                        print_orange("  No manual lookup to cancel.")
                         continue
                     plan = manual_ol_snapshot
                     manual_ol_snapshot = None
@@ -1567,6 +1607,32 @@ def main(argv: list[str] | None = None) -> int:
                     _apply_cleanup_filename(plan, plan.fs_title)
                     if plan.ol_status != "forced":
                         print_orange("  Could not apply that Open Library ref; try again or skip.")
+                    continue
+                if choice == "g":
+                    ref = prompt_goodreads_ref()
+                    if not ref:
+                        print_dark_grey("  (cancelled — showing proposal again)")
+                        continue
+                    if manual_goodreads_snapshot is None:
+                        manual_goodreads_snapshot = copy.deepcopy(plan)
+                    comparison = lookup_metadata(
+                        plan.fs_title or plan.current.title or plan.desired_title,
+                        author=plan.fs_author or plan.current.artist or plan.desired_author,
+                        lookup_goodreads=True,
+                        lookup_open_library=bool(
+                            (os.environ.get("OPEN_LIBRARY_USER_AGENT") or "").strip()
+                        ),
+                        goodreads_ref=ref,
+                    )
+                    _attach_provider_comparison(
+                        plan,
+                        comparison,
+                        apply_goodreads=True,
+                        minimalist=minimalist,
+                    )
+                    _apply_cleanup_filename(plan, plan.fs_title)
+                    if plan.goodreads_status != "forced":
+                        print_orange("  Could not apply that Goodreads ref; try again or skip.")
                     continue
                 if choice == "m":
                     if plan.ol_status != "low_confidence":
