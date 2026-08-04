@@ -23,6 +23,8 @@ Prefer this over re-dropping books into the inbox when only metadata/filenames a
 poetry run python -m src.fix_metadata -h
 poetry run python -m src.fix_metadata -i "George, Margaret"
 poetry run python -m src.fix_metadata --apply "George, Margaret/Elizabeth I (2011)"
+# New conversion with no archive/source counterpart:
+poetry run python -m src.fix_metadata -i --goodreads 176803 "George, Margaret/Elizabeth I (2011)"
 ```
 
 Default is **dry-run**. Write with `--apply`, or confirm each book with `-i` / `--interactive`.
@@ -34,7 +36,7 @@ Default is **dry-run**. Write with `--apply`, or confirm each book with `-i` / `
 | No paths | Scan `CLI_CONVERTED_FOLDER` / `CONVERTED_FOLDER` (auto-recursive) |
 | Relative (`Author` or `Author/Book`) | Resolve under converted |
 | Absolute under converted | Same; source from mirrored archive path |
-| Absolute elsewhere (e.g. `#plex`) | Source audio must sit beside the `.m4b`, or pass `-s` |
+| Absolute elsewhere (e.g. `#plex`) | Source audio must sit beside the `.m4b`, or pass `-s` (unless using `-i` or forced `-o`/`-g`) |
 
 ### Host vs container env
 
@@ -111,6 +113,22 @@ Goodreads accepts a numeric book ID or a Goodreads book URL. The provider uses
 the local title and author to rank search results before fetching the selected
 book record.
 
+Forced Goodreads matching works even when the original source/archive is gone.
+This supports two useful workflows for newly imported books:
+
+```bash
+# Review the current tags and the forced Goodreads result before writing:
+poetry run python -m src.fix_metadata -i --goodreads 176803 /path/to/book
+
+# Apply an agent-confirmed Goodreads ID without prompting:
+poetry run python -m src.fix_metadata --apply --goodreads 176803 /path/to/book
+```
+
+An agent can first inspect an ambiguous result with `goodscraps book 176803`,
+then pass the confirmed numeric ID to `--goodreads`. The forced record supplies
+the title, author, and publication year; Open Library remains available for
+comparison when enabled.
+
 Interactive prompt:
 
 - `y` — yes  
@@ -118,7 +136,8 @@ Interactive prompt:
 - `m` — use this openlibrary match (only when low-confidence)  
 - `o` — provide an Open Library id or url  
 - `e` — edit the proposed Title, Author, Date, Narrator, and filename
-- `c` — cancel a pending manual Open Library lookup
+- `g` — provide a Goodreads id or url
+- `c` — cancel a pending manual lookup
 - `q` — quit  
 
 Edit mode uses the proposed values as defaults. Press Enter to keep a value,
@@ -161,7 +180,7 @@ Open Library auto lookup always runs the dual full + stripped query described ab
 --debug             Verbose debug
 ```
 
-Interactive mode and `-o`/`--ol` can retag from the converted folder/m4b alone when archive source files are missing (still pass `-s` when you have them). Dry-run / non-interactive `--apply` without `-o` still require a resolvable source.
+Interactive mode and `-o`/`--ol`/`-g`/`--goodreads` can retag from the converted folder/m4b alone when archive source files are missing (still pass `-s` when you have them). Dry-run / non-interactive `--apply` without a forced provider reference still requires a resolvable source.
 
 Large author folders: planning shows an updating `Planning i/N · folder` line first. Interactive keeps that pass local, then runs Open Library on those local candidates (so date consensus can clear no-ops) and only then prints the mode banner — e.g. `Interactive // 1 of 7 needs fixing · No missing source files` or `Interactive // No books need fixing`.
 

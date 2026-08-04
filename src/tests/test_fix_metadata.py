@@ -57,6 +57,29 @@ def test_cli_accepts_short_g_for_goodreads():
     assert args.interactive is True
 
 
+def test_forced_goodreads_does_not_require_source(tmp_path: Path, monkeypatch):
+    import src.fix_metadata as module
+
+    plan = _main_manual_ol_plan(tmp_path)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "resolve_cli_paths", lambda: CliPaths())
+    monkeypatch.setattr(module, "resolve_target_paths", lambda _paths, _cli: [tmp_path])
+    monkeypatch.setattr(module, "iter_book_dirs", lambda _paths, recursive: [tmp_path])
+    monkeypatch.setattr(
+        module,
+        "plan_fix",
+        lambda *args, **kwargs: captured.update(kwargs) or plan,
+    )
+    monkeypatch.setattr(module, "print_ol_session_notice", lambda **kwargs: None)
+    monkeypatch.setattr(module, "_print_planning_progress", lambda *args: None)
+    monkeypatch.setattr(module, "_clear_planning_progress", lambda: None)
+    monkeypatch.setattr(module, "apply_fix", lambda *args, **kwargs: None)
+
+    assert main(["--apply", "--goodreads", "176803", str(tmp_path)]) == 0
+    assert captured["require_source"] is False
+
+
 def test_cli_accepts_tags_only_option():
     from src.fix_metadata import build_arg_parser
 
