@@ -170,6 +170,20 @@ def _attach_provider_comparison(
                 plan.desired_album = goodreads.title
                 plan.reasons.append("resolve 2–2 title tie with Goodreads")
 
+        provider_title_similarity = max(
+            fuzz.ratio(goodreads.title, open_library.title),
+            fuzz.token_set_ratio(goodreads.title, open_library.title),
+        ) / 100
+        if (
+            provider_title_similarity >= 0.85
+            and goodreads.title
+            and (plan.desired_title or "").strip().casefold()
+            != goodreads.title.strip().casefold()
+        ):
+            plan.desired_title = goodreads.title
+            plan.desired_album = goodreads.title
+            plan.reasons.append("use agreed Goodreads/Open Library title")
+
     selected = comparison.selected
     if not selected:
         return
