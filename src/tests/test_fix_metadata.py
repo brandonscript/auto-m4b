@@ -15,6 +15,7 @@ from src.fix_metadata import (
     main,
     parse_apply_prompt,
     prompt_apply,
+    prompt_goodreads_ref,
     prompt_ol_ref,
     resolve_cli_paths,
     resolve_target_paths,
@@ -47,6 +48,15 @@ def test_cli_accepts_short_o_for_ol():
     assert args.interactive is True
 
 
+def test_cli_accepts_short_g_for_goodreads():
+    """-g is an alias for --goodreads."""
+    from src.fix_metadata import build_arg_parser
+
+    args = build_arg_parser().parse_args(["-g", "176803", "-i", "Author/Book"])
+    assert args.goodreads_ref == "176803"
+    assert args.interactive is True
+
+
 def test_cli_accepts_tags_only_option():
     from src.fix_metadata import build_arg_parser
 
@@ -66,6 +76,11 @@ def test_parse_apply_prompt_edit_and_cancel(raw: str, expected: str):
 def test_parse_apply_prompt_reassigns_author_to_narrator():
     assert parse_apply_prompt("r") == "r"
     assert parse_apply_prompt("reassign") == "s"
+
+
+def test_parse_apply_prompt_accepts_goodreads():
+    assert parse_apply_prompt("g") == "g"
+    assert parse_apply_prompt("goodreads") == "g"
 
 
 def test_parse_apply_prompt_tags_only():
@@ -390,6 +405,16 @@ def test_open_library_ref_prompt_ctrl_c_propagates(monkeypatch):
 
     with pytest.raises(KeyboardInterrupt):
         prompt_ol_ref()
+
+
+def test_goodreads_ref_prompt_ctrl_c_propagates(monkeypatch):
+    def raise_interrupt(_prompt):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", raise_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        prompt_goodreads_ref()
 
 
 def test_cli_error_is_readable(capfd):

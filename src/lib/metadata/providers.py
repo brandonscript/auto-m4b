@@ -62,6 +62,27 @@ def _similarity(left: str, right: str) -> float:
     return max(fuzz.ratio(left, right), fuzz.token_set_ratio(left, right)) / 100
 
 
+def _strict_title_similarity(left: str, right: str, author: str = "") -> float:
+    """Score the complete title while still allowing minor punctuation changes.
+
+    ``token_set_ratio`` is intentionally permissive, but it gives a perfect score
+    when a short title is merely contained in a much longer title. Use the full
+    string ratio as the tie-breaker so an exact book title beats an anthology,
+    companion work, or reference title containing the same words.
+    """
+    left = minimalist_title(left, author=author).casefold()
+    right = minimalist_title(right, author=author).casefold()
+    if not left or not right:
+        return 0.0
+    if right == left:
+        return 1.0
+    if right.startswith(f"{left} (") and right.endswith(")"):
+        return 1.0
+    if right.startswith(f"{left} ") or right.startswith(f"{left}:"):
+        return 0.95
+    return fuzz.ratio(left, right) / 100
+
+
 def _goodreads_lookup(
     title: str,
     author: str,
@@ -110,22 +131,30 @@ def _goodreads_lookup(
                 if not matches:
                     return MetadataCandidate(provider="goodreads", status="none")
 
-                def scored_match(item) -> tuple[float, float, float]:
+                def scored_match(item) -> tuple[float, float, float, float]:
                     title_score = _similarity(title, item.title)
                     author_score = _similarity(author, item.author_name or "") if author else title_score
-                    return title_score * 0.7 + author_score * 0.3, author_score, title_score
+                    strict_title_score = _strict_title_similarity(
+                        title, item.title, author=author
+                    )
+                    return (
+                        title_score * 0.7 + author_score * 0.3,
+                        author_score,
+                        title_score,
+                        strict_title_score,
+                    )
 
                 scored = [(item, *scored_match(item)) for item in matches]
                 author_matches = [row for row in scored if row[2] >= 0.5] if author else []
                 if author_matches:
-                    best, score, _author_score, _title_score = max(
+                    best, score, _author_score, _title_score, _strict_title_score = max(
                         author_matches,
-                        key=lambda row: (row[2], row[3], row[1]),
+                        key=lambda row: (row[2], row[4], row[3], row[1]),
                     )
                 else:
-                    best, score, _author_score, _title_score = max(
+                    best, score, _author_score, _title_score, _strict_title_score = max(
                         scored,
-                        key=lambda row: row[1],
+                        key=lambda row: (row[4], row[3], row[1]),
                     )
                 book = client.book(best.book_id)
             primary = book.author_primary or (book.authors[0] if book.authors else None)

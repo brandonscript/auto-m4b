@@ -77,6 +77,51 @@ class _AuthorAwareGoodscraps(_FakeGoodscraps):
         )
 
 
+class _TitleCollisionGoodscraps(_FakeGoodscraps):
+    def search(self, _query, *, limit):
+        assert limit == 10
+        return [
+            SimpleNamespace(
+                book_id=33580643,
+                title=(
+                    "Lovers, Lore & Loss Songs From The Arrows of the Queen, "
+                    "Arrow's Flight and Arrow's Fall by Mercedes Lackey & D. F. Sanders"
+                ),
+                author_name="Mercedes Lackey",
+                url="https://www.goodreads.com/book/show/33580643",
+            ),
+            SimpleNamespace(
+                book_id=777,
+                title="Arrow's Fall: Lovers, Lore & Loss",
+                author_name="Mercedes Lackey",
+                url="https://www.goodreads.com/book/show/777",
+            ),
+            SimpleNamespace(
+                book_id=14014,
+                title="Arrow's Fall (Heralds of Valdemar, #3)",
+                author_name="Mercedes Lackey",
+                url="https://www.goodreads.com/book/show/14014.Arrow_s_Fall",
+            ),
+            SimpleNamespace(
+                book_id=49475188,
+                title="Queen's Own Volume Two: Arrow's Fall",
+                author_name="Mercedes Lackey",
+                url="https://www.goodreads.com/book/show/49475188",
+            ),
+        ]
+
+    def book(self, book_id):
+        assert str(book_id) == "14014"
+        return SimpleNamespace(
+            book_id=14014,
+            title="Arrow's Fall",
+            author_primary=SimpleNamespace(name="Mercedes Lackey"),
+            authors=[],
+            first_published_year=1988,
+            url="https://www.goodreads.com/book/show/14014.Arrow_s_Fall",
+        )
+
+
 def test_goodreads_lookup_normalizes_and_scores(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _FakeGoodscraps)
     monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
@@ -101,6 +146,18 @@ def test_goodreads_prefers_a_similar_author_over_top_title(monkeypatch):
     assert result.title == "By the Sword"
     assert result.author == "Mercedes Lackey"
     assert result.year == "1991"
+
+
+def test_goodreads_prefers_exact_title_over_longer_containing_title(monkeypatch):
+    """A companion title containing the query must not beat the actual book."""
+    monkeypatch.setattr(providers, "Goodscraps", _TitleCollisionGoodscraps)
+    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+
+    result = providers._goodreads_lookup("Arrow's Fall", "Mercedes Lackey", "")
+
+    assert result.ref == "14014"
+    assert result.title == "Arrow's Fall"
+    assert result.year == "1988"
 
 
 def test_goodreads_forced_lookup_skips_search(monkeypatch):
