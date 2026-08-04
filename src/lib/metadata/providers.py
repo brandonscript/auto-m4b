@@ -163,8 +163,14 @@ def _goodreads_lookup(
                     )
 
                 scored = [(item, *scored_match(item)) for item in matches]
+                exact_title_matches = [row for row in scored if row[4] >= 0.95]
                 author_matches = [row for row in scored if row[2] >= 0.5] if author else []
-                if author_matches:
+                if exact_title_matches:
+                    best, score, _author_score, _title_score, _strict_title_score = max(
+                        exact_title_matches,
+                        key=lambda row: (row[4], row[2], row[3], row[1]),
+                    )
+                elif author_matches:
                     best, score, _author_score, _title_score, _strict_title_score = max(
                         author_matches,
                         key=lambda row: (row[2], row[4], row[3], row[1]),
