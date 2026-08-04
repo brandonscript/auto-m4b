@@ -134,7 +134,11 @@ def _goodreads_lookup(
                 seen_ids: set[int] = set()
                 for query in search_queries:
                     try:
-                        query_matches = client.search(query, limit=10)
+                        query_matches = client.search(
+                            query,
+                            limit=10,
+                            resolve_canonical=True,
+                        )
                     except Exception as exc:
                         print_debug(f"Goodreads search failed for {query!r}: {exc}")
                         continue
@@ -170,7 +174,8 @@ def _goodreads_lookup(
                         scored,
                         key=lambda row: (row[4], row[3], row[1]),
                     )
-                book = client.book(best.book_id)
+                book_id = getattr(best, "canonical_book_id", None) or best.book_id
+                book = client.book(book_id)
             primary = book.author_primary or (book.authors[0] if book.authors else None)
             canonical_author = primary.name if primary else (best.author_name if best else "")
             return MetadataCandidate(

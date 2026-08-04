@@ -16,7 +16,7 @@ class _FakeGoodscraps:
     def __exit__(self, *_args):
         return None
 
-    def search(self, _query, *, limit):
+    def search(self, _query, *, limit, resolve_canonical=False):
         assert limit == 10
         return [
             SimpleNamespace(
@@ -40,7 +40,7 @@ class _FakeGoodscraps:
 
 
 class _AuthorAwareGoodscraps(_FakeGoodscraps):
-    def search(self, _query, *, limit):
+    def search(self, _query, *, limit, resolve_canonical=False):
         assert limit == 10
         return [
             SimpleNamespace(
@@ -78,7 +78,7 @@ class _AuthorAwareGoodscraps(_FakeGoodscraps):
 
 
 class _TitleCollisionGoodscraps(_FakeGoodscraps):
-    def search(self, _query, *, limit):
+    def search(self, _query, *, limit, resolve_canonical=False):
         assert limit == 10
         return [
             SimpleNamespace(
@@ -127,7 +127,7 @@ class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
         super().__init__(**kwargs)
         self.queries = []
 
-    def search(self, query, *, limit):
+    def search(self, query, *, limit, resolve_canonical=False):
         assert limit == 10
         self.queries.append(query)
         if query not in ("Cockroaches Jo Nesbø", "Cockroaches"):
@@ -150,6 +150,32 @@ class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
             authors=[],
             first_published_year=1998,
             url="https://www.goodreads.com/book/show/18373214-cockroaches",
+        )
+
+
+class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
+    def search(self, _query, *, limit, resolve_canonical=False):
+        assert limit == 10
+        assert resolve_canonical is True
+        return [
+            SimpleNamespace(
+                book_id=123790521,
+                canonical_book_id=13256064,
+                title="Phantom by Jo Nesbo",
+                author_name="Jo Nesbø",
+                url="https://www.goodreads.com/book/show/123790521-phantom-by-jo-nesbo",
+            )
+        ]
+
+    def book(self, book_id):
+        assert str(book_id) == "13256064"
+        return SimpleNamespace(
+            book_id=13256064,
+            title="Phantom",
+            author_primary=SimpleNamespace(name="Jo Nesbø"),
+            authors=[],
+            first_published_year=2011,
+            url="https://www.goodreads.com/book/show/13256064-phantom",
         )
 
 
@@ -202,6 +228,18 @@ def test_goodreads_falls_back_to_series_core_title(monkeypatch):
     assert result.title == "Cockroaches"
     assert result.year == "1998"
     assert "Cockroaches Jo Nesbø" in client.queries
+
+
+def test_goodreads_resolves_search_result_to_canonical_book(monkeypatch):
+    monkeypatch.setattr(providers, "Goodscraps", _CanonicalPhantomGoodscraps)
+    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+
+    result = providers._goodreads_lookup("Phantom", "Jo Nesbø", "")
+
+    assert result.ref == "13256064"
+    assert result.title == "Phantom"
+    assert result.author == "Jo Nesbø"
+    assert result.year == "2011"
 
 
 def test_goodreads_forced_lookup_skips_search(monkeypatch):
