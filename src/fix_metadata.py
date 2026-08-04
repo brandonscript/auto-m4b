@@ -1421,8 +1421,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    # Interactive and forced-OL can retag from folder/m4b alone (no archive source).
-    require_source = not (interactive or bool(ol_ref))
+    # Interactive and forced provider matches can retag from folder/m4b alone
+    # (no archive source).
+    require_source = not (interactive or bool(ol_ref) or bool(goodreads_ref))
     # Interactive (without forced -o): local scan first; OL attaches per book on review.
     # When Goodreads is enabled, query both providers during planning so
     # provider ties can be resolved before interactive review.
