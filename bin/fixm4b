@@ -18,4 +18,6 @@ if [[ ! -x "$FIXM4B" ]]; then
     exit 1
 fi
 
+cd "$REPO_ROOT"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 exec "$FIXM4B" "$@"
