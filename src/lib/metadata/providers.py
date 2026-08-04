@@ -86,9 +86,27 @@ def _goodreads_lookup(
                 best = None
                 book = client.book(normalized_ref)
             else:
-                matches = client.search(title, limit=10)
-                if not matches and minimalist_title(title, author=author) != title:
-                    matches = client.search(minimalist_title(title, author=author), limit=10)
+                search_bases = [title]
+                core_title = minimalist_title(title, author=author)
+                if core_title != title:
+                    search_bases.append(core_title)
+                search_queries = [
+                    query
+                    for base in search_bases
+                    for query in ((f"{base} {author}", base) if author else (base,))
+                ]
+                matches = []
+                seen_ids: set[int] = set()
+                for query in search_queries:
+                    try:
+                        query_matches = client.search(query, limit=10)
+                    except Exception as exc:
+                        print_debug(f"Goodreads search failed for {query!r}: {exc}")
+                        continue
+                    for item in query_matches:
+                        if item.book_id not in seen_ids:
+                            seen_ids.add(item.book_id)
+                            matches.append(item)
                 if not matches:
                     return MetadataCandidate(provider="goodreads", status="none")
 
