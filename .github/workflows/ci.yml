@@ -190,11 +190,14 @@ jobs:
 
       # Hub overview can render README images, but only with absolute URLs.
       - name: Update Docker Hub description
+        # A valid image push should not fail CI when the token lacks Hub
+        # repository-description permission.
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: brandonscript/auto-m4b
-          short-description: ${{ github.event.repository.description }}
+          short-description: Python audiobook converter for chapterized M4B files.
           readme-filepath: ./README.md
           enable-url-completion: true
