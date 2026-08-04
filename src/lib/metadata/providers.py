@@ -13,6 +13,11 @@ from src.lib.config import cfg
 from src.lib.term import print_debug
 
 
+_SERIES_NUMBER_PREFIX = re.compile(
+    r"^\s*.+?\s+\d{1,3}\s*[:\-–—]\s*(?P<title>\S.*)$"
+)
+
+
 @dataclass(frozen=True)
 class MetadataCandidate:
     """Normalized metadata returned by one provider."""
@@ -83,6 +88,12 @@ def _strict_title_similarity(left: str, right: str, author: str = "") -> float:
     return fuzz.ratio(left, right) / 100
 
 
+def _series_number_core_title(title: str) -> str:
+    """Remove a leading ``Series NN:``/``Series NN -`` prefix when present."""
+    match = _SERIES_NUMBER_PREFIX.match(title or "")
+    return match.group("title").strip() if match else (title or "").strip()
+
+
 def _goodreads_lookup(
     title: str,
     author: str,
@@ -111,6 +122,9 @@ def _goodreads_lookup(
                 core_title = minimalist_title(title, author=author)
                 if core_title != title:
                     search_bases.append(core_title)
+                series_core_title = _series_number_core_title(title)
+                if series_core_title not in search_bases:
+                    search_bases.append(series_core_title)
                 search_queries = [
                     query
                     for base in search_bases

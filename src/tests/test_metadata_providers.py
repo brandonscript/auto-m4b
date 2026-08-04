@@ -122,6 +122,37 @@ class _TitleCollisionGoodscraps(_FakeGoodscraps):
         )
 
 
+class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.queries = []
+
+    def search(self, query, *, limit):
+        assert limit == 10
+        self.queries.append(query)
+        if query not in ("Cockroaches Jo Nesbø", "Cockroaches"):
+            return []
+        return [
+            SimpleNamespace(
+                book_id=18373214,
+                title="Cockroaches (Harry Hole, #2)",
+                author_name="Jo Nesbø",
+                url="https://www.goodreads.com/book/show/18373214-cockroaches",
+            )
+        ]
+
+    def book(self, book_id):
+        assert str(book_id) == "18373214"
+        return SimpleNamespace(
+            book_id=18373214,
+            title="Cockroaches",
+            author_primary=SimpleNamespace(name="Jo Nesbø"),
+            authors=[],
+            first_published_year=1998,
+            url="https://www.goodreads.com/book/show/18373214-cockroaches",
+        )
+
+
 def test_goodreads_lookup_normalizes_and_scores(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _FakeGoodscraps)
     monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
@@ -158,6 +189,19 @@ def test_goodreads_prefers_exact_title_over_longer_containing_title(monkeypatch)
     assert result.ref == "14014"
     assert result.title == "Arrow's Fall"
     assert result.year == "1988"
+
+
+def test_goodreads_falls_back_to_series_core_title(monkeypatch):
+    client = _SeriesPrefixedGoodscraps()
+    monkeypatch.setattr(providers, "Goodscraps", lambda **_kwargs: client)
+    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+
+    result = providers._goodreads_lookup("Harry Hole 02: Cockroaches", "Jo Nesbø", "")
+
+    assert result.ref == "18373214"
+    assert result.title == "Cockroaches"
+    assert result.year == "1998"
+    assert "Cockroaches Jo Nesbø" in client.queries
 
 
 def test_goodreads_forced_lookup_skips_search(monkeypatch):
@@ -302,3 +346,41 @@ def test_provider_titles_break_a_two_two_local_tie():
 
     assert plan.desired_title == "Lord of Emperors"
     assert "resolve 2–2 title tie with Goodreads" in plan.reasons
+
+
+def test_agreeing_provider_titles_replace_series_prefixed_local_title():
+    plan = SimpleNamespace(
+        fs_title="Harry Hole 02: Cockroaches",
+        current=SimpleNamespace(title="Harry Hole 02 - Cockroaches"),
+        desired_title="Harry Hole 02: Cockroaches",
+        desired_album="Harry Hole 02: Cockroaches",
+        reasons=[],
+        provider_conflicts=[],
+    )
+    comparison = providers.MetadataComparison(
+        candidates={
+            "goodreads": providers.MetadataCandidate(
+                provider="goodreads",
+                title="Cockroaches",
+                status="match",
+            ),
+            "openlibrary": providers.MetadataCandidate(
+                provider="openlibrary",
+                title="Cockroaches",
+                status="match",
+            ),
+        },
+        selected=providers.MetadataCandidate(
+            provider="goodreads",
+            title="Cockroaches",
+            status="match",
+        ),
+    )
+
+    from src.lib.metadata.plan import _attach_provider_comparison
+
+    _attach_provider_comparison(plan, comparison)
+
+    assert plan.desired_title == "Cockroaches"
+    assert plan.desired_album == "Cockroaches"
+    assert "use agreed Goodreads/Open Library title" in plan.reasons
