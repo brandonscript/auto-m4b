@@ -699,14 +699,14 @@ files = [
 
 [[package]]
 name = "goodscraps"
-version = "0.1.0"
+version = "0.1.1"
 description = "A read-only, unofficial Goodreads metadata client."
 optional = false
 python-versions = "<4.0,>=3.12"
 groups = ["main"]
 files = [
-    {file = "goodscraps-0.1.0-py3-none-any.whl", hash = "sha256:45acefcdd159450b3d06b3b6a89971d64a05dbf9b52994fe7976b01e234c2f31"},
-    {file = "goodscraps-0.1.0.tar.gz", hash = "sha256:27c5fe381cae3daf869f73e519fcdaeacb8983f8a5f27277c418ddc00fcfc1b8"},
+    {file = "goodscraps-0.1.1-py3-none-any.whl", hash = "sha256:03f075ae184362779dc4bb4765532129e579478447bbcd613f2677de6262ee2d"},
+    {file = "goodscraps-0.1.1.tar.gz", hash = "sha256:ec82e866fec9202f171a7e00c44c431840f7e710dc20d4e5caf031a7ae0a72b8"},
 ]
 
 [package.dependencies]
@@ -3578,4 +3578,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "f1a40493247601edf09f3b7af0412b3bf47f4b61efaeece83474e5535b414def"
+content-hash = "8077e02a1880d96eadebbdc2e7bb537dbbcfd8bfe658435516986868b459019a"
