@@ -130,9 +130,6 @@ matcher.add("PRODUCT", [[{"IS_ALPHA": True}]])
 matcher.add("EVENT", [[{"IS_ALPHA": True}]])
 matcher.add("ORG", [[{"IS_ALPHA": True}]])
 
-import inflect as _inflect
-
-inflect = _inflect.engine()
 nlp = cast(Language, nlp)
 
 """

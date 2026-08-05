@@ -5,6 +5,7 @@ import sqlite3
 import string
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import combinations, zip_longest
 from pathlib import Path
 from typing import Any, cast, Literal, overload, TYPE_CHECKING, TypeVar
@@ -23,7 +24,6 @@ from src.lib.misc import (
 )
 from src.lib.nlp import (
     english_words,
-    inflect,
     nlp,
     nlp_trf,
     restore_original_name,
@@ -238,6 +238,35 @@ def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
         pipeline_root = False
 
     dir_title = "" if pipeline_root else re_group(book_title_pattern.search(book.basename), "book_title")
+    if not pipeline_root and book.path.parent:
+        parent_name = book.path.parent.name.strip()
+        parent_names = [parent_name]
+        if " from " in parent_name.casefold():
+            parent_names.append(re.split(r"\s+from\s+", parent_name, maxsplit=1, flags=re.IGNORECASE)[0])
+        parent_marker = next(
+            (
+                re.search(re.escape(name).replace("'", "['’]?"), book.basename, re.IGNORECASE)
+                for name in parent_names
+                if name
+            ),
+            None,
+        )
+        if parent_marker:
+            parent_prefix = re.sub(r"^\s*\d+\s+", "", book.basename[: parent_marker.start()]).strip(" -_–—")
+            if parent_prefix:
+                dir_title = parent_prefix
+    if dir_title:
+        dir_title = re.sub(r"^\s*\d{4}\s*[-–—]\s*", "", dir_title).strip()
+        dir_title = title_chunk_pattern.sub("", dir_title).strip(" ,")
+        dir_title = re.sub(r"\s*[-–—]\s*(?:disc|cd)\s*\d+\s*$", "", dir_title, flags=re.IGNORECASE).strip()
+    if not dir_title and not pipeline_root:
+        bracket_title = re.search(r"\]\s*(?P<title>[A-Za-z].*?)\s*$", book.basename)
+        if bracket_title:
+            dir_title = bracket_title.group("title").strip()
+    if not dir_title and not pipeline_root:
+        numbered_title = re.match(r"^\s*\d+\s+(?P<title>[A-Za-z].*?)\s*$", book.basename)
+        if numbered_title:
+            dir_title = numbered_title.group("title").strip()
     dir_author = "" if pipeline_root else parse_author(book.basename, "fs", fallback="")
     dir_nlp_people, dir_nlp_titles = ([], []) if pipeline_root else spaCy_extract(book.basename)
     dir_year = "" if pipeline_root else re_group(year_pattern.search(book.basename), "year")
@@ -277,7 +306,19 @@ def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
     dir_nlp_titles_n = [t for (t, _, _) in dir_nlp_titles]
     file_nlp_titles_n = [t for (t, _, _) in file_nlp_titles]
 
-    longest_title = max([dir_title, file_title, *dir_nlp_titles_n, *file_nlp_titles_n], key=len)
+    longest_title = dir_title or max([file_title, *dir_nlp_titles_n, *file_nlp_titles_n], key=len)
+    if book.path.parent:
+        parent_name = book.path.parent.name.strip()
+        parent_prefixes = [parent_name]
+        if " from " in parent_name.casefold():
+            parent_prefixes.append(re.split(r"\s+from\s+", parent_name, maxsplit=1, flags=re.IGNORECASE)[0])
+        for parent_prefix in parent_prefixes:
+            marker = re.search(re.escape(parent_prefix).replace("'", "['’]?"), longest_title, re.IGNORECASE)
+            if marker and marker.start():
+                candidate = longest_title[: marker.start()].strip(" ,-_–—")
+                if candidate:
+                    longest_title = re.sub(r"^\s*\d+\s+", "", candidate).strip()
+                    break
     longest_year = max([dir_year, file_year], key=len)
 
     meta = {
@@ -435,8 +476,16 @@ def is_generic_word(word):
     return word.lower() in english_words
 
 
+@lru_cache(maxsize=1)
+def _get_inflect_engine():
+    import inflect
+
+    return inflect.engine()
+
+
 def get_singular(word):
-    return word if not inflect.singular_noun(word) else inflect.singular_noun(word)
+    engine = _get_inflect_engine()
+    return word if not engine.singular_noun(word) else engine.singular_noun(word)
 
 
 # Basic name scoring fallback
@@ -745,6 +794,7 @@ def lookup_and_score_names(candidates: list[tuple[str, str, float]]) -> list[tup
 #     return clean_people, clean_objects
 
 
+@cachetools.func.ttl_cache(maxsize=256, ttl=MEMO_TTL)
 def spaCy_extract(s: str) -> tuple[list[tuple[str, str, float]], list[tuple[str, str, float]]]:
     """Extracts people and objects using spaCy's NER with transformer model."""
     s = strip_leading_nums_and_punct(s)
@@ -848,6 +898,14 @@ def get_cached_nlp_results(text: str) -> list[tuple[str, str, float]] | None:
     return None
 
 
+@lru_cache(maxsize=1)
+def _get_nltk_chunker():
+    """Load the expensive NLTK named-entity model once per process."""
+    from nltk.chunk.named_entity import Maxent_NE_Chunker
+
+    return Maxent_NE_Chunker()
+
+
 def cache_nlp_results(text: str, results: list[tuple[str, str, float]]) -> None:
     """Cache NLP results for the given text."""
     conn = get_nlp_cache_db()
@@ -865,6 +923,7 @@ def cache_nlp_results(text: str, results: list[tuple[str, str, float]]) -> None:
         conn.close()
 
 
+@cachetools.func.ttl_cache(maxsize=256, ttl=MEMO_TTL)
 def get_nlp_names(s: str, *, no_cache: bool = False) -> list[tuple[str, str, float]]:
     """Extract name candidates using both NLTK and spaCy, score and rank."""
     # Try to get from cache first
@@ -873,13 +932,13 @@ def get_nlp_names(s: str, *, no_cache: bool = False) -> list[tuple[str, str, flo
 
     s = swap_firstname_lastname_in_long(s)
 
-    from nltk import ne_chunk, pos_tag, word_tokenize
+    from nltk import pos_tag, word_tokenize
     from nltk.tree import Tree
 
     # --- NLTK ---
     tokens = word_tokenize(s)
     pos_tags = pos_tag(tokens)
-    tree = ne_chunk(pos_tags)
+    tree = _get_nltk_chunker().parse(pos_tags)
 
     nltk_names: list[tuple[str, str, float] | tuple[str, str, None]] = []
     for subtree in tree:
@@ -1068,11 +1127,16 @@ def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = Non
     """
     if target == "fs":
         normalized = s.replace("_", " ")
-        prefix = re.match(r"^\s*(.+?)\s+[-–—]\s+", normalized)
+        prefix = re.match(r"^\s*(.+?)\s*[-–—]\s+", normalized)
         if prefix:
             candidate = prefix.group(1).strip()
-            if len(candidate.split()) >= 2:
+            if candidate.isdigit():
+                return normalize_author_initials(fallback or "")
+            if not re.search(r"\b[\w]+['’]s\b", candidate, re.IGNORECASE):
                 return normalize_author_initials(candidate)
+            if re.search(r"\b[\w]+['’]s\b", candidate, re.IGNORECASE):
+                return normalize_author_initials(fallback or "")
+        return normalize_author_initials(fallback or "")
     return normalize_author_initials(
         parse_names(s, target, fallback=fallback, max_chars=max_chars).author or fallback or ""
     )

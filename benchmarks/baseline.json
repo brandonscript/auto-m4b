@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "chapters": 1,
+      "conversion_wall_seconds": 0.7679589670151472,
+      "duration_seconds": 126.329002,
+      "fixture": "basic_no_cover__single_mp3",
+      "input_bytes": 507074,
+      "output_bytes": 550084,
+      "preparation_seconds": 5.638104222016409,
+      "runs": 3,
+      "source_files": 1,
+      "stages": {
+        "_convert_file_to_mp4": 0.7218298439402133,
+        "_embed_metadata_and_cover": 0.025580896995961666,
+        "_ffprobe_duration_ms": 0.0038280609296634793,
+        "_ffprobe_title_tag": 0.0026831559371203184,
+        "write_ffmetadata": 0.0002092400100082159
+      },
+      "verification_seconds": 0.0036952249938622117,
+      "wall_seconds": {
+        "max": 6.782935303053819,
+        "median": 6.372377953957766,
+        "min": 6.290364179993048
+      }
+    },
+    {
+      "chapters": 1,
+      "conversion_wall_seconds": 0.7596980719827116,
+      "duration_seconds": 126.329002,
+      "fixture": "basic_with_cover__single_mp3",
+      "input_bytes": 548851,
+      "output_bytes": 562119,
+      "preparation_seconds": 5.560237671015784,
+      "runs": 3,
+      "source_files": 1,
+      "stages": {
+        "_convert_file_to_mp4": 0.6972007100703195,
+        "_embed_metadata_and_cover": 0.024467153009027243,
+        "_ffprobe_duration_ms": 0.0035342309856787324,
+        "_ffprobe_title_tag": 0.0047315629199147224,
+        "write_ffmetadata": 0.00015245901886373758
+      },
+      "verification_seconds": 0.003576161921955645,
+      "wall_seconds": {
+        "max": 6.395893060020171,
+        "median": 6.319941000081599,
+        "min": 6.177124597015791
+      }
+    },
+    {
+      "chapters": 5,
+      "conversion_wall_seconds": 0.23911259195301682,
+      "duration_seconds": 33.993878,
+      "fixture": "tiny__flat_mp3",
+      "input_bytes": 111978,
+      "output_bytes": 112450,
+      "preparation_seconds": 6.665043000946753,
+      "runs": 3,
+      "source_files": 5,
+      "stages": {
+        "_concat_to_m4b": 0.013976393034681678,
+        "_convert_file_to_mp4": 0.1501133469864726,
+        "_embed_metadata_and_cover": 0.012640874949283898,
+        "_ffprobe_duration_ms": 0.01602563913911581,
+        "_ffprobe_title_tag": 0.017098334967158735,
+        "write_ffmetadata": 0.00022183696273714304
+      },
+      "verification_seconds": 0.0035568709718063474,
+      "wall_seconds": {
+        "max": 6.946849241037853,
+        "median": 6.896518914029002,
+        "min": 6.8925793709931895
+      }
+    }
+  ],
+  "cpu_cores": 1,
+  "generated_at": "2026-08-05T19:16:10Z",
+  "iterations": 3,
+  "python": "3.12.1",
+  "warmups": 1
+}
