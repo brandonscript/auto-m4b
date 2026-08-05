@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import re
 import shutil
@@ -15,6 +17,7 @@ from src.lib.ffprobe_utils import ffprobe_file
 from src.lib.formatters import strip_leading_the
 from src.lib.books_tree import BooksTree
 from src.lib.cleaners import (
+    fix_smart_quotes,
     minimalist_title,
     strip_leading_articles,
     strip_leading_author_dash,
@@ -22,8 +25,6 @@ from src.lib.cleaners import (
 )
 from src.lib.fs_utils import find_first_audio_file
 from src.lib.misc import compare_trim
-from src.lib.metadata.ol_attach import resolve_date_consensus
-from src.lib.metadata.providers import MetadataCandidate, lookup_metadata
 from src.lib.ol_lookup import (
     id3_prefer_colon_separator,
     ol_match_band,
@@ -37,6 +38,18 @@ from src.lib.parsers import (
 from src.lib.scorers import (
     MetadataScore,
 )
+
+if TYPE_CHECKING:
+    from src.lib.metadata.providers import MetadataCandidate
+
+
+def lookup_metadata(*args: Any, **kwargs: Any):
+    """Load provider lookup lazily to avoid the metadata package cycle."""
+    from src.lib.metadata.providers import lookup_metadata as provider_lookup
+
+    return provider_lookup(*args, **kwargs)
+
+
 from src.lib.term import (
     nl,
     PATH_COLOR,
@@ -128,6 +141,9 @@ def _sanitize_tags_for_write(
     title came only from the filename.
     """
     out: dict = dict(tags)
+    for key in ("title", "album", "sortalbum", "artist", "albumartist", "composer", "comment"):
+        if key in out and out[key] is not None:
+            out[key] = fix_smart_quotes(str(out[key]))
     title = str(out.get("title") or "").strip()
     album = str(out.get("album") or "").strip()
     stem = (fallback_stem or "").strip() or "Unknown Audiobook"
@@ -399,6 +415,8 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
                     book.artist = book.albumartist = shared_plan.desired_author
                 if shared_plan.desired_date:
                     book.date = shared_plan.desired_date
+    from src.lib.metadata.ol_attach import resolve_date_consensus
+
     resolved_year = resolve_date_consensus(
         book.fs_year,
         book.id3_date,
@@ -923,7 +941,7 @@ def _normalize_ol_title(title: str) -> str:
     OL often returns sentence case; this is the single choke point used wherever
     an OL title is assigned to ``book.title`` or written into ID3 tags.
     """
-    return title_case_ol_title(_strip_ol_edition_suffix(title))
+    return title_case_ol_title(fix_smart_quotes(_strip_ol_edition_suffix(title)))
 
 
 def _finalize_convert_title(title: str, author: str | None = None) -> str:
@@ -1271,19 +1289,19 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
         preferred_canonical or preferred_author, best_ol.author, best_ol.author_score(fallback=None)
     ):
         # Prefer OL canonical when it agrees; keeps "Ursula K. Le Guin" tidy.
-        book.artist = best_ol.author
-        book.albumartist = best_ol.author
+        book.artist = fix_smart_quotes(best_ol.author)
+        book.albumartist = fix_smart_quotes(best_ol.author)
         if best_ol.author_and_narrator_swapped and best_ol.narrator:
             # Genuine swap: preferred was the performer; OL author is correct.
             # Only set narrator from swap if it isn't the preferred author.
             if best_ol.narrator.lower() != (preferred_author or "").lower():
-                book.narrator = best_ol.narrator
+                book.narrator = fix_smart_quotes(best_ol.narrator)
     elif preferred_author:
         book.artist = preferred_canonical or preferred_author
         book.albumartist = book.artist
     else:
-        book.artist = best_ol.author
-        book.albumartist = best_ol.author
+        book.artist = fix_smart_quotes(best_ol.author)
+        book.albumartist = fix_smart_quotes(best_ol.author)
 
     return best_ol
 

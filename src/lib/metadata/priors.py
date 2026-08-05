@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from src.lib.cleaners import normalize_author_initials
 from src.lib.fs_utils import try_relative_to
 from src.lib.metadata.models import CliPaths
 from src.lib.parsers import swap_firstname_lastname
@@ -108,7 +109,7 @@ def parent_author_hint(book_dir: Path, cli: CliPaths | None = None) -> str:
     name = parent.name.strip()
     if not name or name.startswith("#"):
         return ""
-    return swap_firstname_lastname(name)
+    return normalize_author_initials(swap_firstname_lastname(name))
 
 
 def filesystem_extracted(
@@ -117,7 +118,7 @@ def filesystem_extracted(
     """Title / author / date / narrator priors from folder path alone."""
     if _loose_m4b_in_author_folder(book_dir, cli):
         # {converted}/Author/*.m4b — folder is author, not title.
-        author = swap_firstname_lastname(book_dir.name.strip())
+        author = normalize_author_initials(swap_firstname_lastname(book_dir.name.strip()))
         return "", author, "", folder_narrator_hint(book_dir.name)
     title = folder_title_hint(book_dir.name)
     author = parent_author_hint(book_dir, cli)

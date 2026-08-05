@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.lib.converter.chapters import Chapter
+from src.lib.cleaners import fix_smart_quotes
 
 # Characters that must be escaped in ffmetadata values: = ; # \ and newline
 _ESCAPE_RE_CHARS = str.maketrans(
@@ -67,7 +68,7 @@ def build_ffmetadata(
     ]
     for key, val in tag_map:
         if val:
-            lines.append(f"{key}={_escape(val)}")
+            lines.append(f"{key}={_escape(fix_smart_quotes(val))}")
 
     # Chapter blocks
     for ch in chapters:
@@ -76,7 +77,7 @@ def build_ffmetadata(
         lines.append("TIMEBASE=1/1000")
         lines.append(f"START={ch.start_ms}")
         lines.append(f"END={ch.end_ms}")
-        lines.append(f"title={_escape(ch.title)}")
+        lines.append(f"title={_escape(fix_smart_quotes(ch.title))}")
 
     return "\n".join(lines) + "\n"
 

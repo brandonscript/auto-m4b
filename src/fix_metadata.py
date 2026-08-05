@@ -41,7 +41,7 @@ from typing import NoReturn
 
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import minimalist_title
+from src.lib.cleaners import canonical_author_initials, minimalist_title
 from src.lib.metadata import (
     CliPaths,
     FixPlan,
@@ -228,11 +228,20 @@ def _short_path(path: Path | str, cli: CliPaths | None = None) -> str:
     return str(p)
 
 
-def _prop_equal(a: str | None, b: str | None, *, is_date: bool = False) -> bool:
+def _prop_equal(
+    a: str | None,
+    b: str | None,
+    *,
+    is_date: bool = False,
+    is_author: bool = False,
+) -> bool:
     if is_date:
         ya, yb = get_year_from_date(a or ""), get_year_from_date(b or "")
         if ya or yb:
             return ya == yb and bool(ya)
+    if is_author:
+        a = canonical_author_initials(a or "")
+        b = canonical_author_initials(b or "")
     return (a or "").strip().casefold() == (b or "").strip().casefold()
 
 
@@ -432,8 +441,8 @@ def _print_proposed_block(
 def _print_proposed_plan(plan: FixPlan, *, show_rename: bool = True) -> None:
     """Print the consolidated proposed-fixes block for a plan."""
     cur = plan.current
-    artist_diff = not _prop_equal(cur.artist, plan.desired_author)
-    albumartist_diff = not _prop_equal(cur.albumartist, plan.desired_author)
+    artist_diff = not _prop_equal(cur.artist, plan.desired_author, is_author=True)
+    albumartist_diff = not _prop_equal(cur.albumartist, plan.desired_author, is_author=True)
     if artist_diff:
         author_display = cur.artist
     elif albumartist_diff:
@@ -720,7 +729,7 @@ def _can_reassign_author_to_narrator(plan: FixPlan) -> bool:
         current_author
         and desired_author
         and not (plan.current.composer or "").strip()
-        and not _prop_equal(current_author, desired_author)
+        and not _prop_equal(current_author, desired_author, is_author=True)
         and fuzz.token_set_ratio(current_author, desired_author) / 100 < 0.7
     )
 
@@ -1345,6 +1354,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Show each planned fix and prompt before applying (implies write; default answer is skip)",
     )
     parser.add_argument(
+        "-e",
+        "--force-dirty",
+        action="store_true",
+        help="Force otherwise-clean books into the dirty plan list",
+    )
+    parser.add_argument(
         "--no-ol",
         action="store_true",
         help="Skip automatic Open Library lookup (still allows -o / interactive o)",
@@ -1453,6 +1468,7 @@ def main(argv: list[str] | None = None) -> int:
                 goodreads_ref=goodreads_ref,
                 lookup_goodreads=lookup_goodreads_upfront,
                 minimalist=minimalist,
+                force_dirty=args.force_dirty,
             )
         except SourceResolutionError as e:
             failures.append(e)
@@ -1481,11 +1497,11 @@ def main(argv: list[str] | None = None) -> int:
         for plan in plans:
             _attach_open_library(plan, apply_ol_tags=False, minimalist=minimalist)
             _apply_cleanup_filename(plan, plan.fs_title)
-            if plan.needs_work:
+            if plan.needs_work or args.force_dirty:
                 kept.append(plan)
         plans = kept
 
-    if interactive and args.tags_only:
+    if interactive and args.tags_only and not args.force_dirty:
         plans = [
             plan
             for plan in plans

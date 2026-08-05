@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import re
 from dataclasses import dataclass, field
 
 from goodscraps import Goodscraps
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import minimalist_title
+from src.lib.cleaners import fix_smart_quotes, minimalist_title
 from src.lib.config import cfg
 from src.lib.term import print_debug
 
@@ -32,6 +33,11 @@ class MetadataCandidate:
     score: float = 0.0
     status: str = "none"
     error: str = ""
+
+    def __post_init__(self) -> None:
+        """Keep provider-returned text safe for display, comparison, and tags."""
+        for field_name in ("title", "author", "narrator", "error"):
+            object.__setattr__(self, field_name, fix_smart_quotes(getattr(self, field_name)))
 
     @property
     def confident(self) -> bool:
@@ -163,8 +169,14 @@ def _goodreads_lookup(
                     )
 
                 scored = [(item, *scored_match(item)) for item in matches]
+                exact_title_matches = [row for row in scored if row[4] >= 0.95]
                 author_matches = [row for row in scored if row[2] >= 0.5] if author else []
-                if author_matches:
+                if exact_title_matches:
+                    best, score, _author_score, _title_score, _strict_title_score = max(
+                        exact_title_matches,
+                        key=lambda row: (row[4], row[2], row[3], row[1]),
+                    )
+                elif author_matches:
                     best, score, _author_score, _title_score, _strict_title_score = max(
                         author_matches,
                         key=lambda row: (row[2], row[4], row[3], row[1]),
@@ -249,15 +261,25 @@ def lookup_metadata(
 ) -> MetadataComparison:
     """Query enabled providers and select Goodreads before Open Library."""
     comparison = MetadataComparison()
-    if lookup_goodreads:
-        comparison.candidates["goodreads"] = _goodreads_lookup(
-            title,
-            author,
-            narrator,
-            ref=goodreads_ref,
-        )
-    if lookup_open_library:
-        comparison.candidates["openlibrary"] = _open_library_lookup(title, author, narrator)
+    lookups = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        if lookup_goodreads:
+            lookups["goodreads"] = executor.submit(
+                _goodreads_lookup,
+                title,
+                author,
+                narrator,
+                ref=goodreads_ref,
+            )
+        if lookup_open_library:
+            lookups["openlibrary"] = executor.submit(
+                _open_library_lookup,
+                title,
+                author,
+                narrator,
+            )
+        for provider, future in lookups.items():
+            comparison.candidates[provider] = future.result()
 
     _add_conflicts(comparison)
     goodreads = comparison.candidates.get("goodreads")
