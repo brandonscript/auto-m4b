@@ -8,7 +8,7 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import fix_smart_quotes
+from src.lib.cleaners import canonical_author_initials, fix_smart_quotes
 from src.lib.parsers import get_year_from_date
 
 
@@ -118,6 +118,9 @@ class FixPlan:
     @property
     def needs_tag_write(self) -> bool:
         cur = self.current
+        author_equal = lambda value: canonical_author_initials(value or "").casefold() == canonical_author_initials(
+            self.desired_author or ""
+        ).casefold()
         date_changed = bool(self.desired_date) and get_year_from_date(cur.date) != get_year_from_date(self.desired_date)
         narrator_changed = False
         if self.desired_narrator:
@@ -127,8 +130,8 @@ class FixPlan:
         return any(
             [
                 (cur.title or "") != self.desired_title,
-                (cur.artist or "") != self.desired_author,
-                (cur.albumartist or "") != self.desired_author,
+                not author_equal(cur.artist),
+                not author_equal(cur.albumartist),
                 (cur.album or "") != self.desired_album,
                 date_changed,
                 narrator_changed,
