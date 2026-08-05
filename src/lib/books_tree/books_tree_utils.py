@@ -179,14 +179,14 @@ def match_filter_paths(
     rel_match_filter = cast(
         list[PT] | str,
         (
-            [try_relative_to(str(p), root or Path()) for p in match_filter]
+            [try_relative_to(p, root or Path()) for p in match_filter]
             if isinstance(match_filter, list)
             else match_filter
         ),
     )
 
     def _is_wanted_path(t: "PT | str | None"):
-        if not (rel_path := try_relative_to(str(t), root or Path())):
+        if not (rel_path := try_relative_to(t, root or Path())):
             return False
         if isinstance(rel_match_filter, str):
             return bool(re.search(rel_match_filter, str(rel_path), re.I))

@@ -259,22 +259,25 @@ class BooksTree(BaseModel):
         _audio_files_by_parent: dict[Path, list[Path]] = defaultdict(list)
         for _audio_file in _all_audio_files:
             _audio_files_by_parent[_audio_file.parent].append(_audio_file)
+        depth_limited = mindepth is not None or maxdepth is not None
 
         # tick("building tree of audio files and dirs")
         # Build a tree of the audio files and dirs
         for d in _rglob_dirs:
             # If d is not within the mindepth and maxdepth, skip it
-            if not filter_depth(d, root.path, mindepth=mindepth, maxdepth=maxdepth):
+            if depth_limited and not filter_depth(d, root.path, mindepth=mindepth, maxdepth=maxdepth):
                 # tick("d not in mindepth and maxdepth, skipping")
                 continue
 
             # If x is a dir, make sure the path and its parents exists in the tree
             # tick("d is a dir, getting audio files in dir")
-            audio_files_in_dir = [
-                f
-                for f in _audio_files_by_parent.get(d, [])
-                if filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
-            ]
+            audio_files_in_dir = _audio_files_by_parent.get(d, [])
+            if depth_limited:
+                audio_files_in_dir = [
+                    f
+                    for f in audio_files_in_dir
+                    if filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
+                ]
             # tick(f"done getting audio {len(audio_files_in_dir)} files in dir {d.relative_to(root.path)}")
             if audio_files_in_dir:
                 # tick("about to call _add_to_tree(d)", d)
@@ -288,7 +291,11 @@ class BooksTree(BaseModel):
             [
                 BooksTree.cast(f, root=root, match_filter=self.match_filter)
                 for f in match_filter_paths(_all_audio_files, self.match_filter, root=root)
-                if f.parent == self.path and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
+                if f.parent == self.path
+                and (
+                    not depth_limited
+                    or filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
+                )
             ]
         )
         # tick(f"done adding files from current level to self.files, total is now {len(self._files)}")

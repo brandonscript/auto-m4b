@@ -78,7 +78,7 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 minversion = "7.4"
-addopts = "-rP -vv -s --color=yes --capture=tee-sys --slow --ignore=.venv"
+addopts = "-rN -q --color=yes --capture=fd --slow --ignore=.venv"
 testpaths = ["src/tests"]
 python_files = ["*_test.py", "test_*.py"]
 python_classes = ["test_", "_test", "Test*"]

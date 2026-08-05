@@ -270,7 +270,14 @@ def extract_path_info(book: "Audiobook", console: bool = False) -> "Audiobook":
     dir_author = "" if pipeline_root else parse_author(book.basename, "fs", fallback="")
     dir_nlp_people, dir_nlp_titles = ([], []) if pipeline_root else spaCy_extract(book.basename)
     dir_year = "" if pipeline_root else re_group(year_pattern.search(book.basename), "year")
-    dir_narrator = "" if pipeline_root else parse_narrator(book.basename, "fs", fallback="")
+    has_narrator_hint = bool(
+        narrator_comment_pattern.search(book.basename) or narrator_slash_pattern.search(book.basename)
+    )
+    dir_narrator = (
+        ""
+        if pipeline_root or not has_narrator_hint
+        else parse_narrator(book.basename, "fs", fallback="")
+    )
 
     # remove suffix/extension from files
     files = [f.path.stem for f in book.tree.files_recursive]
