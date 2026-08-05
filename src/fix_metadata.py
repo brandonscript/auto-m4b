@@ -41,7 +41,7 @@ from typing import NoReturn
 
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import minimalist_title
+from src.lib.cleaners import canonical_author_initials, minimalist_title
 from src.lib.metadata import (
     CliPaths,
     FixPlan,
@@ -228,11 +228,20 @@ def _short_path(path: Path | str, cli: CliPaths | None = None) -> str:
     return str(p)
 
 
-def _prop_equal(a: str | None, b: str | None, *, is_date: bool = False) -> bool:
+def _prop_equal(
+    a: str | None,
+    b: str | None,
+    *,
+    is_date: bool = False,
+    is_author: bool = False,
+) -> bool:
     if is_date:
         ya, yb = get_year_from_date(a or ""), get_year_from_date(b or "")
         if ya or yb:
             return ya == yb and bool(ya)
+    if is_author:
+        a = canonical_author_initials(a or "")
+        b = canonical_author_initials(b or "")
     return (a or "").strip().casefold() == (b or "").strip().casefold()
 
 
@@ -432,8 +441,8 @@ def _print_proposed_block(
 def _print_proposed_plan(plan: FixPlan, *, show_rename: bool = True) -> None:
     """Print the consolidated proposed-fixes block for a plan."""
     cur = plan.current
-    artist_diff = not _prop_equal(cur.artist, plan.desired_author)
-    albumartist_diff = not _prop_equal(cur.albumartist, plan.desired_author)
+    artist_diff = not _prop_equal(cur.artist, plan.desired_author, is_author=True)
+    albumartist_diff = not _prop_equal(cur.albumartist, plan.desired_author, is_author=True)
     if artist_diff:
         author_display = cur.artist
     elif albumartist_diff:
@@ -720,7 +729,7 @@ def _can_reassign_author_to_narrator(plan: FixPlan) -> bool:
         current_author
         and desired_author
         and not (plan.current.composer or "").strip()
-        and not _prop_equal(current_author, desired_author)
+        and not _prop_equal(current_author, desired_author, is_author=True)
         and fuzz.token_set_ratio(current_author, desired_author) / 100 < 0.7
     )
 
