@@ -1865,7 +1865,7 @@ def score_series_parent(tree: "BooksTree") -> float:
 @cached_scorer
 def score_multi_parent(tree: "BooksTree") -> float:
     try:
-        if not tree.parent or tree.is_root or tree.is_file():
+        if not tree.parent or tree.is_root or tree.is_file() or not tree.dirs:
             return 0.0
 
         multi_disc_score = 0.0

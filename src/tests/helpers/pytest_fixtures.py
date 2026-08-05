@@ -1,8 +1,8 @@
 import multiprocessing as mp
 import os
-import random
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -852,6 +852,13 @@ def not_an_audio_file():
 @pytest.fixture(scope="function", autouse=False)
 def mock_inbox(setup_teardown, requires_empty_inbox):
     """Populate INBOX_FOLDER with mocked sample audiobooks."""
+    template_dir = Path(tempfile.gettempdir()) / f"auto-m4b-pytest-inbox-{os.getpid()}"
+    if template_dir.exists():
+        shutil.copytree(template_dir, TEST_DIRS.inbox, dirs_exist_ok=True)
+        yield TEST_DIRS.inbox
+        for f in TEST_DIRS.inbox.rglob("mock_book_*"):
+            testutils.rm(f)
+        return
 
     # make 4 sample audiobooks using nealy empty txt files (~5kb) as pretend mp3 files.
     for i, f in enumerate(MOCKED.flat_dirs[:4]):
@@ -964,6 +971,7 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     # make an empty dir
     MOCKED.empty.mkdir(parents=True, exist_ok=True)
 
+    shutil.copytree(TEST_DIRS.inbox, template_dir)
     yield TEST_DIRS.inbox
 
     # remove everything in the inbox that starts with `mock_book_`
