@@ -7,6 +7,19 @@ from src.lib.config import cfg
 from src.lib.metadata import providers
 
 
+def test_metadata_candidate_normalizes_smart_quotes():
+    candidate = providers.MetadataCandidate(
+        provider="openlibrary",
+        title="Midnight’s Children",
+        author="O’Reilly",
+        narrator='“Reader”',
+    )
+
+    assert candidate.title == "Midnight's Children"
+    assert candidate.author == "O'Reilly"
+    assert candidate.narrator == '"Reader"'
+
+
 class _FakeGoodscraps:
     def __init__(self, **kwargs):
         self.kwargs = kwargs

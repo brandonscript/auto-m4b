@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from src.lib.cleaners import looks_like_marketing_subtitle, minimalist_title, title_case_ol_title
+from src.lib.cleaners import (
+    fix_smart_quotes,
+    looks_like_marketing_subtitle,
+    minimalist_title,
+    title_case_ol_title,
+)
 from src.lib.metadata.models import FixPlan
 from src.lib.metadata.priors import folder_title_hint
 from src.lib.parsers import get_year_from_date
@@ -89,9 +94,9 @@ def _attach_open_library(
         plan.ol_status = "none"
         return plan
 
-    plan.ol_title = title_case_ol_title(ol.title) if ol and ol.title else ""
-    plan.ol_author = ol.author if ol else ""
-    plan.ol_narrator = ol.narrator if ol else ""
+    plan.ol_title = title_case_ol_title(fix_smart_quotes(ol.title)) if ol and ol.title else ""
+    plan.ol_author = fix_smart_quotes(ol.author) if ol else ""
+    plan.ol_narrator = fix_smart_quotes(ol.narrator) if ol else ""
     plan.ol_year = ol.date if ol else ""
     plan.ol_key = ol.key if ol else ""
     plan.ol_url = ol.url if ol else ""
