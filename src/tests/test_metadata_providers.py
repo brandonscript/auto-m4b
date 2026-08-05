@@ -16,6 +16,9 @@ class _FakeGoodscraps:
     def __exit__(self, *_args):
         return None
 
+    def canonical_book_id(self, book_id):
+        return book_id
+
     def search(self, _query, *, limit, resolve_canonical=False):
         assert limit == 10
         return [
@@ -196,7 +199,6 @@ class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
 class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
     def search(self, _query, *, limit, resolve_canonical=False):
         assert limit == 10
-        assert resolve_canonical is True
         return [
             SimpleNamespace(
                 book_id=123790521,
@@ -206,6 +208,10 @@ class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
                 url="https://www.goodreads.com/book/show/123790521-phantom-by-jo-nesbo",
             )
         ]
+
+    def canonical_book_id(self, book_id):
+        assert str(book_id) == "123790521"
+        return 13256064
 
     def book(self, book_id):
         assert str(book_id) == "13256064"
