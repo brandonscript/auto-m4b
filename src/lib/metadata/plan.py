@@ -222,11 +222,13 @@ def plan_fix(
     goodreads_ref: str | None = None,
     lookup_goodreads: bool | None = None,
     minimalist: bool = False,
+    force_dirty: bool = False,
 ) -> FixPlan | None:
     """Build a fix plan for one book dir.
 
     Raises SourceResolutionError when ``require_source`` and no source can be resolved.
-    Returns None when the book needs no changes (unless ``ol_ref`` forces a rewrite).
+    Returns None when the book needs no changes (unless ``ol_ref`` or
+    ``force_dirty`` forces a plan).
     """
     ignore_globs = ignore_globs or []
     cli = cli or CliPaths()
@@ -455,7 +457,7 @@ def plan_fix(
     if plan.ol_title:
         _apply_cleanup_filename(plan, title)
 
-    if not plan.needs_work:
+    if not plan.needs_work and not force_dirty:
         return None
     return plan
 

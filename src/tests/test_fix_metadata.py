@@ -88,6 +88,14 @@ def test_cli_accepts_tags_only_option():
     assert args.tags_only is True
 
 
+def test_cli_accepts_force_dirty_option():
+    from src.fix_metadata import build_arg_parser
+
+    args = build_arg_parser().parse_args(["-e", "Author/Book"])
+
+    assert args.force_dirty is True
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [("e", "e"), ("edit", "e"), ("c", "c"), ("cancel", "c")],

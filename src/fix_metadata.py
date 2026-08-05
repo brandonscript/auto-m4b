@@ -1354,6 +1354,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Show each planned fix and prompt before applying (implies write; default answer is skip)",
     )
     parser.add_argument(
+        "-e",
+        "--force-dirty",
+        action="store_true",
+        help="Force otherwise-clean books into the dirty plan list",
+    )
+    parser.add_argument(
         "--no-ol",
         action="store_true",
         help="Skip automatic Open Library lookup (still allows -o / interactive o)",
@@ -1462,6 +1468,7 @@ def main(argv: list[str] | None = None) -> int:
                 goodreads_ref=goodreads_ref,
                 lookup_goodreads=lookup_goodreads_upfront,
                 minimalist=minimalist,
+                force_dirty=args.force_dirty,
             )
         except SourceResolutionError as e:
             failures.append(e)
@@ -1490,11 +1497,11 @@ def main(argv: list[str] | None = None) -> int:
         for plan in plans:
             _attach_open_library(plan, apply_ol_tags=False, minimalist=minimalist)
             _apply_cleanup_filename(plan, plan.fs_title)
-            if plan.needs_work:
+            if plan.needs_work or args.force_dirty:
                 kept.append(plan)
         plans = kept
 
-    if interactive and args.tags_only:
+    if interactive and args.tags_only and not args.force_dirty:
         plans = [
             plan
             for plan in plans
