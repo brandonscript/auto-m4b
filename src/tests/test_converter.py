@@ -255,6 +255,15 @@ class TestBuildFfmetadata:
         assert "artist=Jane Doe" in meta
         assert "genre=Audiobook" in meta
 
+    def test_smart_quotes_are_normalized(self):
+        meta = build_ffmetadata(
+            [Chapter(start_ms=0, end_ms=1000, title="“Midnight’s Children”")],
+            title="Midnight’s Children",
+        )
+
+        assert "title=Midnight's Children" in meta
+        assert 'title="Midnight\'s Children"' in meta
+
     def test_none_tags_omitted(self):
         meta = build_ffmetadata([], title=None, artist=None)
         assert "title=" not in meta

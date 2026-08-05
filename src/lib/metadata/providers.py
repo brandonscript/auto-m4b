@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from goodscraps import Goodscraps
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import minimalist_title
+from src.lib.cleaners import fix_smart_quotes, minimalist_title
 from src.lib.config import cfg
 from src.lib.term import print_debug
 
@@ -33,6 +33,11 @@ class MetadataCandidate:
     score: float = 0.0
     status: str = "none"
     error: str = ""
+
+    def __post_init__(self) -> None:
+        """Keep provider-returned text safe for display, comparison, and tags."""
+        for field_name in ("title", "author", "narrator", "error"):
+            object.__setattr__(self, field_name, fix_smart_quotes(getattr(self, field_name)))
 
     @property
     def confident(self) -> bool:
