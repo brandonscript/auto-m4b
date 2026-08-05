@@ -110,7 +110,7 @@ skip_covered = false
 
 [tool.poetry]
 name = "auto-m4b"
-version = "0.6.1"
+version = "0.6.2"
 description = "Python-native audiobook converter — watches a folder and converts multi-file mp3/m4a books to chapterized m4b"
 authors = ["Brandon Shelley <brandon@pacificaviator.co>"]
 license = "MIT"
@@ -169,7 +169,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.scripts]
 app = "src:main"
 forever = "src:main"
-fixm4b = "src.fix_metadata:main"
+fixm4b = "src.fixm4b:main"
 tests = "pytest:main"
 # fix-ffprobe = "./scripts/fix-ffprobe.sh"
 # install-docker-m4b-tool = "./scripts/install-docker-m4b-tool.sh"
