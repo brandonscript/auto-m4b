@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-import tempfile
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from pathlib import Path
@@ -239,6 +238,11 @@ def should_stream_copy(book: "Audiobook") -> bool:
     return not book.bitrate_exceeds_max
 
 
+def _conversion_worker_count(source_count: int, cpu_cores: int) -> int:
+    """Avoid creating more conversion threads than source files."""
+    return min(max(1, cpu_cores), max(1, source_count))
+
+
 def convert_book_native(book: "Audiobook") -> int:
     """Native Python implementation of ``m4b-tool merge``.
 
@@ -298,7 +302,7 @@ def convert_book_native(book: "Audiobook") -> int:
         return i, dst
 
     ordered: dict[int, Path] = {}
-    max_workers = max(1, cfg.CPU_CORES)
+    max_workers = _conversion_worker_count(len(src_files), cfg.CPU_CORES)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_convert_one, i, f): i for i, f in enumerate(src_files)}
         for fut in as_completed(futures):

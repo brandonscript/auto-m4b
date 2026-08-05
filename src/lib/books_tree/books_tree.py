@@ -1,5 +1,7 @@
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from functools import cached_property
 from pathlib import Path
@@ -14,7 +16,6 @@ from src.lib.id3_tags import Id3Tags
 from src.lib.misc import (
     any_in,
     any_matching,
-    flatlist,
     isorted,
 )
 from src.lib.term import print_debug
@@ -255,6 +256,9 @@ class BooksTree(BaseModel):
             except OSError:
                 pass
         _all_audio_files = only_audio_files(filter_ignored(_rglob_files))
+        _audio_files_by_parent: dict[Path, list[Path]] = defaultdict(list)
+        for _audio_file in _all_audio_files:
+            _audio_files_by_parent[_audio_file.parent].append(_audio_file)
 
         # tick("building tree of audio files and dirs")
         # Build a tree of the audio files and dirs
@@ -268,8 +272,8 @@ class BooksTree(BaseModel):
             # tick("d is a dir, getting audio files in dir")
             audio_files_in_dir = [
                 f
-                for f in _all_audio_files
-                if f.parent == d and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
+                for f in _audio_files_by_parent.get(d, [])
+                if filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
             ]
             # tick(f"done getting audio {len(audio_files_in_dir)} files in dir {d.relative_to(root.path)}")
             if audio_files_in_dir:
@@ -296,10 +300,16 @@ class BooksTree(BaseModel):
             # tick(f"scanning id3 tags because scan_id3 is {scan_id3}")
             if self.is_root:
                 # tick(f"self is root, scanning id3 tags recurseively ({len(self.files_recursive)} files)")
-                for f in [f for f in self.files_recursive if not f.id3_tags]:
-                    # tick(f"(root-leaf) scanning id3 tags for file {f.rel_path}")
-                    f.id3_tags = t if (t := Id3Tags.from_file(f.path)) and not t.BAD else None
-                    # tick(f"(root-leaf) done scanning id3 tags for file {f.rel_path}")
+                files_to_scan = [f for f in self.files_recursive if not f.id3_tags]
+
+                def scan_id3(file_node: "BooksTree"):
+                    tags = Id3Tags.from_file(file_node.path)
+                    return file_node, tags if tags and not tags.BAD else None
+
+                max_workers = min(8, max(1, len(files_to_scan)))
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    for file_node, tags in pool.map(scan_id3, files_to_scan):
+                        file_node.id3_tags = tags
             elif self.is_file() and not self.id3_tags:
                 # tick(f"(self-is_file) scanning id3 tags for direct file {self.rel_path}")
                 self.id3_tags = t if (t := Id3Tags.from_file(self.path)) and not t.BAD else None
@@ -683,14 +693,11 @@ class BooksTree(BaseModel):
     def dirs_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all directories, excluding the root.
         # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
-        return isorted(
-            d
-            for d in (
-                *self._dirs.values(),
-                *sum([d.dirs_recursive for d in self._dirs.values()], []),
-            )
-            if not d.is_root
-        )
+        directories = list(self._dirs.values())
+        recursive = []
+        for directory in directories:
+            recursive.extend(directory.dirs_recursive)
+        return isorted(d for d in (*directories, *recursive) if not d.is_root)
 
     @property
     @filter_matches
@@ -710,7 +717,10 @@ class BooksTree(BaseModel):
     def files_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all files.
         # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
-        return isorted((*self._files, *sum([d.files_recursive for d in self._dirs.values()], [])))
+        recursive = []
+        for directory in self._dirs.values():
+            recursive.extend(directory.files_recursive)
+        return isorted((*self._files, *recursive))
 
     @filter_matches
     def files_of_type_f(self, fmt: AudiobookFmt) -> list["BooksTree"]:
@@ -740,11 +750,10 @@ class BooksTree(BaseModel):
     def children_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all paths.
         # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
-        return isorted(
-            flatlist(
-                [*self._files, *self._dirs.values(), *sum([d.children_recursive for d in self._dirs.values()], [])]
-            )
-        )
+        recursive = []
+        for directory in self._dirs.values():
+            recursive.extend(directory.children_recursive)
+        return isorted([*self._files, *self._dirs.values(), *recursive])
 
     @property
     def children_without_structure_r(self) -> list["BooksTree"]:

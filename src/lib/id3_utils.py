@@ -41,6 +41,15 @@ from src.lib.scorers import (
 
 if TYPE_CHECKING:
     from src.lib.metadata.providers import MetadataCandidate
+
+
+def lookup_metadata(*args: Any, **kwargs: Any):
+    """Load provider lookup lazily to avoid the metadata package cycle."""
+    from src.lib.metadata.providers import lookup_metadata as provider_lookup
+
+    return provider_lookup(*args, **kwargs)
+
+
 from src.lib.term import (
     nl,
     PATH_COLOR,
@@ -340,8 +349,6 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     ]
     ol_title = open_library_lookup_title(book.title, author=book.author, narrator=book.narrator, method="similarity")
     ol_status = ol_match_band(ol_title)
-    from src.lib.metadata.providers import lookup_metadata
-
     goodreads_match = lookup_metadata(
         book.title,
         author=book.author,
@@ -1063,7 +1070,6 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     from rapidfuzz import fuzz
 
     from src.lib.config import cfg
-    from src.lib.metadata.providers import lookup_metadata
     from src.lib.ol_lookup import _title_sim
     from src.lib.parsers import contains_partno_or_ch
 
