@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import re
 from dataclasses import dataclass, field
 
@@ -254,15 +255,25 @@ def lookup_metadata(
 ) -> MetadataComparison:
     """Query enabled providers and select Goodreads before Open Library."""
     comparison = MetadataComparison()
-    if lookup_goodreads:
-        comparison.candidates["goodreads"] = _goodreads_lookup(
-            title,
-            author,
-            narrator,
-            ref=goodreads_ref,
-        )
-    if lookup_open_library:
-        comparison.candidates["openlibrary"] = _open_library_lookup(title, author, narrator)
+    lookups = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        if lookup_goodreads:
+            lookups["goodreads"] = executor.submit(
+                _goodreads_lookup,
+                title,
+                author,
+                narrator,
+                ref=goodreads_ref,
+            )
+        if lookup_open_library:
+            lookups["openlibrary"] = executor.submit(
+                _open_library_lookup,
+                title,
+                author,
+                narrator,
+            )
+        for provider, future in lookups.items():
+            comparison.candidates[provider] = future.result()
 
     _add_conflicts(comparison)
     goodreads = comparison.candidates.get("goodreads")
