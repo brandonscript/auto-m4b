@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 from src.fix_metadata import build_arg_parser
@@ -338,6 +339,26 @@ def test_lookup_prefers_goodreads_and_reports_conflicts(monkeypatch):
     assert comparison.selected is not None
     assert comparison.selected.provider == "goodreads"
     assert any(conflict.startswith("title:") for conflict in comparison.conflicts)
+
+
+def test_lookup_queries_enabled_providers_in_parallel(monkeypatch):
+    barrier = threading.Barrier(2)
+
+    def goodreads_lookup(*_args, **_kwargs):
+        barrier.wait(timeout=1)
+        return providers.MetadataCandidate(provider="goodreads", status="match", title="Book")
+
+    def open_library_lookup(*_args, **_kwargs):
+        barrier.wait(timeout=1)
+        return providers.MetadataCandidate(provider="openlibrary", status="match", title="Book")
+
+    monkeypatch.setattr(providers, "_goodreads_lookup", goodreads_lookup)
+    monkeypatch.setattr(providers, "_open_library_lookup", open_library_lookup)
+
+    comparison = providers.lookup_metadata("Book")
+
+    assert comparison.selected is not None
+    assert set(comparison.candidates) == {"goodreads", "openlibrary"}
 
 
 def test_lookup_falls_back_to_open_library(monkeypatch):
