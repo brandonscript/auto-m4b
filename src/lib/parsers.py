@@ -14,7 +14,7 @@ import cachetools.func
 from nltk import pos_tag, word_tokenize
 
 from src.lib import nlp
-from src.lib.cleaners import clean_name_abbreviations
+from src.lib.cleaners import clean_name_abbreviations, normalize_author_initials
 from src.lib.ol_lookup import open_library_lookup_author
 from src.lib.misc import (
     get_numbers_in_string,
@@ -1072,8 +1072,10 @@ def parse_author(s: str, target: NameParserTarget, *, fallback: str | None = Non
         if prefix:
             candidate = prefix.group(1).strip()
             if len(candidate.split()) >= 2:
-                return candidate
-    return parse_names(s, target, fallback=fallback, max_chars=max_chars).author or fallback or ""
+                return normalize_author_initials(candidate)
+    return normalize_author_initials(
+        parse_names(s, target, fallback=fallback, max_chars=max_chars).author or fallback or ""
+    )
 
 
 def has_graphic_audio(s: str) -> bool:

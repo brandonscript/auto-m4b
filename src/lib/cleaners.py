@@ -29,6 +29,8 @@ abbrev_pattern = re.compile(r"^(?:[A-Z](?:\.\s*|\s*\.?|\s*)(?=[A-Z]|\s|$)){1,3}$
 # Pattern to match and capture capital letters with their surrounding punctuation
 letter_cap_pattern = re.compile(r"(?:(?P<cap>[A-Z])(?:\.\s*|\s*\.?|\s*)(?=[A-Z]|\s|$))+")
 
+author_initial_token_pattern = re.compile(r"^(?:[A-Za-z]\.?){1,3}$")
+
 
 def strip_html_tags(s: str) -> str:
     """Replaces all html tags including <open> and </close> tags, and <autoclose /> tags with an empty string"""
@@ -116,6 +118,54 @@ def fix_smart_quotes(s: str) -> str:
     }
     trnsl = str.maketrans(smart_quote_map)
     return s.translate(trnsl)
+
+
+def normalize_author_initials(s: str) -> str:
+    """Normalize malformed abbreviated given names to ``J. K. Rowling`` style.
+
+    Full names are left unchanged. This only rewrites an initial prefix, so
+    ``JK Rowling``, ``J.K.Rowling``, and ``J K. Rowling`` become
+    ``J. K. Rowling``.
+    """
+    text = (s or "").strip()
+    compact_match = re.fullmatch(r"((?:[A-Z]\.?){2,3})([A-Z][a-z].*)", text)
+    if compact_match:
+        prefix = compact_match.group(1)
+        surname = compact_match.group(2)
+        return f"{prefix} {surname}"
+
+    words = text.split()
+    if len(words) < 2:
+        return s
+
+    initials: list[str] = []
+    index = 0
+    while index < len(words) - 1 and author_initial_token_pattern.fullmatch(words[index]):
+        initials.extend(char for char in words[index] if char.isalpha())
+        index += 1
+
+    if len(initials) < 2:
+        return s
+    prefix_words = words[:index]
+    has_period = ["." in word for word in prefix_words]
+    if any(has_period) and not all(has_period):
+        prefix_words = [f"{initial}." for initial in initials]
+        return " ".join([*prefix_words, *words[index:]])
+    return s
+
+
+def canonical_author_initials(s: str) -> str:
+    """Return an initial-insensitive comparison form for an author name."""
+    text = normalize_author_initials(s)
+    words = text.split()
+    initials: list[str] = []
+    index = 0
+    while index < len(words) - 1 and author_initial_token_pattern.fullmatch(words[index]):
+        initials.extend(char for char in words[index] if char.isalpha())
+        index += 1
+    if len(initials) < 2:
+        return text
+    return " ".join([*(f"{initial}." for initial in initials), *words[index:]])
 
 
 urlencode_map = {

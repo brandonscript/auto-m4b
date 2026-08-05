@@ -118,6 +118,32 @@ def test_fix_smart_quotes(test_str: str, expected: str):
 
 
 @pytest.mark.parametrize(
+    "author, expected",
+    [
+        ("NK Jemisin", "NK Jemisin"),
+        ("N K Jemisin", "N K Jemisin"),
+        ("N.K. Jemisin", "N.K. Jemisin"),
+        ("NKJemisin", "NK Jemisin"),
+        ("N.K.Jemisin", "N.K. Jemisin"),
+        ("N K. Jemisin", "N. K. Jemisin"),
+        ("N. K Jemisin", "N. K. Jemisin"),
+        ("JRR Tolkien", "JRR Tolkien"),
+        ("J R R Tolkien", "J R R Tolkien"),
+        ("J.R.R. Tolkien", "J.R.R. Tolkien"),
+        ("JRRTolkien", "JRR Tolkien"),
+        ("J.R.R.Tolkien", "J.R.R. Tolkien"),
+        ("J R R. Tolkien", "J. R. R. Tolkien"),
+        ("J. R R Tolkien", "J. R. R. Tolkien"),
+        ("John Rowling", "John Rowling"),
+    ],
+)
+def test_normalize_author_initials(author: str, expected: str):
+    from src.lib.cleaners import normalize_author_initials
+
+    assert normalize_author_initials(author) == expected
+
+
+@pytest.mark.parametrize(
     "test_str, expected",
     [
         ("hello%20world", "hello world"),

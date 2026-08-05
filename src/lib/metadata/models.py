@@ -8,6 +8,7 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 from rapidfuzz import fuzz
 
+from src.lib.cleaners import canonical_author_initials, fix_smart_quotes
 from src.lib.parsers import get_year_from_date
 
 
@@ -61,11 +62,11 @@ class TagSnapshot:
             return str(v[0] if isinstance(v, list) else v).strip()
 
         return cls(
-            title=_get("title"),
-            artist=_get("artist"),
-            album=_get("album"),
-            albumartist=_get("albumartist"),
-            composer=_get("composer"),
+            title=fix_smart_quotes(_get("title")),
+            artist=fix_smart_quotes(_get("artist")),
+            album=fix_smart_quotes(_get("album")),
+            albumartist=fix_smart_quotes(_get("albumartist")),
+            composer=fix_smart_quotes(_get("composer")),
             date=_get("date") or _get("year"),
             path=path,
         )
@@ -117,6 +118,9 @@ class FixPlan:
     @property
     def needs_tag_write(self) -> bool:
         cur = self.current
+        author_equal = lambda value: canonical_author_initials(value or "").casefold() == canonical_author_initials(
+            self.desired_author or ""
+        ).casefold()
         date_changed = bool(self.desired_date) and get_year_from_date(cur.date) != get_year_from_date(self.desired_date)
         narrator_changed = False
         if self.desired_narrator:
@@ -126,8 +130,8 @@ class FixPlan:
         return any(
             [
                 (cur.title or "") != self.desired_title,
-                (cur.artist or "") != self.desired_author,
-                (cur.albumartist or "") != self.desired_author,
+                not author_equal(cur.artist),
+                not author_equal(cur.albumartist),
                 (cur.album or "") != self.desired_album,
                 date_changed,
                 narrator_changed,

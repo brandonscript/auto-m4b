@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from src.lib.id3_utils import write_id3_tags_mutagen
+from src.lib.cleaners import fix_smart_quotes
 from src.lib.metadata.models import CliPaths, FixPlan
 from src.lib.term import LIGHT_GREY_COLOR, print_green, print_orange
 
@@ -75,12 +76,12 @@ def apply_fix(
     progress: Callable[[str], None] | None = None,
 ) -> None:
     tags = {
-        "title": plan.desired_title,
-        "album": plan.desired_album,
-        "artist": plan.desired_author,
-        "albumartist": plan.desired_author,
+        "title": fix_smart_quotes(plan.desired_title),
+        "album": fix_smart_quotes(plan.desired_album),
+        "artist": fix_smart_quotes(plan.desired_author),
+        "albumartist": fix_smart_quotes(plan.desired_author),
         "date": plan.desired_date,
-        "composer": plan.desired_narrator or "",
+        "composer": fix_smart_quotes(plan.desired_narrator or ""),
     }
 
     if dry_run:

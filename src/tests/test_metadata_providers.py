@@ -1,9 +1,23 @@
+import threading
 from types import SimpleNamespace
 
 from src.fix_metadata import build_arg_parser
 from src.lib import id3_utils
 from src.lib.config import cfg
 from src.lib.metadata import providers
+
+
+def test_metadata_candidate_normalizes_smart_quotes():
+    candidate = providers.MetadataCandidate(
+        provider="openlibrary",
+        title="Midnight’s Children",
+        author="O’Reilly",
+        narrator='“Reader”',
+    )
+
+    assert candidate.title == "Midnight's Children"
+    assert candidate.author == "O'Reilly"
+    assert candidate.narrator == '"Reader"'
 
 
 class _FakeGoodscraps:
@@ -16,11 +30,15 @@ class _FakeGoodscraps:
     def __exit__(self, *_args):
         return None
 
+    def canonical_book_id(self, book_id):
+        return book_id
+
     def search(self, _query, *, limit, resolve_canonical=False):
         assert limit == 10
         return [
             SimpleNamespace(
                 book_id=42,
+                canonical_book_id=42,
                 title="The Hobbit",
                 author_name="J. R. R. Tolkien",
                 url="https://www.goodreads.com/book/show/42",
@@ -45,12 +63,14 @@ class _AuthorAwareGoodscraps(_FakeGoodscraps):
         return [
             SimpleNamespace(
                 book_id=99,
+                canonical_book_id=99,
                 title="The Sword of Summer",
                 author_name="Rick Riordan",
                 url="https://www.goodreads.com/book/show/99",
             ),
             SimpleNamespace(
                 book_id=100,
+                canonical_book_id=100,
                 title="By the Sword",
                 author_name="Mercedes Lackey",
                 url="https://www.goodreads.com/book/show/100",
@@ -83,6 +103,7 @@ class _TitleCollisionGoodscraps(_FakeGoodscraps):
         return [
             SimpleNamespace(
                 book_id=33580643,
+                canonical_book_id=33580643,
                 title=(
                     "Lovers, Lore & Loss Songs From The Arrows of the Queen, "
                     "Arrow's Flight and Arrow's Fall by Mercedes Lackey & D. F. Sanders"
@@ -92,18 +113,21 @@ class _TitleCollisionGoodscraps(_FakeGoodscraps):
             ),
             SimpleNamespace(
                 book_id=777,
+                canonical_book_id=777,
                 title="Arrow's Fall: Lovers, Lore & Loss",
                 author_name="Mercedes Lackey",
                 url="https://www.goodreads.com/book/show/777",
             ),
             SimpleNamespace(
                 book_id=14014,
+                canonical_book_id=14014,
                 title="Arrow's Fall (Heralds of Valdemar, #3)",
                 author_name="Mercedes Lackey",
                 url="https://www.goodreads.com/book/show/14014.Arrow_s_Fall",
             ),
             SimpleNamespace(
                 book_id=49475188,
+                canonical_book_id=49475188,
                 title="Queen's Own Volume Two: Arrow's Fall",
                 author_name="Mercedes Lackey",
                 url="https://www.goodreads.com/book/show/49475188",
@@ -122,6 +146,38 @@ class _TitleCollisionGoodscraps(_FakeGoodscraps):
         )
 
 
+class _ItalianGirlGoodscraps(_FakeGoodscraps):
+    def search(self, _query, *, limit, resolve_canonical=False):
+        assert limit == 10
+        return [
+            SimpleNamespace(
+                book_id=40253222,
+                canonical_book_id=40253222,
+                title="Lucinda Riley Collection 6 Books Bundles",
+                author_name="Lucinda Riley",
+                url="https://www.goodreads.com/book/show/40253222",
+            ),
+            SimpleNamespace(
+                book_id=22057035,
+                canonical_book_id=22057035,
+                title="The Italian Girl",
+                author_name="Lucinda Edmonds",
+                url="https://www.goodreads.com/book/show/22057035",
+            ),
+        ]
+
+    def book(self, book_id):
+        assert str(book_id) == "22057035"
+        return SimpleNamespace(
+            book_id=22057035,
+            title="The Italian Girl",
+            author_primary=SimpleNamespace(name="Lucinda Edmonds"),
+            authors=[],
+            first_published_year=1996,
+            url="https://www.goodreads.com/book/show/22057035",
+        )
+
+
 class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -135,6 +191,7 @@ class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
         return [
             SimpleNamespace(
                 book_id=18373214,
+                canonical_book_id=18373214,
                 title="Cockroaches (Harry Hole, #2)",
                 author_name="Jo Nesbø",
                 url="https://www.goodreads.com/book/show/18373214-cockroaches",
@@ -167,6 +224,10 @@ class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
             )
         ]
 
+    def canonical_book_id(self, book_id):
+        assert str(book_id) == "123790521"
+        return 13256064
+
     def book(self, book_id):
         assert str(book_id) == "13256064"
         return SimpleNamespace(
@@ -177,7 +238,6 @@ class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
             first_published_year=2011,
             url="https://www.goodreads.com/book/show/13256064-phantom",
         )
-
 
 def test_goodreads_lookup_normalizes_and_scores(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _FakeGoodscraps)
@@ -217,6 +277,17 @@ def test_goodreads_prefers_exact_title_over_longer_containing_title(monkeypatch)
     assert result.year == "1988"
 
 
+def test_goodreads_prefers_exact_title_over_exact_author_collection(monkeypatch):
+    monkeypatch.setattr(providers, "Goodscraps", _ItalianGirlGoodscraps)
+    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+
+    result = providers._goodreads_lookup("The Italian Girl", "Lucinda Riley", "")
+
+    assert result.ref == "22057035"
+    assert result.title == "The Italian Girl"
+    assert result.year == "1996"
+
+
 def test_goodreads_falls_back_to_series_core_title(monkeypatch):
     client = _SeriesPrefixedGoodscraps()
     monkeypatch.setattr(providers, "Goodscraps", lambda **_kwargs: client)
@@ -240,7 +311,6 @@ def test_goodreads_resolves_search_result_to_canonical_book(monkeypatch):
     assert result.title == "Phantom"
     assert result.author == "Jo Nesbø"
     assert result.year == "2011"
-
 
 def test_goodreads_forced_lookup_skips_search(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _FakeGoodscraps)
@@ -283,6 +353,26 @@ def test_lookup_prefers_goodreads_and_reports_conflicts(monkeypatch):
     assert comparison.selected is not None
     assert comparison.selected.provider == "goodreads"
     assert any(conflict.startswith("title:") for conflict in comparison.conflicts)
+
+
+def test_lookup_queries_enabled_providers_in_parallel(monkeypatch):
+    barrier = threading.Barrier(2)
+
+    def goodreads_lookup(*_args, **_kwargs):
+        barrier.wait(timeout=1)
+        return providers.MetadataCandidate(provider="goodreads", status="match", title="Book")
+
+    def open_library_lookup(*_args, **_kwargs):
+        barrier.wait(timeout=1)
+        return providers.MetadataCandidate(provider="openlibrary", status="match", title="Book")
+
+    monkeypatch.setattr(providers, "_goodreads_lookup", goodreads_lookup)
+    monkeypatch.setattr(providers, "_open_library_lookup", open_library_lookup)
+
+    comparison = providers.lookup_metadata("Book")
+
+    assert comparison.selected is not None
+    assert set(comparison.candidates) == {"goodreads", "openlibrary"}
 
 
 def test_lookup_falls_back_to_open_library(monkeypatch):

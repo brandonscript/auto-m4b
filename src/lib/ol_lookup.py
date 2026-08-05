@@ -9,7 +9,7 @@ import requests
 import requests_cache
 from rapidfuzz import fuzz
 
-from src.lib.cleaners import strip_leading_articles
+from src.lib.cleaners import fix_smart_quotes, strip_leading_articles
 from src.lib.misc import max_if, re_group
 from src.lib.term import print_debug
 from src.lib.config import cfg
@@ -1008,7 +1008,7 @@ class OpenLibraryTitle:
 
     @property
     def title(self) -> str:
-        return self.title_res.get("title", "") if self.has_match else ""
+        return fix_smart_quotes(self.title_res.get("title", "")) if self.has_match else ""
 
     @overload
     def score(self, *, fallback: float) -> float: ...
@@ -1035,9 +1035,9 @@ class OpenLibraryTitle:
         if authors := self.title_res.get("author_name", [""]):
             # return the first if there is no original author, otherwise the one with the highest fuzz.ratio
             if not original:
-                return authors[0]
+                return fix_smart_quotes(authors[0])
             else:
-                return max(authors, key=lambda x: fuzz.ratio(original or "", x))
+                return fix_smart_quotes(max(authors, key=lambda x: fuzz.ratio(original or "", x)))
         return ""
 
     @property
@@ -1058,8 +1058,8 @@ class OpenLibraryTitle:
             return ""
         if self.author_and_narrator_swapped and self.original_author:
             # Mislabeled "author" input was actually the performer/narrator.
-            return self.original_author
-        return self.original_narrator or ""
+            return fix_smart_quotes(self.original_author)
+        return fix_smart_quotes(self.original_narrator or "")
 
     @property
     def date(self) -> str:
