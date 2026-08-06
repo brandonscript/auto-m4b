@@ -255,10 +255,13 @@ class BooksTree(BaseModel):
             # tick("root.is_file() and allow_file_root, returning self")
             return self
 
-        # Do a recursive glob of all files in the directory, and prepend the root so we can get standalone files
+        # Do a recursive walk of all paths, classifying dirs/files from scandir
+        # metadata so we avoid a second is_dir()/stat pass over SMB.
         # tick("getting rglob")
-        rglob = isorted(self._walk_paths(root.path))
-        # tick("done getting rglob", len(rglob))
+        _rglob_dirs, _rglob_files = self._walk_paths(root.path)
+        _rglob_dirs = isorted(_rglob_dirs)
+        _rglob_files = isorted(_rglob_files)
+        # tick("done getting rglob", len(_rglob_dirs) + len(_rglob_files))
 
         self._files = []
         self._dirs = {}
@@ -288,20 +291,8 @@ class BooksTree(BaseModel):
             # else:
             # tick("subtree has no files, skipping")
 
-        # Separate dirs and files in a single pass to avoid calling is_dir() on every entry,
-        # which is expensive over network mounts (each call requires a separate stat syscall).
-        # Also precompute the filtered audio file list once so the directory loop below is
+        # Precompute the filtered audio file list once so the directory loop below is
         # O(n + d) instead of the previous O(n×d) where n=files and d=directories.
-        _rglob_dirs: list[Path] = []
-        _rglob_files: list[Path] = []
-        for _p in rglob:
-            try:
-                if _p.is_dir():
-                    _rglob_dirs.append(_p)
-                else:
-                    _rglob_files.append(_p)
-            except OSError:
-                pass
         _all_audio_files = only_audio_files(filter_ignored(_rglob_files))
         _audio_files_by_parent: dict[Path, list[Path]] = defaultdict(list)
         for _audio_file in _all_audio_files:
@@ -380,12 +371,23 @@ class BooksTree(BaseModel):
         return self
 
     @staticmethod
-    def _walk_paths(path: Path) -> list[Path]:
-        """Recursively list paths while reusing scandir directory metadata."""
-        paths = [path]
-        if not path.is_dir():
-            return paths
+    def _walk_paths(path: Path) -> tuple[list[Path], list[Path]]:
+        """Recursively list paths, classifying dirs/files from scandir metadata.
 
+        Returns ``(dirs, files)`` so callers avoid a second ``Path.is_dir()`` pass
+        (expensive over SMB — each call is a separate stat).
+        """
+        dirs: list[Path] = []
+        files: list[Path] = []
+        try:
+            if not path.is_dir():
+                if path.is_file():
+                    files.append(path)
+                return dirs, files
+        except OSError:
+            return dirs, files
+
+        dirs.append(path)
         pending = [path]
         while pending:
             current = pending.pop()
@@ -393,12 +395,18 @@ class BooksTree(BaseModel):
                 with os.scandir(current) as entries:
                     for entry in entries:
                         child = Path(entry.path)
-                        paths.append(child)
-                        if entry.is_dir(follow_symlinks=False):
-                            pending.append(child)
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                dirs.append(child)
+                                pending.append(child)
+                            else:
+                                # Treat non-dirs (files, symlinks-to-files) as files.
+                                files.append(child)
+                        except OSError:
+                            continue
             except OSError:
                 continue
-        return paths
+        return dirs, files
 
     @copy_kwargs(_scan)
     def scan(self, *args, **kwargs) -> "BooksTree":

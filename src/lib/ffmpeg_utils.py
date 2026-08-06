@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Any, Literal, NamedTuple, overload
 
 import cachetools.func
 import ffmpeg
@@ -13,15 +13,63 @@ from src.lib.term import print_error, print_warning
 from src.lib.typing import DurationFmt, MEMO_TTL
 
 
-def get_file_duration_py(file_path: Path) -> float:
+class AudioTechProbe(NamedTuple):
+    """Cached technical metadata from a single ffprobe invocation."""
+
+    duration: float
+    bitrate: int  # bits per second (0 if unknown)
+    sample_rate: int  # Hz (0 if unknown)
+    has_attached_pic: bool
+
+
+@cachetools.func.ttl_cache(maxsize=256, ttl=MEMO_TTL)
+def _probe_audio_tech(path_str: str) -> AudioTechProbe:
+    """Run one ffprobe and return duration/bitrate/samplerate/cover presence.
+
+    All public getters below share this cache so extract_metadata / logging /
+    merge no longer spawn 2–3 probes for the same sample file.
+    """
     try:
-        return float(ffprobe(str(file_path))["format"]["duration"])
+        probe_result = ffprobe(path_str)
     except ffmpeg.Error as e:
         from src.lib.logger import write_err_file
 
-        write_err_file(file_path, e, "ffprobe", e.stderr.decode())
-        print_error(f"Error getting duration for {file_path}")
-        return 0
+        path = Path(path_str)
+        write_err_file(path, e, "ffprobe", e.stderr.decode())
+        print_error(f"Error probing audio tech for {path}")
+        return AudioTechProbe(0.0, 0, 0, False)
+
+    fmt = probe_result.get("format") or {}
+    streams = probe_result.get("streams") or []
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if audio is None and streams:
+        audio = streams[0]
+    audio = audio or {}
+
+    duration = float(fmt.get("duration") or 0.0)
+    bitrate_raw = audio.get("bit_rate") or fmt.get("bit_rate") or 0
+    try:
+        bitrate = int(bitrate_raw)
+    except (TypeError, ValueError):
+        bitrate = 0
+    try:
+        sample_rate = int(audio.get("sample_rate") or 0)
+    except (TypeError, ValueError):
+        sample_rate = 0
+
+    has_pic = any(
+        (s.get("disposition") or {}).get("attached_pic") or s.get("codec_type") == "video" for s in streams
+    )
+    return AudioTechProbe(duration, bitrate, sample_rate, bool(has_pic))
+
+
+def probe_audio_tech(file: "BooksTree | Path") -> AudioTechProbe:
+    path = file.path if isinstance(file, BooksTree) else file
+    return _probe_audio_tech(str(path))
+
+
+def get_file_duration_py(file_path: Path) -> float:
+    return _probe_audio_tech(str(file_path)).duration
 
 
 @overload
@@ -56,67 +104,28 @@ def get_duration(path: Path, fmt: DurationFmt = "human") -> str | float:
     return format_duration(duration, fmt)
 
 
-# def extract_id3_tag(file: Path, tag: str) -> str:
-#     command = f"ffprobe -hide_banner -loglevel 0 -of flat -i {file} -select_streams a -show_entries format_tags={tag} -of default=noprint_wrappers=1:nokey=1"
-#     result = subprocess.check_output(command, shell=True).decode().strip()
-#     return result
-
-
-# def get_bitrate(file: Path, round: bool = True) -> int:
-#     command = f"ffprobe -hide_banner -loglevel 0 -select_streams a:0 -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 {file}"
-#     bitrate = subprocess.check_output(command, shell=True).decode().strip()
-#     return round_bitrate(int(bitrate)) if round else int(bitrate)
-
-
 def is_variable_bitrate(file: "BooksTree | Path") -> bool:
     path = file.path if isinstance(file, BooksTree) else file
     bitrate, nearest_std_bitrate = get_bitrate_py(path)
     return abs(bitrate - nearest_std_bitrate) > 0.5
 
 
-@cachetools.func.ttl_cache(maxsize=128, ttl=MEMO_TTL)
 def get_bitrate_py(file: "BooksTree | Path") -> tuple[int, int]:
     """Returns the bitrate of an audio file in bits per second.
 
-    Args:
-        file (Path): Path to the audio file
-        round_result (bool, optional): Whether to round the result to the nearest standard bitrate. Defaults to True.
-
     Returns:
-        tuple[int, int]: (in kbps) The nearest standard bitrate, and the actual bitrate rounded to the nearest int.
+        tuple[int, int]: (nearest standard bitrate, actual bitrate) in bps.
     """
     path = file.path if isinstance(file, BooksTree) else file
-    try:
-        probe_result = ffmpeg.probe(str(path))
-        actual_bitrate = int(probe_result["streams"][0]["bit_rate"])
-        return get_nearest_standard_bitrate(actual_bitrate), actual_bitrate
-    except ffmpeg.Error as e:
-        from src.lib.logger import write_err_file
-
-        write_err_file(path, e, "ffprobe", e.stderr.decode())
-        print_error(f"Error getting bitrate for {path}")
+    actual_bitrate = _probe_audio_tech(str(path)).bitrate
+    if not actual_bitrate:
         return 0, 0
+    return get_nearest_standard_bitrate(actual_bitrate), actual_bitrate
 
 
-# def get_samplerate(file: Path) -> int:
-#     command = f"ffprobe -hide_banner -loglevel 0 -of flat -i {file} -select_streams a -show_entries stream=sample_rate -of default=noprint_wrappers=1:nokey=1"
-#     sample_rate = subprocess.check_output(command, shell=True).decode().strip()
-#     return int(sample_rate)
-
-
-@cachetools.func.ttl_cache(maxsize=128, ttl=MEMO_TTL)
 def get_samplerate_py(file: "BooksTree | Path") -> int:
     path = file.path if isinstance(file, BooksTree) else file
-    try:
-        probe_result = ffmpeg.probe(str(path))
-        sample_rate = probe_result["streams"][0]["sample_rate"]
-        return int(sample_rate)
-    except ffmpeg.Error as e:
-        from src.lib.logger import write_err_file
-
-        write_err_file(path, e, "ffprobe", e.stderr.decode())
-        print_error(f"Error getting sample rate for {path}")
-        return 0
+    return _probe_audio_tech(str(path)).sample_rate
 
 
 def build_id3_tags_args(
