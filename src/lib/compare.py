@@ -412,18 +412,21 @@ def cached_similarity(func: Callable[..., T]) -> Callable[..., T]:
             if not cache:
                 cache = {
                     "comparison": comparison,
+                    "fallback": fallback,
                     **kwargs,
                 }
                 setattr(self, f"_{prop}_similarity_cache", cache)
             elif (
                 _kwargs_match := all(False if not k in cache else cache[k] == v for k, v in (kwargs or {}).items())
                 and cache["comparison"] == comparison
+                and cache.get("fallback") == fallback
                 and "result" in cache
             ):
                 return cache["result"] or fallback
 
             result = func(self, prop, comparison, **kwargs, fallback=fallback)
             cache["result"] = result
+            cache["fallback"] = fallback
             return result
         except Exception as e:
             print_error(f"Error calculating similarity for {prop}: {e}")

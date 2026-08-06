@@ -1054,8 +1054,6 @@ class MetadataProps:
             if self.albumartist1:
                 self._aar1_eq_comment_narrator = self.narrator_in_comment == self.albumartist1
 
-        str(self)
-
     def table(self):
         from src.lib.id3_utils import custom_sort
 
@@ -1106,12 +1104,6 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
         cri = tree.i.children_recursive
 
         files_sim = tree.i.files.similarity("pathnames", distinct=True) or 0.0
-        dirs_sim = tree.i.dirs.similarity("pathnames", distinct=True) or 0.0
-        children_sim = 1.0 - (tree.i.children.similarity("pathnames", distinct=True) or 0.0)
-        pathnames_sim = tree.i.files.similarity("pathnames", distinct=True) or 0.0
-
-        has_multiple_files = len(tree.files) > 1
-        has_files_and_dirs = bool(tree.parent and (tree.parent.files or tree.parent.dirs))
         standalones = -0.5 + truthiness([score_single_standalone_file(f)[1] > 0.4 for f in tree.files])
         files_gt_50mb = truthiness([is_gt_50mb(f.size) for f in tree.files])
         files_gt_75mb = truthiness([is_gt_75mb(f.size) for f in tree.files])
@@ -1319,16 +1311,6 @@ def score_flat(tree: "BooksTree") -> float:
             or 0
         )
 
-        # Adjust the score depending on whether child structures have already been determined
-        child_adj = 0.0
-        for s in tree.list_structures_r:
-            adj = 1 / len(tree.list_structures_r)
-            match s:
-                case "multi_disc" | "multi_part" | "series_parent" | "multi_parent" | "standalone_file":
-                    child_adj -= 0.5 * adj
-                case "flatish" | "flat":
-                    child_adj += 0.5 * adj
-
         return round((completion + contiguous + path_sim) / 3, 3)
     except Exception as e:
         if "pytest" in sys.modules:
@@ -1338,7 +1320,9 @@ def score_flat(tree: "BooksTree") -> float:
 
 
 @cached_scorer
-def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone_file", "single"] | None, float, float]:
+def _score_single_standalone_file_base(
+    tree: "BooksTree",
+) -> tuple[Literal["standalone_file", "single"] | None, float, float]:
     """
     Only determines score for files, not dirs.
 
@@ -1354,11 +1338,6 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
 
         if not tree.is_file():
             return (None, 0.0, 0.0)
-
-        # Check if we've already processed this file in this pass
-        if already_checked.has(tree.path):
-            return (None, 0.0, 0.0)
-        already_checked.add(tree.path)
 
         # tree.parent.tick(f"--- score_single_standalone_file: {tree.rel_path}")
 
@@ -1501,24 +1480,63 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         )
         # tree.parent.tick(f" --- standalone_score: {standalone_score}")
 
-        sibling_files = [f for f in (tree.siblings or []) if f.is_file() and not f == tree]
-
-        # tree.parent.tick(f" --- sibling_files: {len(sibling_files)}")
-
-        for f in sibling_files:
-            if not already_checked.has(f.path):
-                (_, s, _) = score_single_standalone_file(f)
-                bonus = (-0.5 + s) / 10
-                standalone_score += bonus
-
-        # tree.parent.tick(f" --- done checking sibling files")
-
         return ("standalone_file", round(standalone_score, 3), 0.0)
     except Exception as e:
         if "pytest" in sys.modules:
             raise e
         print_debug(f"Error scoring standalone_file: {e}")
         return (None, 0.0, 0.0)
+
+
+@cached_scorer
+def _score_single_standalone_file_group(
+    parent: "BooksTree",
+) -> dict[Path, tuple[Literal["standalone_file", "single"] | None, float, float]]:
+    """Score all direct files in a parent once, including sibling bonuses."""
+    base_scores = {
+        file.path: _score_single_standalone_file_base(file)
+        for file in parent.files
+        if file.is_file()
+    }
+
+    scores = {}
+    for path, result in base_scores.items():
+        structure, score, single_score = result
+        if structure != "standalone_file":
+            scores[path] = result
+            continue
+
+        sibling_bonus = sum(
+            (-0.5 + sibling_score) / 10
+            for sibling_path, (_, sibling_score, _) in base_scores.items()
+            if sibling_path != path
+        )
+        scores[path] = ("standalone_file", round(score + sibling_bonus, 3), single_score)
+
+    return scores
+
+
+@cached_scorer
+def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone_file", "single"] | None, float, float]:
+    """
+    Only determines score for files, not dirs.
+
+    Returns:
+        tuple[Literal["standalone_file", "single"], float, float]:
+            - The type of structure (standalone_file or single) or None
+            - The score for the standalone file
+            - The score for the single file
+    """
+    base_score = _score_single_standalone_file_base(tree)
+    if base_score[0] != "standalone_file" or not tree.parent:
+        return base_score
+
+    # Files directly below the root, a container, or a series parent are already
+    # unconditionally standalone and do not receive sibling bonuses.
+    if tree.parent.is_root or tree.parent.has_structure("container") or tree.parent.has_structure("series_parent"):
+        return base_score
+
+    return _score_single_standalone_file_group(tree.parent).get(tree.path, base_score)
 
 
 @cached_scorer
