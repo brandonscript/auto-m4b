@@ -71,10 +71,111 @@ def id3_tags_raw_to_source(in_dict: dict[str, str]) -> dict["TagSource | Additio
 id3Cache = Id3Cache()
 
 
+def _mutagen_tags_to_source(raw: dict[str, Any]) -> Id3TagDict:
+    """Normalize mutagen Easy* tag dicts into the same key space as ffprobe."""
+    # mutagen easy uses tracknumber/discnumber; ffprobe uses track/disc.
+    aliases = {
+        "tracknumber": "track",
+        "discnumber": "discnumber",
+        "albumartist": "albumartist",
+        "album_artist": "albumartist",
+        "encodedby": "encoder",
+        "encoded_by": "encoder",
+        "organization": "publisher",
+    }
+    normalized: dict[str, str] = {}
+    for key, value in raw.items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else ""
+        if isinstance(value, (bytes, bytearray)):
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        k = aliases.get(key.lower(), key.lower())
+        normalized[k] = text
+    return cast(Id3TagDict, id3_tags_raw_to_source(normalized))
+
+
+def _extract_id3_tags_mutagen(path: Path) -> Id3TagDict:
+    """Fast in-process tag read via mutagen. Returns {} on failure/empty."""
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.easyid3 import EasyID3
+
+        # Ensure comment frames are visible through the EasyID3 interface.
+        try:
+            EasyID3.RegisterTextKey("comment", "COMM")
+        except Exception:
+            pass
+
+        audio = MutagenFile(str(path), easy=True)
+        if audio is None:
+            return {}
+        tags = getattr(audio, "tags", None)
+        raw: dict[str, Any]
+        if tags:
+            raw = dict(tags)
+        elif len(audio):
+            raw = dict(audio)
+        else:
+            raw = {}
+
+        # EasyID3 sometimes omits COMM even after RegisterTextKey — pull it
+        # directly from the underlying ID3/MP4 atoms when missing.
+        # EasyMP4 also omits composer/encoder (©wrt / ©too) by default; those
+        # are required for narrator (composer) and tool-identity checks.
+        try:
+            suffix = path.suffix.lower()
+            lower_keys = {k.lower() for k in raw}
+            if suffix == ".mp3":
+                if "comment" not in lower_keys:
+                    from mutagen.id3 import ID3
+
+                    id3 = ID3(str(path))
+                    for frame in id3.values():
+                        if getattr(frame, "FrameID", "") == "COMM" or frame.__class__.__name__.startswith("COMM"):
+                            text = getattr(frame, "text", None)
+                            if text:
+                                raw["comment"] = text[0]
+                                break
+            elif suffix in {".m4a", ".m4b", ".mp4", ".m4v"}:
+                from mutagen.mp4 import MP4
+
+                mp4 = MP4(str(path))
+                atoms = mp4.tags or {}
+                atom_map = {
+                    "comment": "\xa9cmt",
+                    "composer": "\xa9wrt",
+                    "encoder": "\xa9too",
+                    "description": "desc",
+                }
+                for dest, atom in atom_map.items():
+                    if dest in lower_keys or atom not in atoms:
+                        continue
+                    val = atoms[atom]
+                    if isinstance(val, (list, tuple)):
+                        val = val[0] if val else ""
+                    if val:
+                        raw[dest] = val
+        except Exception:
+            pass
+
+        return _mutagen_tags_to_source(raw) if raw else {}
+    except Exception:
+        return {}
+
+
 def extract_id3_tags(file: "BooksTree | Path", *tags: "TagSource | AdditionalTags", throw=False) -> Id3TagDict:
     from src.lib.books_tree.books_tree import BooksTree
 
-    """Extract ID3 tags from a file."""
+    """Extract ID3 tags from a file.
+
+    Prefers mutagen (in-process, ~10x faster than spawning ffprobe) and falls
+    back to ffprobe when mutagen cannot read the file.
+    """
     path = file.path if isinstance(file, BooksTree) else Path(file) if file else None
 
     if not path or not path.is_file():
@@ -83,13 +184,15 @@ def extract_id3_tags(file: "BooksTree | Path", *tags: "TagSource | AdditionalTag
         return {}
 
     try:
-        if ffresult := cast(dict[str, Any], ffprobe_file(path, throw=throw)):
-            tag_dict = id3_tags_raw_to_source(
-                {key.lower(): value for key, value in (ffresult["format"]["tags"] or {}).items()}
-            )
-            if not tags:
-                return cast(Id3TagDict, tag_dict)
-            return cast(Id3TagDict, {tag: tag_dict.get(tag, "") for tag in tags})
+        tag_dict: Id3TagDict = _extract_id3_tags_mutagen(path)
+        if not tag_dict:
+            if ffresult := cast(dict[str, Any], ffprobe_file(path, throw=throw)):
+                tag_dict = id3_tags_raw_to_source(
+                    {key.lower(): value for key, value in (ffresult["format"]["tags"] or {}).items()}
+                )
+        if not tags:
+            return cast(Id3TagDict, tag_dict)
+        return cast(Id3TagDict, {tag: tag_dict.get(tag, "") for tag in tags})
     except Exception as e:
         if throw:
             raise HeaderNotFoundError(

@@ -1,5 +1,4 @@
 import re
-from pathlib import Path
 from typing import Any, cast, overload, TYPE_CHECKING, TypeVar
 
 from lazy.lazy import lazy
@@ -34,6 +33,15 @@ T = TypeVar("T")
 F = TypeVar("F", bound=Any)
 
 
+def _basename_stem(name: str) -> str:
+    """Path.stem equivalent for basename strings without constructing Path."""
+    base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if base.startswith(".") and base.count(".") == 1:
+        return base
+    idx = base.rfind(".")
+    return base[:idx] if idx > 0 else base
+
+
 class TreeNodeList:
 
     def __init__(self, trees: list["BooksTree"], curr: "TreeNode | None" = None, *, default_include_curr: bool = True):
@@ -43,9 +51,6 @@ class TreeNodeList:
 
         self._trees = trees
         self.node = cast("TreeNode", curr)
-        self.id3_tags = (
-            [t for t in (p.id3_tags for p in self._trees if p.id3_tags) if t and not t.BAD] if self._trees else []
-        )
 
         self._album_similarity_cache = {}
         self._albumartist_similarity_cache = {}
@@ -54,6 +59,12 @@ class TreeNodeList:
         self._track_nums_similarity_cache = {}
         self._title_similarity_cache = {}
         self._default_include_curr = default_include_curr
+
+    @lazy
+    def id3_tags(self):
+        if not self._trees:
+            return []
+        return [t for t in (p.id3_tags for p in self._trees if p.id3_tags) if t and not t.BAD]
 
     def __repr__(self):
         di = self.disc_nums
@@ -99,13 +110,13 @@ class TreeNodeList:
             ^ num    ^ num       ^ num    ^ num
             pos ^    pos ^       pos ^    pos ^
         """
-        return [only_gte_0_tuple(get_all_nums_in_string(Path(p.name).stem), 0) for p in self._trees]
+        return [only_gte_0_tuple(get_all_nums_in_string(_basename_stem(p.name)), 0) for p in self._trees]
 
     @lazy
     def all_path_nums_reverse(self) -> list[list[tuple[int | float, ...]]]:
         """Same as all_path_nums, but with numbers detected in reverse order from the end of the pathname - useful
         if filenames have different lengths, but you want to match numbers at the end of the pathname."""
-        return [only_gte_0_tuple(get_all_nums_in_string(Path(p.name).stem, reverse=True), 0) for p in self._trees]
+        return [only_gte_0_tuple(get_all_nums_in_string(_basename_stem(p.name), reverse=True), 0) for p in self._trees]
 
     @lazy
     def all_path_nums_completion(self):

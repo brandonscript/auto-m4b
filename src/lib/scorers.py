@@ -75,10 +75,15 @@ already_checked = AlreadyChecked()
 
 
 class ScorerCache:
-    """Custom cache implementation for scorer results with a bounded TTL."""
+    """Custom cache implementation for scorer results with a bounded TTL.
+
+    Entries are grouped by root id so a rescan can drop one tree's scores
+    without wiping unrelated roots (live inbox builds multiple trees).
+    """
 
     def __init__(self, ttl_seconds: int = 300):  # 5 minutes TTL
         self._cache: dict[Hashable, tuple[Any, datetime]] = {}
+        self._by_root: dict[int, set[Hashable]] = {}
         self._ttl = timedelta(seconds=ttl_seconds)
 
     def get(self, key: Hashable | None) -> Any | None:
@@ -92,13 +97,20 @@ class ScorerCache:
             return None
         return value
 
-    def set(self, key: Hashable | None, value: Any) -> None:
+    def set(self, key: Hashable | None, value: Any, *, root_id: int | None = None) -> None:
         if not key:
             return
         self._cache[key] = (value, datetime.now())
+        if root_id is not None:
+            self._by_root.setdefault(root_id, set()).add(key)
 
-    def clear(self) -> None:
-        self._cache.clear()
+    def clear(self, root_id: int | None = None) -> None:
+        if root_id is None:
+            self._cache.clear()
+            self._by_root.clear()
+            return
+        for key in self._by_root.pop(root_id, set()):
+            self._cache.pop(key, None)
 
 
 # Global cache instance
@@ -113,26 +125,33 @@ def cached_scorer(func: Callable[..., T]) -> Callable[..., T]:
         from src.lib.config import cfg
 
         root = tree.root or tree
+        root_id = id(root)
         trace = cfg.SCORER_TRACE
-        # Create a unique cache key that includes the function name and args
-        cache_key = (
-            f"{func.__name__}:{id(root)}:{root._scorer_cache_namespace}:"
-            f"{root._scorer_cache_epoch}:{tree.path}"
-        )
+        # Hashable tuple key — avoids f-string formatting on every call.
+        # tree.path is a Path (hashable); epoch/namespace invalidate on rescan.
+        key_parts: list[Any] = [
+            func.__name__,
+            root_id,
+            root._scorer_cache_namespace,
+            root._scorer_cache_epoch,
+            tree.path,
+        ]
         if args:
-            cache_key += f":{args}"
+            key_parts.append(args)
         if kwargs:
             # Sort kwargs items to ensure consistent cache keys
             sorted_kwargs = sorted(kwargs.items())
             # For already_checked, only include the length and first few items to avoid huge keys
             if "already_checked" in kwargs:
-                already_checked = kwargs["already_checked"]
-                if already_checked:
+                already_checked_arg = kwargs["already_checked"]
+                if already_checked_arg:
                     sorted_kwargs = [(k, v) for k, v in sorted_kwargs if k != "already_checked"]
-                    sorted_kwargs.append(("already_checked_len", len(already_checked)))
-                    if already_checked:
-                        sorted_kwargs.append(("already_checked_first", str(already_checked[0].path)))
-            cache_key += f":{sorted_kwargs}"
+                    sorted_kwargs.append(("already_checked_len", len(already_checked_arg)))
+                    if already_checked_arg:
+                        sorted_kwargs.append(("already_checked_first", str(already_checked_arg[0].path)))
+            key_parts.append(tuple(sorted_kwargs))
+
+        cache_key = tuple(key_parts)
 
         cached_result = _scorer_cache.get(cache_key)
         if cached_result is not None:
@@ -145,7 +164,7 @@ def cached_scorer(func: Callable[..., T]) -> Callable[..., T]:
 
         start = time.perf_counter() if trace else 0.0
         result = func(tree, *args, **kwargs)
-        _scorer_cache.set(cache_key, result)
+        _scorer_cache.set(cache_key, result, root_id=root_id)
         if trace:
             tree.tick(
                 "scorer",
