@@ -207,13 +207,22 @@ class InboxState(Hasher):
         global SCAN_CALLS
         SCAN_CALLS += 1
 
-        super().scan()
-
         if not self.tree:
             # Create without auto-scan so the explicit scan() call below
             # controls whether ID3 tags are read (avoids a redundant full scan).
             self.tree = BooksTree(cfg.inbox_dir, scan=False)
         self.tree.scan(scan_id3=False if scan_id3 is False else True, determine_structure=determine_structure)
+
+        # Prefer the scandir inventory collected during the tree walk so we don't
+        # do a second full rglob+stat over SMB just to refresh the inbox hash.
+        from src.lib.config import AUDIO_EXTS
+        from src.lib.fs_utils import hash_path_from_file_sizes
+
+        walk_sizes = getattr(self.tree, "_last_walk_file_sizes", None)
+        if walk_sizes is not None:
+            self.record_hash(hash_path_from_file_sizes(cfg.inbox_dir, walk_sizes, only_file_exts=AUDIO_EXTS))
+        else:
+            super().scan()
         # self._tree.scan()
 
         found_items = {str(t.key): InboxItem(t) for t in self.tree.books_and_series}

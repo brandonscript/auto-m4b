@@ -1462,16 +1462,16 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             setattr(book, f"id3_{tag}", value)
 
     book.id3_year = get_year_from_date(book.id3_date)
-    # Detect embedded cover art via ffprobe stream inspection — much faster than
+    # Detect embedded cover art via the shared tech probe — much faster than
     # extracting bytes with ffmpeg.  For m4b/m4a files the cover image is interleaved
     # with audio data inside the mdat chunk, so ffmpeg must scan the entire file to
     # extract it (O(filesize)), whereas ffprobe only reads the moov atom header.
     # Fall back to mutagen when streams are missing/unreadable but covr/APIC exists.
-    _probe = ffprobe_file(book.sample_audio1) or {}
-    book.has_id3_cover = any(
-        s.get("codec_name") in ("mjpeg", "png") and s.get("disposition", {}).get("attached_pic")
-        for s in _probe.get("streams", [])
-    ) or bool(_extract_cover_art_mutagen(book.sample_audio1))
+    from src.lib.ffmpeg_utils import probe_audio_tech
+
+    book.has_id3_cover = probe_audio_tech(book.sample_audio1).has_attached_pic or bool(
+        _extract_cover_art_mutagen(book.sample_audio1)
+    )
 
     # ── Provider-first extraction ──────────────────────────────────────────────
     # Query both enabled providers before heuristic scoring. Goodreads wins when

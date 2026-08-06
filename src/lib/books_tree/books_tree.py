@@ -203,9 +203,22 @@ class BooksTree(BaseModel):
         root: "Path | BooksTree | None",
         match_filter: list[Path] | str | None = None,
         scan_id3: bool = False,
+        is_file: bool | None = None,
+        is_dir: bool | None = None,
+        size: int | None = None,
     ):
-        """Casts a path to a TreePath without scanning it"""
+        """Casts a path to a TreePath without scanning it.
+
+        When ``is_file`` / ``is_dir`` / ``size`` are known from a scandir walk,
+        seed them so scorers and InboxItem avoid remote ``stat`` / ``is_dir`` calls.
+        """
         tree = BooksTree(path, root=root, scan=False, match_filter=match_filter)
+        if is_file is not None:
+            tree._is_file = is_file
+        if is_dir is not None:
+            tree._is_dir = is_dir
+        if size is not None:
+            tree.__dict__["size"] = size
         if scan_id3:
             tree.scan(scan_id3=True)
         return tree
@@ -258,9 +271,15 @@ class BooksTree(BaseModel):
         # Do a recursive walk of all paths, classifying dirs/files from scandir
         # metadata so we avoid a second is_dir()/stat pass over SMB.
         # tick("getting rglob")
-        _rglob_dirs, _rglob_files = self._walk_paths(root.path)
+        from src.lib.fs_utils import walk_dirs_and_files
+
+        _rglob_dirs, _rglob_files, _rglob_sizes = walk_dirs_and_files(root.path)
         _rglob_dirs = isorted(_rglob_dirs)
         _rglob_files = isorted(_rglob_files)
+        # Full-inbox inventory (pre match_filter) for Hasher — avoids a second walk.
+        root._last_walk_file_sizes = _rglob_sizes
+        root._is_dir = True
+        root._is_file = False
         # tick("done getting rglob", len(_rglob_dirs) + len(_rglob_files))
 
         self._files = []
@@ -281,12 +300,26 @@ class BooksTree(BaseModel):
                         # tick("parent_p not in match_filter, skipping")
                         continue
                     # tick("parent_p in match_filter, adding to subtree")
-                    subtree._dirs[part] = BooksTree.cast(parent_p, root=root, match_filter=self.match_filter)
+                    subtree._dirs[part] = BooksTree.cast(
+                        parent_p, root=root, match_filter=self.match_filter, is_dir=True, is_file=False
+                    )
                 # tick(f"subtree._dirs[{part}] =", subtree._dirs[part])
                 subtree = subtree._dirs[part]
             if files := [*subtree._files, *audio_files]:
                 # tick(f"subtree has files, adding {len(files)} to subtree")
-                subtree._files = isorted([BooksTree.cast(p, root=root, match_filter=self.match_filter) for p in files])
+                subtree._files = isorted(
+                    [
+                        BooksTree.cast(
+                            p,
+                            root=root,
+                            match_filter=self.match_filter,
+                            is_file=True,
+                            is_dir=False,
+                            size=_rglob_sizes.get(p),
+                        )
+                        for p in files
+                    ]
+                )
                 # tick("done adding files to subtree", [f.rel_path for f in subtree._files])
             # else:
             # tick("subtree has no files, skipping")
@@ -327,7 +360,14 @@ class BooksTree(BaseModel):
         # tick(f"adding files from current level to self.files, total is currently {len(self._files)}")
         self._files = isorted(
             [
-                BooksTree.cast(f, root=root, match_filter=self.match_filter)
+                BooksTree.cast(
+                    f,
+                    root=root,
+                    match_filter=self.match_filter,
+                    is_file=True,
+                    is_dir=False,
+                    size=_rglob_sizes.get(f),
+                )
                 for f in match_filter_paths(_all_audio_files, self.match_filter, root=root)
                 if f.parent == self.path
                 and (
@@ -371,42 +411,15 @@ class BooksTree(BaseModel):
         return self
 
     @staticmethod
-    def _walk_paths(path: Path) -> tuple[list[Path], list[Path]]:
+    def _walk_paths(path: Path) -> tuple[list[Path], list[Path], dict[Path, int]]:
         """Recursively list paths, classifying dirs/files from scandir metadata.
 
-        Returns ``(dirs, files)`` so callers avoid a second ``Path.is_dir()`` pass
-        (expensive over SMB — each call is a separate stat).
+        Returns ``(dirs, files, file_sizes)`` so callers avoid a second ``Path.is_dir()``
+        / ``stat()`` pass (expensive over SMB).
         """
-        dirs: list[Path] = []
-        files: list[Path] = []
-        try:
-            if not path.is_dir():
-                if path.is_file():
-                    files.append(path)
-                return dirs, files
-        except OSError:
-            return dirs, files
+        from src.lib.fs_utils import walk_dirs_and_files
 
-        dirs.append(path)
-        pending = [path]
-        while pending:
-            current = pending.pop()
-            try:
-                with os.scandir(current) as entries:
-                    for entry in entries:
-                        child = Path(entry.path)
-                        try:
-                            if entry.is_dir(follow_symlinks=False):
-                                dirs.append(child)
-                                pending.append(child)
-                            else:
-                                # Treat non-dirs (files, symlinks-to-files) as files.
-                                files.append(child)
-                        except OSError:
-                            continue
-            except OSError:
-                continue
-        return dirs, files
+        return walk_dirs_and_files(path)
 
     @copy_kwargs(_scan)
     def scan(self, *args, **kwargs) -> "BooksTree":
