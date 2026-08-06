@@ -172,14 +172,11 @@ def build_id3_tags_args(
 
 
 def shrink_mp3_to_size(file: Path, target_size: int) -> Path:
-    """Shrink an MP3 file to a target size via ffmpeg using whatever means necessary, including trimming and/or reducing bitrate.
+    """Shrink an audio file toward ``target_size``.
 
-    Args:
-        file (Path): Path to the MP3 file
-        target_size (int): Target size in bytes
-
-    Returns:
-        Path: Path to the shrunk file (original file if already small enough)
+    Prefers a stream-copy trim (no re-encode). That preserves the original
+    bitrate/sample-rate, works without ``libmp3lame``, and is what fixture
+    tests rely on. Falls back to libmp3lame re-encode when available.
     """
     if not file.exists():
         raise ValueError(f"[shrink_mp3_to_size]: file {file} does not exist")
@@ -194,17 +191,80 @@ def shrink_mp3_to_size(file: Path, target_size: int) -> Path:
         return file
 
     # get the duration of the file
-    duration = max(1, get_duration(file, fmt="seconds"))
+    duration = max(1.0, float(get_duration(file, fmt="seconds")))
 
     # get the bitrate of the file, in bps
     bitrate, _ = get_bitrate_py(file)
-    _stream_size = bitrate * duration / 8
 
     # get the samplerate of the file, in Hz
     samplerate = get_samplerate_py(file)
 
     # Create a temporary file for processing
-    tmp_file = file.with_suffix(".tmp.mp3")
+    tmp_file = file.with_suffix(f".tmp{file.suffix}")
+
+    def _restore_tags(src: Path, dst: Path) -> None:
+        """ffmpeg stream-copy often drops ID3/MP4 atoms; reinstate from ``src``."""
+        try:
+            if src.suffix.lower() == ".mp3":
+                from mutagen.id3 import ID3
+
+                ID3(src).save(dst)
+            elif src.suffix.lower() in {".m4a", ".m4b", ".mp4"}:
+                from mutagen.mp4 import MP4
+
+                src_tags, dst_tags = MP4(src), MP4(dst)
+                for key, value in src_tags.items():
+                    dst_tags[key] = value
+                dst_tags.save()
+        except Exception:
+            # Best-effort: shrinking still succeeds even if tags cannot be copied.
+            pass
+
+    def _replace_if_smaller() -> bool:
+        if not tmp_file.exists():
+            return False
+        new_size = tmp_file.stat().st_size
+        if new_size < current_size:
+            _restore_tags(file, tmp_file)
+            tmp_file.replace(file)
+            return True
+        tmp_file.unlink(missing_ok=True)
+        return False
+
+    # Fast path: stream-copy trim. Size ≈ bitrate/8 * seconds (+ tags/cover).
+    # Drop embedded cover/video streams so artwork cannot keep us over budget.
+    if bitrate > 0:
+        for budget_factor in (0.75, 0.45, 0.25, 0.12):
+            trim_t = max(1.0, min(duration, (target_size * budget_factor * 8) / bitrate))
+            try:
+                (
+                    ffmpeg.input(str(file), t=trim_t)
+                    .output(
+                        str(tmp_file),
+                        **{
+                            "c": "copy",
+                            "map": "0:a:0",
+                            "map_metadata": "0",
+                            "map_chapters": "0",
+                            "sn": None,
+                            "dn": None,
+                        },
+                    )
+                    .overwrite_output()
+                    .run(quiet=True)
+                )
+                if tmp_file.exists() and tmp_file.stat().st_size <= target_size:
+                    _restore_tags(file, tmp_file)
+                    tmp_file.replace(file)
+                    return file
+                if _replace_if_smaller() and file.stat().st_size <= target_size:
+                    return file
+            except ffmpeg.Error:
+                tmp_file.unlink(missing_ok=True)
+                break
+
+        if file.stat().st_size <= target_size:
+            return file
 
     try:
 
@@ -217,7 +277,7 @@ def shrink_mp3_to_size(file: Path, target_size: int) -> Path:
         cover_adj = {
             "vcodec": "copy",
         }
-        if (_has_cover_stream := bool(cover_stream)) and cover_stream.get("width", 0) > 100:
+        if bool(cover_stream) and cover_stream.get("width", 0) > 100:
             # If cover art is larger than 100px, resize it
             cover_adj = {
                 "vcodec": "mjpeg",
@@ -225,18 +285,14 @@ def shrink_mp3_to_size(file: Path, target_size: int) -> Path:
                 "qscale": 2,
             }
 
-        # First attempt: Try reducing bitrate
-        # Convert target size to bits and divide by duration
+        # Fallback: re-encode with libmp3lame when the build supports it.
         target_bitrate = int((target_size * 8) / duration)
-        # Keep bitrate between 24kbps and original bitrate
-        target_bitrate = min(bitrate, max(target_bitrate, 24 * 1000))
+        target_bitrate = min(bitrate or target_bitrate, max(target_bitrate, 24 * 1000))
 
-        # Predict new file size in bytes with new bitrate
         predicted_size = int((target_bitrate / 8) * duration)
 
-        # if the new size is still too large, we need to trim the file
         trim_seconds = 0
-        while predicted_size > target_size:
+        while predicted_size > target_size and trim_seconds < duration - 1:
             trim_seconds += 1
             predicted_size = int((target_bitrate / 8) * (duration - trim_seconds))
 
