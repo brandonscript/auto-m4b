@@ -155,14 +155,20 @@ def get_similarity(
     def calc_med(lst: list[float]) -> float:
         return round(statistics.median(lst), precision)
 
-    # Extract just the base filenames (without extensions) for path or pathlike
+    # Extract basenames without extensions. Prefer cheap string ops for str
+    # inputs (hot pathnames are already basenames from TreeNodeList.pathnames);
+    # only construct Path for Path objects.
     str_vals: list[str] = []
     for v in values:
-        if isinstance(v, Path) or isinstance(v, str):
-            try:
-                str_vals.append(Path(v).stem)
-            except Exception:
-                str_vals.append(str(v))
+        if isinstance(v, Path):
+            str_vals.append(v.stem)
+        elif isinstance(v, str):
+            base = v.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            if base.startswith(".") and base.count(".") == 1:
+                str_vals.append(base)
+            else:
+                idx = base.rfind(".")
+                str_vals.append(base[:idx] if idx > 0 else base)
         else:
             str_vals.append(str(v))
 
@@ -397,7 +403,14 @@ T = TypeVar("T")
 
 
 def cached_similarity(func: Callable[..., T]) -> Callable[..., T]:
-    """Decorator to handle caching of similarity calculations"""
+    """Cache similarity results per TreeNodeList and share across list wrappers.
+
+    Previous implementation stored a single kwargs blob per prop and overwrote it
+    on subsequent calls with different arguments. Structure scorers often request
+    the same prop with different ``include_curr`` / ``distinct`` values, and also
+    rebuild ``TreeNodeList`` wrappers over the same underlying trees — both of
+    which previously forced full rapidfuzz recomputation.
+    """
 
     @wraps(func)
     def decorator(
@@ -407,27 +420,51 @@ def cached_similarity(func: Callable[..., T]) -> Callable[..., T]:
         **kwargs: Any,
     ) -> T:
         try:
-            cache = getattr(self, f"_{prop}_similarity_cache", None)
-            fallback = kwargs.pop("fallback", None)
-            if not cache:
-                cache = {
-                    "comparison": comparison,
-                    "fallback": fallback,
-                    **kwargs,
-                }
-                setattr(self, f"_{prop}_similarity_cache", cache)
-            elif (
-                _kwargs_match := all(False if not k in cache else cache[k] == v for k, v in (kwargs or {}).items())
-                and cache["comparison"] == comparison
-                and cache.get("fallback") == fallback
-                and "result" in cache
-            ):
-                return cache["result"] or fallback
+            fallback = kwargs.get("fallback", None)
+            distinct = kwargs.get("distinct", True)
+            include_curr = kwargs.get("include_curr")
+            if include_curr is None:
+                include_curr = getattr(self, "_default_include_curr", True)
 
-            result = func(self, prop, comparison, **kwargs, fallback=fallback)
-            cache["result"] = result
-            cache["fallback"] = fallback
-            return result
+            trees = getattr(self, "_trees", ())
+            trees_key = tuple(id(t) for t in trees)
+            # When include_curr is set, the current node's property value is
+            # prepended — so the cache entry is specific to that node.
+            curr_key = id(self.node) if include_curr else 0
+            key = (prop, comparison, distinct, bool(include_curr), curr_key, trees_key)
+
+            root_cache: dict[Any, Any] | None
+            try:
+                root = self.node._tree.root
+                root_cache = root.__dict__.setdefault("_similarity_list_cache", {})
+            except Exception:
+                root_cache = None
+
+            if root_cache is not None and key in root_cache:
+                result = root_cache[key]
+                return result if result is not None else fallback
+
+            local_attr = f"_{prop}_similarity_cache"
+            local_cache = getattr(self, local_attr, None)
+            if not isinstance(local_cache, dict) or "entries" not in local_cache:
+                local_cache = {"entries": {}}
+                setattr(self, local_attr, local_cache)
+
+            entries = local_cache["entries"]
+            if key in entries:
+                result = entries[key]
+                if root_cache is not None:
+                    root_cache[key] = result
+                return result if result is not None else fallback
+
+            # Compute without caller fallback so cache entries stay reusable
+            # across different fallback values; re-apply fallback on return.
+            call_kwargs = {**kwargs, "fallback": None, "distinct": distinct, "include_curr": include_curr}
+            result = func(self, prop, comparison, **call_kwargs)
+            entries[key] = result
+            if root_cache is not None:
+                root_cache[key] = result
+            return result if result is not None else fallback
         except Exception as e:
             print_error(f"Error calculating similarity for {prop}: {e}")
             raise e

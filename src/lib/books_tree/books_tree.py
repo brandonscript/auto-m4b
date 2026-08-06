@@ -240,11 +240,12 @@ class BooksTree(BaseModel):
             # summaries with the freshly built tree structure.
             _node._i = None
 
-        # Clear the scorer cache and already_checked set so re-scans after
-        # filesystem changes don't use stale structure scores, and so files
-        # processed in a previous scan pass can be re-scored in the new pass.
-        _scorer_cache.clear()
+        # Clear this root's scorer cache entries (and already_checked) so re-scans
+        # after filesystem changes don't use stale structure scores, without wiping
+        # scores from unrelated inbox roots.
+        _scorer_cache.clear(root_id=id(root))
         already_checked.clear()
+        root.__dict__.pop("_similarity_list_cache", None)
 
         if not root.exists():
             # tick("root.exists() is False, returning self")

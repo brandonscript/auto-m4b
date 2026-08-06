@@ -563,7 +563,7 @@ class test_tree_structures:
     def test_rescan_bumps_scorer_epoch(self, tmp_path, monkeypatch):
         from src.lib.scorers import _scorer_cache, cached_scorer
 
-        monkeypatch.setattr(_scorer_cache, "clear", lambda: None)
+        monkeypatch.setattr(_scorer_cache, "clear", lambda *args, **kwargs: None)
         calls = 0
 
         @cached_scorer
