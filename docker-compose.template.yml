@@ -22,6 +22,7 @@ services:
       # - OVERWRITE_EXISTING=N
       # - ON_COMPLETE=archive
       # - CLEANUP_FILENAMES=N
+      # - SCORER_TRACE=N
       # - OPEN_LIBRARY_TIMEOUT=30
       # - GOODSCRAPS_USER_AGENT=auto-m4b/1.0 (you@example.com)
       # - GOODSCRAPS_TIMEOUT=30

@@ -201,6 +201,7 @@ All options are set via environment variables (`.env` file or shell environment)
 | `USE_FILENAMES_AS_CHAPTERS`   | `N`           | Set to `Y` to derive chapter titles from filenames instead of ID3 tags                                                                            |
 | `CLEANUP_FILENAMES`           | `N`           | Set to `Y` to opt into metadata-driven filename cleanup; the safe default preserves trusted GCS-derived names                                  |
 | `NO_CATS`                     | `N`           | Set to `Y` to suppress the ASCII cat art between loops                                                                                            |
+| `SCORER_TRACE`                | `N`           | Set to `Y` to enable scorer cache and decision timing diagnostics                                                                                |
 | `OPEN_LIBRARY_USER_AGENT`     | _(none)_      | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup))           |
 | `OPEN_LIBRARY_TIMEOUT`        | `30`          | Open Library request timeout in seconds                                                                                                           |
 | `GOODSCRAPS_USER_AGENT`       | _(none)_      | Identifiable user-agent string for optional Goodreads metadata lookups; setting it enables Goodreads-first comparison with Open Library             |
