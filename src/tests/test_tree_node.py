@@ -31,6 +31,8 @@ class test_tree_node:
             assert x.unique_part_nums == None or x.unique_part_nums == [1, 2]
             assert x.unique_series_nums == None
             assert x.similarity("id3_disc_nums", include_curr=True) == None
+            assert x.similarity("id3_disc_nums", include_curr=True, fallback=0.25) == 0.25
+            assert x.similarity("id3_disc_nums", include_curr=True, fallback=0.75) == 0.75
 
         # Children
         assert i.children.start_nums == [n for n in range(1, 39)]
