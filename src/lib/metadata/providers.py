@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 import re
+from threading import RLock
 from dataclasses import dataclass, field
 
+from cachetools import TTLCache
 from goodscraps import Goodscraps
 from rapidfuzz import fuzz
 
 from src.lib.cleaners import fix_smart_quotes, minimalist_title
 from src.lib.config import cfg
 from src.lib.term import print_debug
+from src.lib.typing import MEMO_TTL
+
+_PROVIDER_CACHE: TTLCache[tuple[object, ...], MetadataComparison] = TTLCache(maxsize=256, ttl=MEMO_TTL)
+_PROVIDER_CACHE_LOCK = RLock()
 
 
 _SERIES_NUMBER_PREFIX = re.compile(
@@ -156,7 +163,11 @@ def _goodreads_lookup(
 
                 def scored_match(item) -> tuple[float, float, float, float]:
                     title_score = _similarity(title, item.title)
-                    author_score = _similarity(author, item.author_name or "") if author else title_score
+                    author_score = (
+                        _similarity(author, item.author.name if item.author else "")
+                        if author
+                        else title_score
+                    )
                     strict_title_score = _strict_title_similarity(
                         title, item.title, author=author
                     )
@@ -187,8 +198,7 @@ def _goodreads_lookup(
                     )
                 book_id = client.canonical_book_id(best.book_id)
                 book = client.book(book_id)
-            primary = book.author_primary or (book.authors[0] if book.authors else None)
-            canonical_author = primary.name if primary else (best.author_name if best else "")
+            canonical_author = book.author.name if book.author else (best.author.name if best and best.author else "")
             return MetadataCandidate(
                 provider="goodreads",
                 title=book.title or (best.title if best else ""),
@@ -259,6 +269,21 @@ def lookup_metadata(
     goodreads_ref: str | None = None,
 ) -> MetadataComparison:
     """Query enabled providers and select Goodreads before Open Library."""
+    cache_key = (
+        title,
+        author,
+        narrator,
+        lookup_goodreads,
+        lookup_open_library,
+        goodreads_ref,
+        cfg.GOODSCRAPS_USER_AGENT,
+        cfg.GOODSCRAPS_TIMEOUT,
+        cfg.OPEN_LIBRARY_TIMEOUT,
+    )
+    with _PROVIDER_CACHE_LOCK:
+        if cached := _PROVIDER_CACHE.get(cache_key):
+            return deepcopy(cached)
+
     comparison = MetadataComparison()
     lookups = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -291,4 +316,12 @@ def lookup_metadata(
         comparison.selected = goodreads
     elif open_library and open_library.status == "low_confidence":
         comparison.selected = open_library
+    with _PROVIDER_CACHE_LOCK:
+        _PROVIDER_CACHE[cache_key] = deepcopy(comparison)
     return comparison
+
+
+def clear_provider_cache() -> None:
+    """Clear in-process provider results after configuration or test changes."""
+    with _PROVIDER_CACHE_LOCK:
+        _PROVIDER_CACHE.clear()

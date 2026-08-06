@@ -12,9 +12,8 @@ from typing import Any, cast, Literal, overload, TYPE_CHECKING, TypeVar
 
 import cachetools
 import cachetools.func
-from nltk import pos_tag, word_tokenize
 
-from src.lib import nlp
+import src.lib.nlp as nlp_utils
 from src.lib.cleaners import clean_name_abbreviations, normalize_author_initials
 from src.lib.ol_lookup import open_library_lookup_author
 from src.lib.misc import (
@@ -22,14 +21,7 @@ from src.lib.misc import (
     isorted,
     re_group,
 )
-from src.lib.nlp import (
-    english_words,
-    nlp,
-    nlp_trf,
-    restore_original_name,
-    squash_nlp_results,
-    squash_trf_results,
-)
+from src.lib.nlp import restore_original_name, squash_nlp_results, squash_trf_results
 from src.lib.patterns import *
 from src.lib.patterns import book_series_pattern, multi_disc_pattern
 from src.lib.term import print_debug
@@ -480,7 +472,7 @@ def get_name_from_str(s: str, max_words=6) -> str:
 
 def is_generic_word(word):
     # Load English words from nltk corpus
-    return word.lower() in english_words
+    return word.lower() in nlp_utils.get_english_words()
 
 
 @lru_cache(maxsize=1)
@@ -497,6 +489,8 @@ def get_singular(word):
 
 # Basic name scoring fallback
 def heuristic_score(name: str) -> float:
+    from nltk import pos_tag, word_tokenize
+
     tokens = word_tokenize(name)
 
     if not tokens:
@@ -528,7 +522,7 @@ def lookup_and_score_names(candidates: list[tuple[str, str, float]]) -> list[tup
 
         # Check if spaCy detects it as a PERSON entity
         if not label.endswith("SPACY"):
-            doc = nlp(name)
+            doc = nlp_utils.get_nlp()(name)
             for ent in doc.ents:
                 if ent.label_.startswith("PER") and ent.text == name:
                     entity_score = (
@@ -806,7 +800,7 @@ def spaCy_extract(s: str) -> tuple[list[tuple[str, str, float]], list[tuple[str,
     """Extracts people and objects using spaCy's NER with transformer model."""
     s = strip_leading_nums_and_punct(s)
 
-    doc = nlp(s)
+    doc = nlp_utils.get_nlp()(s)
 
     entities = []
 
@@ -835,7 +829,7 @@ def spaCy_extract(s: str) -> tuple[list[tuple[str, str, float]], list[tuple[str,
     entities = [(p, l, sc) for p, l, sc in entities if not any(j in p for j in junk_tokens)]
 
     # Add transformer results if we can derive them
-    trf = squash_trf_results(nlp_trf(s))
+    trf = squash_trf_results(nlp_utils.get_nlp_trf()(s))
     for ent in trf:
         # if any(k.startswith(ent["entity_group"]) for k in tuple(default_score_map.keys())):
         # If the entity as an exact match already exists, average the score and update it instead of adding
@@ -955,7 +949,14 @@ def get_nlp_names(s: str, *, no_cache: bool = False) -> list[tuple[str, str, flo
 
     # --- spaCy ---
     spacy_people, _ = spaCy_extract(s)
-    spacy_names = [(n.strip(), l, sc) for n, l, sc in spacy_people]
+    spacy_names = [
+        (
+            get_name_from_str(n.strip()) if re.search(r"\s+the\s+", n, re.IGNORECASE) else n.strip(),
+            l,
+            sc,
+        )
+        for n, l, sc in spacy_people
+    ]
 
     # --- Merge and dedupe substrings ---
     combined = squash_nlp_results(nltk_names + spacy_names)
@@ -1111,8 +1112,18 @@ def parse_names(
     if nltk_s and (not fallback or len(nltk_s) > len(fallback)):
         fallback = nltk_s
 
-    author = nltk_author if nltk_author else (get_name_from_str(author) or fallback)
-    narrator = nltk_narrator if nltk_narrator else (get_name_from_str(narrator) or fallback)
+    parsed_author = get_name_from_str(author)
+    parsed_narrator = get_name_from_str(narrator)
+    author = (
+        get_name_from_str(nltk_author)
+        if nltk_author and len(nltk_author) >= len(parsed_author) and len(to_words(nltk_author)) <= 3
+        else (parsed_author or fallback)
+    )
+    narrator = (
+        get_name_from_str(nltk_narrator)
+        if nltk_narrator and len(nltk_narrator) >= len(parsed_narrator) and len(to_words(nltk_narrator)) <= 3
+        else (parsed_narrator or fallback)
+    )
 
     # Remove author name from narrator, then trip leading/trailing junk chars again
     if author in narrator:

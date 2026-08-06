@@ -9,22 +9,19 @@ import sys
 import warnings
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import cast, Literal, TypedDict
+from typing import cast, Literal, TypedDict, TYPE_CHECKING
 
 # Suppress deprecation warning from thinc about torch.cuda.amp.autocast
 warnings.filterwarnings("ignore", message=r".*torch\.cuda\.amp\.autocast.*", category=FutureWarning)
 warnings.filterwarnings("ignore", message=r".*torch\.amp\.autocast.*", category=FutureWarning)
 warnings.filterwarnings("ignore", category=FutureWarning, module=r"thinc\..*")
 
-import nltk
-import spacy
-from nltk.corpus import words
-from spacy.language import Language
-from spacy.matcher import Matcher
-
 from src.lib.misc import re_group
 from src.lib.config import cfg
 from src.lib.term import print_debug
+
+if TYPE_CHECKING:
+    from spacy.language import Language
 
 SPACY_MODEL_TRF = "en_core_web_trf"
 SPACY_MODEL_SM = "en_core_web_sm"
@@ -46,6 +43,7 @@ def should_update_nltk() -> bool:
 
 
 english_words: set[str] = set()
+_nltk_loaded = False
 
 
 def update_nltk_timestamp():
@@ -56,7 +54,10 @@ def update_nltk_timestamp():
 
 def _load_nltk_data():
     """Download required NLTK resources and load corpora. Fails gracefully."""
-    global english_words
+    global english_words, _nltk_loaded
+    import nltk
+    from nltk.corpus import words
+
     with contextlib.redirect_stdout(open(os.devnull, "w")):
         # punkt_tab / averaged_perceptron_tagger_eng / maxent_ne_chunker_tab
         # are required by word_tokenize, pos_tag, and ne_chunk in NLTK 3.8+.
@@ -66,19 +67,25 @@ def _load_nltk_data():
         english_words = set(words.words())
     except Exception:
         pass  # Degrade gracefully; english_words stays empty
+    _nltk_loaded = True
 
 
-if should_update_nltk():
-    _load_nltk_data()
-    update_nltk_timestamp()
-else:
-    try:
-        english_words = set(words.words())
-    except Exception:
-        _load_nltk_data()
-        update_nltk_timestamp()
+def get_english_words() -> set[str]:
+    global english_words, _nltk_loaded
+    if not _nltk_loaded:
+        if should_update_nltk():
+            _load_nltk_data()
+            update_nltk_timestamp()
+        else:
+            try:
+                from nltk.corpus import words
 
-nlp = None  # type: ignore
+                english_words = set(words.words())
+                _nltk_loaded = True
+            except Exception:
+                _load_nltk_data()
+                update_nltk_timestamp()
+    return english_words
 
 
 def _ensure_pip():
@@ -98,7 +105,9 @@ def _devnull():
             yield
 
 
-def _load_spacy_model() -> spacy.language.Language:
+def _load_spacy_model() -> "Language":
+    import spacy
+
     # en_core_web_trf requires spacy-curated-transformers which is only
     # installed on macOS (Apple Silicon). Skip it on other platforms.
     models = (SPACY_MODEL_TRF, SPACY_MODEL_SM) if sys.platform == "darwin" else (SPACY_MODEL_SM,)
@@ -120,17 +129,14 @@ def _load_spacy_model() -> spacy.language.Language:
     raise RuntimeError(f"Could not load any spaCy model (tried: {', '.join(models)})")
 
 
-nlp = _load_spacy_model()
+_nlp: "Language | None" = None
 
 
-matcher = Matcher(nlp.vocab)
-matcher.add("PERSON", [[{"IS_ALPHA": True}]])
-matcher.add("WORK_OF_ART", [[{"IS_ALPHA": True}]])
-matcher.add("PRODUCT", [[{"IS_ALPHA": True}]])
-matcher.add("EVENT", [[{"IS_ALPHA": True}]])
-matcher.add("ORG", [[{"IS_ALPHA": True}]])
-
-nlp = cast(Language, nlp)
+def get_nlp() -> "Language":
+    global _nlp
+    if _nlp is None:
+        _nlp = _load_spacy_model()
+    return cast("Language", _nlp)
 
 """
 [{'entity_group': 'PER', 'score': 0.9915958, 'word': 'Melody Muze', 'start': 0, 'end': 11}, {'entity_group': 'PER', 'score': 0.9990646, 'word': 'Fe', 'start': 15, 'end': 17}, {'entity_group': 'PER', 'score': 0.68379545, 'word': '##yre', 'start': 17, 'end': 20}]
@@ -202,6 +208,8 @@ def get_transformer_pipeline(pipeline, *, model_name: str) -> Callable[[str], li
     Returns:
         A callable that takes a string and returns a list of NER results
     """
+    from transformers import AutoModelForTokenClassification, AutoTokenizer
+
     # Create the pipeline
     tokenizer = AutoTokenizer.from_pretrained(model_name, never_split=[])
     model = AutoModelForTokenClassification.from_pretrained(model_name)
@@ -254,27 +262,35 @@ class NoTRF:
         return cast(list[DslimBertBaseNER], [])
 
 
-try:
-    # Suppress "None of PyTorch/TensorFlow/Flax found" noise at import time.
-    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-    # Prevent HuggingFace from making network requests for model downloads.
-    # If the model isn't cached locally, skip the transformer pipeline entirely.
-    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+_nlp_trf: Callable[[str], list[DslimBertBaseNER]] | None = None
 
-    # Skip transformer pipeline if no ML framework (PyTorch/TF/Flax) is present —
-    # from_pretrained() would otherwise stall indefinitely on a network download.
-    import importlib.util
-    if not any(importlib.util.find_spec(pkg) for pkg in ("torch", "tensorflow", "flax")):
-        raise ImportError("No ML framework (torch/tensorflow/flax) available; skipping transformer pipeline")
 
-    with _devnull(), warnings.catch_warnings():
-        warnings.filterwarnings("ignore")
-        from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
-        nlp_trf = get_transformer_pipeline(pipeline, model_name=TRF_MODEL)
-except Exception as e:
-    print_debug(f"Error loading transformer model: {e}")
-    nlp_trf = NoTRF()
+def get_nlp_trf() -> Callable[[str], list[DslimBertBaseNER]]:
+    global _nlp_trf
+    if _nlp_trf is not None:
+        return _nlp_trf
+    try:
+        # Suppress "None of PyTorch/TensorFlow/Flax found" noise at import time.
+        os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+        # Prevent HuggingFace from making network requests for model downloads.
+        # If the model isn't cached locally, skip the transformer pipeline entirely.
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
+        import importlib.util
+
+        if not any(importlib.util.find_spec(pkg) for pkg in ("torch", "tensorflow", "flax")):
+            raise ImportError("No ML framework (torch/tensorflow/flax) available; skipping transformer pipeline")
+
+        with _devnull(), warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
+            from transformers import pipeline
+
+            _nlp_trf = get_transformer_pipeline(pipeline, model_name=TRF_MODEL)
+    except Exception as e:
+        print_debug(f"Error loading transformer model: {e}")
+        _nlp_trf = NoTRF()
+    return _nlp_trf
 
 
 def squash_trf_results(results: list[DslimBertBaseNER]) -> list[DslimBertBaseNER]:

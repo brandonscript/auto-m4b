@@ -46,11 +46,13 @@ def setup_teardown():
 
 def _clear_all_caches():
     from src.lib.config import cfg
+    from src.lib.metadata.providers import clear_provider_cache
     from src.lib.scorers import _scorer_cache, already_checked
     import src.lib.parsers as _parsers
 
     _scorer_cache.clear()
     already_checked.clear()
+    clear_provider_cache()
     cfg.FATAL_FILE.unlink(missing_ok=True)
 
     # Clear all cachetools TTL caches in parsers so stale narrator/author
@@ -282,7 +284,8 @@ def load_test_fixture(
     # Shrink files in parallel using multiprocessing
     if files_to_shrink:
         tick(f"{len(files_to_shrink)} files to shrink")
-        with mp.Pool(processes=mp.cpu_count()) as pool:
+        worker_count = min(4, mp.cpu_count(), len(files_to_shrink))
+        with mp.Pool(processes=worker_count) as pool:
             pool.starmap(shrink_mp3_to_size, files_to_shrink)
         tick("done shrinking files")
 

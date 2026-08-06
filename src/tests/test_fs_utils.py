@@ -1,3 +1,4 @@
+import os
 import random
 import re
 import shutil
@@ -231,17 +232,18 @@ def test_find_recently_modified_files_and_dirs():
     from src.lib.config import cfg
     from src.lib.fs_utils import find_recently_modified_files_and_dirs
 
-    (TEST_DIRS.inbox / "recently_modified_file.mp3").unlink(missing_ok=True)
-    time.sleep(1)
+    recently_modified_file = TEST_DIRS.inbox / "recently_modified_file.mp3"
+    recently_modified_file.unlink(missing_ok=True)
+    old_time = time.time() - 2
+    os.utime(TEST_DIRS.inbox, (old_time, old_time))
     assert find_recently_modified_files_and_dirs(TEST_DIRS.inbox, 0.5) == []
 
     # create a file
-    time.sleep(0.5)
-    (TEST_DIRS.inbox / "recently_modified_file.mp3").touch()
+    recently_modified_file.touch()
     recents = find_recently_modified_files_and_dirs(TEST_DIRS.inbox, 5, only_file_exts=cfg.AUDIO_EXTS)
     assert recents[0][0] == TEST_DIRS.inbox / "recently_modified_file.mp3"
     # remove the file
-    (TEST_DIRS.inbox / "recently_modified_file.mp3").unlink()
+    recently_modified_file.unlink()
 
 
 def test_was_recently_modified():
@@ -251,15 +253,18 @@ def test_was_recently_modified():
     shutil.rmtree(nested_dir, ignore_errors=True)
     nested_dir.mkdir(parents=True, exist_ok=True)
 
-    time.sleep(1)
-    (nested_dir / "recently_modified_file.mp3").unlink(missing_ok=True)
+    recently_modified_file = nested_dir / "recently_modified_file.mp3"
+    recently_modified_file.unlink(missing_ok=True)
+    old_time = time.time() - 2
+    os.utime(TEST_DIRS.inbox, (old_time, old_time))
+    os.utime(nested_dir, (old_time, old_time))
     assert not was_recently_modified(TEST_DIRS.inbox, 1)
 
     # create a file
-    (nested_dir / "recently_modified_file.mp3").touch()
+    recently_modified_file.touch()
     assert was_recently_modified(TEST_DIRS.inbox, 1)
     # remove the file
-    (nested_dir / "recently_modified_file.mp3").unlink()
+    recently_modified_file.unlink()
 
 
 def test_last_updated_at(old_mill__multidisc_mp3: Audiobook, capfd: pytest.CaptureFixture[str]):

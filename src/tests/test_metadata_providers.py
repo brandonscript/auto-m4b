@@ -20,6 +20,30 @@ def test_metadata_candidate_normalizes_smart_quotes():
     assert candidate.narrator == '"Reader"'
 
 
+def test_lookup_metadata_reuses_scoped_provider_results(monkeypatch):
+    calls = 0
+
+    def fake_open_library(_title, _author, _narrator):
+        nonlocal calls
+        calls += 1
+        return providers.MetadataCandidate(
+            provider="openlibrary",
+            title="The Hobbit",
+            author="J. R. R. Tolkien",
+            status="match",
+        )
+
+    monkeypatch.setattr(providers, "_open_library_lookup", fake_open_library)
+    providers.clear_provider_cache()
+
+    first = providers.lookup_metadata("The Hobbit", lookup_goodreads=False)
+    second = providers.lookup_metadata("The Hobbit", lookup_goodreads=False)
+
+    assert calls == 1
+    assert first == second
+    assert first is not second
+
+
 class _FakeGoodscraps:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -40,7 +64,7 @@ class _FakeGoodscraps:
                 book_id=42,
                 canonical_book_id=42,
                 title="The Hobbit",
-                author_name="J. R. R. Tolkien",
+                author=SimpleNamespace(name="J. R. R. Tolkien"),
                 url="https://www.goodreads.com/book/show/42",
             )
         ]
@@ -50,8 +74,8 @@ class _FakeGoodscraps:
         return SimpleNamespace(
             book_id=42,
             title="The Hobbit",
-            author_primary=SimpleNamespace(name="J. R. R. Tolkien"),
-            authors=[],
+            author=SimpleNamespace(name="J. R. R. Tolkien"),
+            additional_authors=[],
             first_published_year=1937,
             url="https://www.goodreads.com/book/show/42",
         )
@@ -65,14 +89,14 @@ class _AuthorAwareGoodscraps(_FakeGoodscraps):
                 book_id=99,
                 canonical_book_id=99,
                 title="The Sword of Summer",
-                author_name="Rick Riordan",
+                author=SimpleNamespace(name="Rick Riordan"),
                 url="https://www.goodreads.com/book/show/99",
             ),
             SimpleNamespace(
                 book_id=100,
                 canonical_book_id=100,
                 title="By the Sword",
-                author_name="Mercedes Lackey",
+                author=SimpleNamespace(name="Mercedes Lackey"),
                 url="https://www.goodreads.com/book/show/100",
             ),
         ]
@@ -82,16 +106,16 @@ class _AuthorAwareGoodscraps(_FakeGoodscraps):
             return SimpleNamespace(
                 book_id=100,
                 title="By the Sword",
-                author_primary=SimpleNamespace(name="Mercedes Lackey"),
-                authors=[],
+                author=SimpleNamespace(name="Mercedes Lackey"),
+                additional_authors=[],
                 first_published_year=1991,
                 url="https://www.goodreads.com/book/show/100",
             )
         return SimpleNamespace(
             book_id=99,
             title="The Sword of Summer",
-            author_primary=SimpleNamespace(name="Rick Riordan"),
-            authors=[],
+            author=SimpleNamespace(name="Rick Riordan"),
+            additional_authors=[],
             first_published_year=2015,
             url="https://www.goodreads.com/book/show/99",
         )
@@ -108,28 +132,28 @@ class _TitleCollisionGoodscraps(_FakeGoodscraps):
                     "Lovers, Lore & Loss Songs From The Arrows of the Queen, "
                     "Arrow's Flight and Arrow's Fall by Mercedes Lackey & D. F. Sanders"
                 ),
-                author_name="Mercedes Lackey",
+                author=SimpleNamespace(name="Mercedes Lackey"),
                 url="https://www.goodreads.com/book/show/33580643",
             ),
             SimpleNamespace(
                 book_id=777,
                 canonical_book_id=777,
                 title="Arrow's Fall: Lovers, Lore & Loss",
-                author_name="Mercedes Lackey",
+                author=SimpleNamespace(name="Mercedes Lackey"),
                 url="https://www.goodreads.com/book/show/777",
             ),
             SimpleNamespace(
                 book_id=14014,
                 canonical_book_id=14014,
                 title="Arrow's Fall (Heralds of Valdemar, #3)",
-                author_name="Mercedes Lackey",
+                author=SimpleNamespace(name="Mercedes Lackey"),
                 url="https://www.goodreads.com/book/show/14014.Arrow_s_Fall",
             ),
             SimpleNamespace(
                 book_id=49475188,
                 canonical_book_id=49475188,
                 title="Queen's Own Volume Two: Arrow's Fall",
-                author_name="Mercedes Lackey",
+                author=SimpleNamespace(name="Mercedes Lackey"),
                 url="https://www.goodreads.com/book/show/49475188",
             ),
         ]
@@ -139,8 +163,8 @@ class _TitleCollisionGoodscraps(_FakeGoodscraps):
         return SimpleNamespace(
             book_id=14014,
             title="Arrow's Fall",
-            author_primary=SimpleNamespace(name="Mercedes Lackey"),
-            authors=[],
+            author=SimpleNamespace(name="Mercedes Lackey"),
+            additional_authors=[],
             first_published_year=1988,
             url="https://www.goodreads.com/book/show/14014.Arrow_s_Fall",
         )
@@ -154,14 +178,14 @@ class _ItalianGirlGoodscraps(_FakeGoodscraps):
                 book_id=40253222,
                 canonical_book_id=40253222,
                 title="Lucinda Riley Collection 6 Books Bundles",
-                author_name="Lucinda Riley",
+                author=SimpleNamespace(name="Lucinda Riley"),
                 url="https://www.goodreads.com/book/show/40253222",
             ),
             SimpleNamespace(
                 book_id=22057035,
                 canonical_book_id=22057035,
                 title="The Italian Girl",
-                author_name="Lucinda Edmonds",
+                author=SimpleNamespace(name="Lucinda Edmonds"),
                 url="https://www.goodreads.com/book/show/22057035",
             ),
         ]
@@ -171,8 +195,8 @@ class _ItalianGirlGoodscraps(_FakeGoodscraps):
         return SimpleNamespace(
             book_id=22057035,
             title="The Italian Girl",
-            author_primary=SimpleNamespace(name="Lucinda Edmonds"),
-            authors=[],
+            author=SimpleNamespace(name="Lucinda Edmonds"),
+            additional_authors=[],
             first_published_year=1996,
             url="https://www.goodreads.com/book/show/22057035",
         )
@@ -193,7 +217,7 @@ class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
                 book_id=18373214,
                 canonical_book_id=18373214,
                 title="Cockroaches (Harry Hole, #2)",
-                author_name="Jo Nesbø",
+                author=SimpleNamespace(name="Jo Nesbø"),
                 url="https://www.goodreads.com/book/show/18373214-cockroaches",
             )
         ]
@@ -203,8 +227,8 @@ class _SeriesPrefixedGoodscraps(_FakeGoodscraps):
         return SimpleNamespace(
             book_id=18373214,
             title="Cockroaches",
-            author_primary=SimpleNamespace(name="Jo Nesbø"),
-            authors=[],
+            author=SimpleNamespace(name="Jo Nesbø"),
+            additional_authors=[],
             first_published_year=1998,
             url="https://www.goodreads.com/book/show/18373214-cockroaches",
         )
@@ -218,7 +242,7 @@ class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
                 book_id=123790521,
                 canonical_book_id=13256064,
                 title="Phantom by Jo Nesbo",
-                author_name="Jo Nesbø",
+                author=SimpleNamespace(name="Jo Nesbø"),
                 url="https://www.goodreads.com/book/show/123790521-phantom-by-jo-nesbo",
             )
         ]
@@ -232,8 +256,8 @@ class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
         return SimpleNamespace(
             book_id=13256064,
             title="Phantom",
-            author_primary=SimpleNamespace(name="Jo Nesbø"),
-            authors=[],
+            author=SimpleNamespace(name="Jo Nesbø"),
+            additional_additional_authors=[],
             first_published_year=2011,
             url="https://www.goodreads.com/book/show/13256064-phantom",
         )

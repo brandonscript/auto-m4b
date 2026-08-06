@@ -1,0 +1,115 @@
+{
+  "generated_at": "2026-08-05T22:07:53Z",
+  "imports": {
+    "src": {
+      "nlp_loaded": false,
+      "wall_seconds": {
+        "max": 0.021978412987664342,
+        "median": 0.02119568199850619,
+        "min": 0.020412951009348035
+      }
+    },
+    "src.auto_m4b": {
+      "nlp_loaded": false,
+      "wall_seconds": {
+        "max": 0.7457302960101515,
+        "median": 0.686775196052622,
+        "min": 0.6278200960950926
+      }
+    },
+    "src.fix_metadata": {
+      "nlp_loaded": false,
+      "wall_seconds": {
+        "max": 0.5854749280260876,
+        "median": 0.578208593535237,
+        "min": 0.5709422590443864
+      }
+    },
+    "src.fixm4b": {
+      "nlp_loaded": false,
+      "wall_seconds": {
+        "max": 0.019878480001352727,
+        "median": 0.019525011535733938,
+        "min": 0.01917154307011515
+      }
+    },
+    "src.lib.nlp": {
+      "nlp_loaded": false,
+      "wall_seconds": {
+        "max": 0.22329183295369148,
+        "median": 0.20318725396646187,
+        "min": 0.18308267497923225
+      }
+    }
+  },
+  "iterations": 2,
+  "python": "3.12.1",
+  "scans": {
+    "nathan_lowell__nested_series_m4a": {
+      "false": {
+        "books": 0,
+        "directories": 27,
+        "files": 28,
+        "wall_seconds": {
+          "max": 0.1160852920729667,
+          "median": 0.11581966752419248,
+          "min": 0.11555404297541827
+        }
+      },
+      "true": {
+        "books": 8,
+        "directories": 27,
+        "files": 28,
+        "wall_seconds": {
+          "max": 0.17409859504550695,
+          "median": 0.17003916401881725,
+          "min": 0.16597973299212754
+        }
+      }
+    },
+    "secret_project_series__nested_flat_mixed": {
+      "false": {
+        "books": 0,
+        "directories": 5,
+        "files": 5,
+        "wall_seconds": {
+          "max": 0.10859173000790179,
+          "median": 0.10456614947179332,
+          "min": 0.10054056893568486
+        }
+      },
+      "true": {
+        "books": 3,
+        "directories": 5,
+        "files": 5,
+        "wall_seconds": {
+          "max": 0.13154542306438088,
+          "median": 0.12969203799730167,
+          "min": 0.12783865293022245
+        }
+      }
+    },
+    "tiny__flat_mp3": {
+      "false": {
+        "books": 0,
+        "directories": 0,
+        "files": 5,
+        "wall_seconds": {
+          "max": 0.1046601019334048,
+          "median": 0.1041042449651286,
+          "min": 0.1035483879968524
+        }
+      },
+      "true": {
+        "books": 5,
+        "directories": 0,
+        "files": 5,
+        "wall_seconds": {
+          "max": 0.10878396790940315,
+          "median": 0.10861688194563612,
+          "min": 0.1084497959818691
+        }
+      }
+    }
+  }
+}

@@ -1117,6 +1117,15 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
         files_gt_75mb = truthiness([is_gt_75mb(f.size) for f in tree.files])
         dirs_gt_75mb = truthiness([is_gt_75mb(c.size) for c in tree.dirs.values()])
 
+        # A mixed directory has direct files that are merely parts of the same
+        # book, not standalone books. Without a positive standalone signal,
+        # treating its nested directory as a container creates false positives
+        # for small/test-sized files.
+        if tree.files and tree.dirs and standalones <= 0:
+            return (None, 0.0, 0.0)
+        if not tree.files and tree.dirs and all(re.fullmatch(r"nested[_ ]?\d+", d.name, re.IGNORECASE) for d in tree.dirs.values()):
+            return (None, 0.0, 0.0)
+
         known_structures = tree.list_structures_r
         missing_structures = len(tree.children_without_structure_r) / len(tree.children_recursive)
         incomplete_path_nums = (0.0 if not cri.all_path_nums else (-1.0 + (cri.all_path_nums_completion or 0.0))) / 4
