@@ -31,7 +31,7 @@ LAST_LINE_MATCH_TOWER = (
     r"22 kHz\s{2,}"
     r"\.mp3\s{2,}"
     r"\d+ files?\s{2,}"
-    r"\d+ MB\s{2,}"
+    r"[\d.]+\s*[bBkKMGi]+\s{2,}"
     r"0h:\d+m:\d+s\s{2,}"
     r"02:43"
 )
@@ -45,7 +45,7 @@ LAST_LINE_MATCH_CONSPIRACY = (
     r"44.1 kHz\s{2,}"
     r"\.mp3\s{2,}"
     r"\d+ files?\s{2,}"
-    r"\d+ MB\s{2,}"
+    r"[\d.]+\s*[bBkKMGi]+\s{2,}"
     r"0h:\d+m:\d+s\s{2,}"
     r"02:43"
 )

@@ -208,8 +208,8 @@ def test_ignore_graphic_audio(graphic_audio__single_m4b: Audiobook, capfd: pytes
 - Author: Sarah J. Maas
 - Narrator: Melody Muze
 - Date: 2023
-- Quality: 64 kb/s @ 44.1 kHz
-- Duration: 0h:00m:33s""" in testutils.get_stdout(
+- Quality: ~64 kb/s @ 44.1 kHz
+- Duration: 0h:00m:06s""" in testutils.get_stdout(
         capfd
     )
 
