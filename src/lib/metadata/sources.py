@@ -200,7 +200,12 @@ def _clean_gcs_values(values: list[str]) -> str:
     return cleaned
 
 
-def source_common_title(source_dir: Path, ignore_globs: list[str] | None = None) -> tuple[str, str]:
+def source_common_title(
+    source_dir: Path,
+    ignore_globs: list[str] | None = None,
+    *,
+    _files: list[Path] | None = None,
+) -> tuple[str, str]:
     """Derive a book title from multi-file sources via GCS + part/disc strip.
 
     Returns ``(title, reason)`` where reason is empty if nothing useful found.
@@ -208,7 +213,7 @@ def source_common_title(source_dir: Path, ignore_globs: list[str] | None = None)
     then ``clean_string`` to strip ``Part N`` / ``Disc N`` / orphaned Part.
     """
     ignore_globs = ignore_globs or []
-    files = _source_audio_files(source_dir, ignore_globs)
+    files = _files if _files is not None else _source_audio_files(source_dir, ignore_globs)
     if not files:
         return "", ""
 
@@ -239,14 +244,19 @@ def source_common_title(source_dir: Path, ignore_globs: list[str] | None = None)
     return "", ""
 
 
-def source_common_filename(source_dir: Path, ignore_globs: list[str] | None = None) -> str:
+def source_common_filename(
+    source_dir: Path,
+    ignore_globs: list[str] | None = None,
+    *,
+    _files: list[Path] | None = None,
+) -> str:
     """Part/disc-stripped GCS of source *filenames* (stems), for m4b rename.
 
     Unlike ``source_common_title``, this always prefers filenames over ID3 titles,
     so e.g. ``Author - Title, Part 1/2`` → ``Author - Title``.
     """
     ignore_globs = ignore_globs or []
-    files = _source_audio_files(source_dir, ignore_globs)
+    files = _files if _files is not None else _source_audio_files(source_dir, ignore_globs)
     if not files:
         return ""
     return _clean_gcs_values([f.stem for f in files])
@@ -269,13 +279,18 @@ def filename_gcs_context(filename_stem: str, book_dir: Path, title: str) -> str:
     return stem
 
 
-def source_files_display(source_dir: Path, ignore_globs: list[str] | None = None) -> str:
+def source_files_display(
+    source_dir: Path,
+    ignore_globs: list[str] | None = None,
+    *,
+    _files: list[Path] | None = None,
+) -> str:
     """``<LCS stem>.<ext>`` for Filesystem ``Original file(s)`` row.
 
     Extension is the most common suffix among source audio files.
     """
     ignore_globs = ignore_globs or []
-    files = _source_audio_files(source_dir, ignore_globs)
+    files = _files if _files is not None else _source_audio_files(source_dir, ignore_globs)
     if not files:
         return ""
     stem = _clean_gcs_values([f.stem for f in files])
@@ -287,10 +302,17 @@ def source_files_display(source_dir: Path, ignore_globs: list[str] | None = None
     return f"{stem}{ext}"
 
 
-def _source_audio_file(source_dir: Path, ignore_globs: list[str]) -> Path | None:
+def _source_audio_file(
+    source_dir: Path,
+    ignore_globs: list[str],
+    *,
+    _files: list[Path] | None = None,
+) -> Path | None:
     """Largest taggable audio in a source dir (prefer non-m4b, else any audio)."""
-    pref = _largest_audio(source_dir, ignore_globs, exts=_SOURCE_EXTS)
+    files = _files if _files is not None else _source_audio_files(source_dir, ignore_globs)
+    candidates = [p for p in files if p.suffix.lower() in _SOURCE_EXTS]
+    pref = max(candidates, key=lambda p: p.stat().st_size, default=None)
     if pref:
         return pref
-    return _largest_audio(source_dir, ignore_globs, exts=_AUDIO_EXTS)
+    return max(files, key=lambda p: p.stat().st_size, default=None)
 

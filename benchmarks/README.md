@@ -32,3 +32,13 @@ chapter count, verification time, and cumulative timings for conversion,
 `ffprobe`, concat, metadata generation, and final embedding. Timings are
 diagnostic rather than CI assertions; compare experiments using the same host,
 fixture set, and `--cpu-cores` value.
+
+Runtime baselines for cold imports and tree scans are collected separately:
+
+```bash
+poetry run python benchmarks/benchmark_runtime.py \
+  --output benchmarks/runtime-baseline.json
+```
+
+This reports fresh-process import timings and `BooksTree` timings with and
+without structure detection for representative nested and multi-file fixtures.

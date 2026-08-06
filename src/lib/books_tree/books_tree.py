@@ -1,3 +1,4 @@
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -210,7 +211,7 @@ class BooksTree(BaseModel):
 
         # Do a recursive glob of all files in the directory, and prepend the root so we can get standalone files
         # tick("getting rglob")
-        rglob = isorted([root.path, *root.path.rglob("*")])
+        rglob = isorted(self._walk_paths(root.path))
         # tick("done getting rglob", len(rglob))
 
         self._files = []
@@ -331,6 +332,27 @@ class BooksTree(BaseModel):
         # # tick(f"done scanning {self.rel_path}", total_time)
         # print_debug(f"total time taken: {total_time} seconds", self.ticks)
         return self
+
+    @staticmethod
+    def _walk_paths(path: Path) -> list[Path]:
+        """Recursively list paths while reusing scandir directory metadata."""
+        paths = [path]
+        if not path.is_dir():
+            return paths
+
+        pending = [path]
+        while pending:
+            current = pending.pop()
+            try:
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        child = Path(entry.path)
+                        paths.append(child)
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(child)
+            except OSError:
+                continue
+        return paths
 
     @copy_kwargs(_scan)
     def scan(self, *args, **kwargs) -> "BooksTree":

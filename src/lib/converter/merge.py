@@ -359,9 +359,9 @@ def convert_book_native(book: "Audiobook") -> int:
     concat_output = tmp_dir / "concat.mp4"
 
     if len(tmp_files) == 1:
-        import shutil as _shutil
-
-        _shutil.copy2(tmp_files[0], concat_output)
+        # The sole converted file is already a valid concat input. Reusing it
+        # avoids an unnecessary full-file copy before the metadata remux.
+        concat_output = tmp_files[0]
     else:
         list_path = tmp_dir / "concat_list.txt"
         _write_concat_list(tmp_files, list_path)

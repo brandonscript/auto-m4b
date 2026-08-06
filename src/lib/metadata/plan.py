@@ -19,6 +19,7 @@ from src.lib.metadata.sources import (
     _find_source_and_m4b,
     filename_gcs_context,
     _source_audio_file,
+    _source_audio_files,
     resolve_source_dir,
     source_common_filename,
     source_common_title,
@@ -257,8 +258,9 @@ def plan_fix(
             source_root=source_root,
             debug=debug,
         )
-        filename_stem = source_common_filename(src_dir, ignore_globs)
-        fs_files = source_files_display(src_dir, ignore_globs)
+        source_files = _source_audio_files(src_dir, ignore_globs)
+        filename_stem = source_common_filename(src_dir, ignore_globs, _files=source_files)
+        fs_files = source_files_display(src_dir, ignore_globs, _files=source_files)
         if beside_source and src_dir == book_dir:
             source_path = beside_source
             source_snap = TagSnapshot.from_file(beside_source)
@@ -272,13 +274,13 @@ def plan_fix(
             if not fs_files:
                 fs_files = beside_source.name
         else:
-            source_path = _source_audio_file(src_dir, ignore_globs)
+            source_path = _source_audio_file(src_dir, ignore_globs, _files=source_files)
             if source_path is None:
                 raise SourceResolutionError(book_dir, f"no audio files in source dir {src_dir}")
             if src_dir != book_dir:
                 reasons_prefix = f"source from {src_dir}"
             source_snap = TagSnapshot.from_file(source_path)
-            common_title, common_title_reason = source_common_title(src_dir, ignore_globs)
+            common_title, common_title_reason = source_common_title(src_dir, ignore_globs, _files=source_files)
             if common_title:
                 source_snap.title = common_title
                 # Prefer common album too when titles were part-split
