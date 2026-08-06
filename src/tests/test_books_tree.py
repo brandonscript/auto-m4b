@@ -438,6 +438,151 @@ class test_tree_structures:
         for c in tree.children:
             xt.is_book_root(c)
 
+    def test_scorer_cache_is_scoped_to_tree_root(self, tmp_path):
+        from src.lib.scorers import cached_scorer
+
+        calls = 0
+
+        @cached_scorer
+        def score_structure(tree):
+            nonlocal calls
+            calls += 1
+            return tree.structure
+
+        first_tree = BooksTree(tmp_path, scan=False, determine_structure=False)
+        second_tree = BooksTree(tmp_path, scan=False, determine_structure=False)
+        first_tree.add_structures("flat")
+        second_tree.add_structures("nested")
+
+        assert score_structure(first_tree) == ("flat",)
+        assert score_structure(second_tree) == ("nested",)
+        assert calls == 2
+        assert score_structure(first_tree) == ("flat",)
+        assert calls == 2
+
+    def test_tick_skips_collection_when_debug_and_scorer_trace_are_disabled(self, tmp_path, monkeypatch):
+        from src.lib.config import cfg
+
+        original_env = cfg._env.copy()
+        try:
+            cfg._env["DEBUG"] = False
+            cfg._env["SCORER_TRACE"] = False
+            tree = BooksTree(tmp_path, scan=False, determine_structure=False)
+            ticks = tree.ticks
+            start_time = tree.start_time
+
+            def unexpected_clock_call():
+                pytest.fail("disabled tick collection should not read the clock")
+
+            monkeypatch.setattr("src.lib.books_tree.books_tree.time.time", unexpected_clock_call)
+
+            assert tree.tick("ignored") is None
+            assert tree.ticks is ticks
+            assert tree.ticks == []
+            assert tree.start_time == start_time
+        finally:
+            cfg._env.clear()
+            cfg._env.update(original_env)
+
+    def test_scorer_trace_records_cache_miss_and_hit(self, tmp_path):
+        from src.lib.config import cfg
+        from src.lib.scorers import cached_scorer
+
+        original_env = cfg._env.copy()
+        calls = 0
+
+        @cached_scorer
+        def score_value(tree):
+            nonlocal calls
+            calls += 1
+            return 0.75
+
+        try:
+            cfg._env["DEBUG"] = False
+            cfg._env["SCORER_TRACE"] = True
+            tree = BooksTree(tmp_path, scan=False, determine_structure=False)
+
+            assert score_value(tree) == 0.75
+            assert score_value(tree) == 0.75
+            assert calls == 1
+
+            events = [tick[2] for tick in tree.ticks]
+            assert events[0] == {
+                "cache": "miss",
+                "scorer": "score_value",
+                "path": str(tree.rel_path),
+                "elapsed_ms": events[0]["elapsed_ms"],
+            }
+            assert isinstance(events[0]["elapsed_ms"], float)
+            assert events[0]["elapsed_ms"] >= 0
+            assert events[1] == {
+                "cache": "hit",
+                "scorer": "score_value",
+                "path": str(tree.rel_path),
+            }
+        finally:
+            cfg._env.clear()
+            cfg._env.update(original_env)
+
+    def test_structure_mutation_bumps_scorer_epoch_once(self, tmp_path, monkeypatch):
+        from contextlib import contextmanager
+
+        from src.lib.scorers import cached_scorer
+
+        calls = 0
+        scopes = []
+
+        @cached_scorer
+        def score_structure(tree):
+            nonlocal calls
+            calls += 1
+            return tree.structure
+
+        tree = BooksTree(tmp_path, scan=False, determine_structure=False)
+        child = BooksTree.cast(tmp_path / "child", root=tree)
+        tree._dirs["child"] = child
+        original_scope = BooksTree._structure_mutation
+
+        @contextmanager
+        def counted_scope(self):
+            scopes.append(self)
+            with original_scope(self):
+                yield
+
+        monkeypatch.setattr(BooksTree, "_structure_mutation", counted_scope)
+
+        assert score_structure(tree) == ()
+        tree.add_structures("flat", recursive=True)
+
+        assert tree._scorer_cache_epoch == 1
+        assert scopes == [tree]
+        assert child.structure == ("flat",)
+        assert score_structure(tree) == ("flat",)
+        assert calls == 2
+
+    def test_rescan_bumps_scorer_epoch(self, tmp_path, monkeypatch):
+        from src.lib.scorers import _scorer_cache, cached_scorer
+
+        monkeypatch.setattr(_scorer_cache, "clear", lambda: None)
+        calls = 0
+
+        @cached_scorer
+        def score_children(tree):
+            nonlocal calls
+            calls += 1
+            return len(tree.children_recursive)
+
+        tree = BooksTree(tmp_path, scan=False, determine_structure=False)
+        tree.scan(scan_id3=False, determine_structure=False)
+        assert score_children(tree) == 0
+
+        (tmp_path / "track.mp3").touch()
+        tree.scan(scan_id3=False, determine_structure=False)
+
+        assert tree._scorer_cache_epoch == 2
+        assert score_children(tree) == 1
+        assert calls == 2
+
     def test_flat_book_with_embedded_chapter_nums_in_filenames(self):
         """A flat book whose filenames contain 'Chapter X.' patterns (like
         '05 - Chapter 1. Understanding Emotional Dysregulation.mp3') must be

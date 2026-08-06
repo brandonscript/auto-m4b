@@ -4,12 +4,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from functools import cached_property
+from contextvars import ContextVar
+from contextlib import contextmanager
+from functools import cached_property, wraps
 from pathlib import Path
 from typing import Any, cast, Literal, overload, Self, TYPE_CHECKING, TypeVar
+from uuid import uuid4
 
 from lazy.lazy import lazy
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.lib.books_tree.books_tree_summary import TreeNodeSummary
 from src.lib.books_tree.books_tree_utils import filter_matches, match_filter_path, match_filter_paths
@@ -27,6 +30,31 @@ if TYPE_CHECKING:
 
 
 F = TypeVar("F", bound="Callable[..., Any]")
+_structure_mutation_active: ContextVar[bool] = ContextVar(
+    "books_tree_structure_mutation_active",
+    default=False,
+)
+_config = None
+
+
+def _track_structure_mutation(func: F) -> F:
+    @wraps(func)
+    def wrapper(self: "BooksTree", *args, **kwargs):
+        if _structure_mutation_active.get():
+            return func(self, *args, **kwargs)
+        with self._structure_mutation():
+            return func(self, *args, **kwargs)
+
+    return cast(F, wrapper)
+
+
+def _should_collect_ticks() -> bool:
+    global _config
+    if _config is None:
+        from src.lib.config import cfg
+
+        _config = cfg
+    return _config.DEBUG or _config.SCORER_TRACE
 
 
 def requires_scan(func: F) -> F:
@@ -63,6 +91,10 @@ class BooksTree(BaseModel):
     id3_tags: Id3Tags | None = None
     start_time: float | None = None
     ticks: list[tuple[float, str, Any]] = Field(default_factory=list)
+    # Only roots own a scorer-cache namespace.  Child nodes use their root's
+    # namespace through the cache key, avoiding one UUID allocation per node.
+    _scorer_cache_namespace: str | None = PrivateAttr(default=None)
+    _scorer_cache_epoch: int = PrivateAttr(default=0)
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -104,6 +136,7 @@ class BooksTree(BaseModel):
         self._dirs: dict[str, "BooksTree"] = {}
 
         if self.root is None:
+            self._scorer_cache_namespace = uuid4().hex
             # Root nodes own the path index that maps absolute path strings to their
             # BooksTree nodes.  O(1) lookup replaces the previous O(n) linear scan
             # through children_recursive every time a child is constructed.
@@ -145,10 +178,22 @@ class BooksTree(BaseModel):
         self.root = None if self.root is None else BooksTree(self.root, scan=False)
 
     def tick(self, name: str, *args):
+        if not _should_collect_ticks():
+            return None
         if self.start_time is None:
             self.start_time = time.time()
         self.ticks.append((max(0, round(time.time() - self.start_time, 4)), name, *args))
         return self.ticks[-1]
+
+    @contextmanager
+    def _structure_mutation(self):
+        root = self.root or self
+        token = _structure_mutation_active.set(True)
+        try:
+            yield
+        finally:
+            root._scorer_cache_epoch += 1
+            _structure_mutation_active.reset(token)
 
     @classmethod
     def cast(
@@ -179,9 +224,9 @@ class BooksTree(BaseModel):
         from src.lib.fs_utils import filter_depth, filter_ignored, only_audio_files
         from src.lib.scorers import _scorer_cache, already_checked
 
-        self.start_time = time.time()
-
         root: Self | BooksTree = self if self.is_root or not self.root else self.root
+        root._scorer_cache_epoch += 1
+        self.start_time = time.time()
 
         if not self.is_root and not allow_non_root:
             raise RuntimeError("scan() should only be called on the root of the tree")
@@ -1057,6 +1102,7 @@ class BooksTree(BaseModel):
 
     #     return score_single_standalone_file(self)
 
+    @_track_structure_mutation
     def determine_structure(
         self,
         *,
@@ -1391,6 +1437,7 @@ class BooksTree(BaseModel):
     def has_only_structures_like(self, *structure: str):
         return all(re.search(s, str(self.structure), re.I) for s in structure)
 
+    @_track_structure_mutation
     def add_structures(
         self,
         *structure: BookStructure2,
@@ -1459,6 +1506,7 @@ class BooksTree(BaseModel):
 
         return self.structure
 
+    @_track_structure_mutation
     def remove_structures(
         self,
         *structure: BookStructure2,
@@ -1468,7 +1516,9 @@ class BooksTree(BaseModel):
         if not structure:
             raise ValueError("No structure provided when trying to remove structures")
 
-        self.structure = tuple([s for s in self.structure if s not in structure])
+        new_structure = tuple([s for s in self.structure if s not in structure])
+        if new_structure != self.structure:
+            self.structure = new_structure
         children = []
         match recursive:
             case "files":
@@ -1480,6 +1530,7 @@ class BooksTree(BaseModel):
         [c.remove_structures(*structure, recursive=recursive) for c in children]
         return self.structure
 
+    @_track_structure_mutation
     def set_structures(
         self,
         # *structure: "BookStructure2 | tuple[BookStructure2, ...]",
@@ -1496,8 +1547,10 @@ class BooksTree(BaseModel):
         self.add_structures(*structure, recursive=recursive)
         return self.structure
 
+    @_track_structure_mutation
     def clear_structure(self, recursive: bool | Literal["files", "dirs", "all", "none"] = False):
-        self.structure = ()
+        if self.structure:
+            self.structure = ()
         children = []
         match recursive:
             case "files":

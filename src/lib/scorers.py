@@ -1,7 +1,8 @@
 import functools
 import re
 import sys
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Hashable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeVar
@@ -74,28 +75,27 @@ already_checked = AlreadyChecked()
 
 
 class ScorerCache:
-    """Custom cache implementation for scorers that uses tree.path as key"""
+    """Custom cache implementation for scorer results with a bounded TTL."""
 
     def __init__(self, ttl_seconds: int = 300):  # 5 minutes TTL
-        self._cache: dict[str, tuple[Any, datetime]] = {}
+        self._cache: dict[Hashable, tuple[Any, datetime]] = {}
         self._ttl = timedelta(seconds=ttl_seconds)
 
-    def get(self, key: Path | None) -> Any | None:
+    def get(self, key: Hashable | None) -> Any | None:
         if not key:
             return None
-        str_key = str(key)
-        if str_key not in self._cache:
+        if key not in self._cache:
             return None
-        value, timestamp = self._cache[str_key]
+        value, timestamp = self._cache[key]
         if datetime.now() - timestamp > self._ttl:
-            del self._cache[str_key]
+            del self._cache[key]
             return None
         return value
 
-    def set(self, key: Path | None, value: Any) -> None:
+    def set(self, key: Hashable | None, value: Any) -> None:
         if not key:
             return
-        self._cache[str(key)] = (value, datetime.now())
+        self._cache[key] = (value, datetime.now())
 
     def clear(self) -> None:
         self._cache.clear()
@@ -106,12 +106,19 @@ _scorer_cache = ScorerCache()
 
 
 def cached_scorer(func: Callable[..., T]) -> Callable[..., T]:
-    """Custom decorator that caches scorer results using tree.path as key"""
+    """Cache scorer results within one tree root and structure/scan epoch."""
 
     @functools.wraps(func)
     def wrapper(tree: "BooksTree", *args: Any, **kwargs: Any) -> T:
+        from src.lib.config import cfg
+
+        root = tree.root or tree
+        trace = cfg.SCORER_TRACE
         # Create a unique cache key that includes the function name and args
-        cache_key = f"{func.__name__}:{tree.path}"
+        cache_key = (
+            f"{func.__name__}:{id(root)}:{root._scorer_cache_namespace}:"
+            f"{root._scorer_cache_epoch}:{tree.path}"
+        )
         if args:
             cache_key += f":{args}"
         if kwargs:
@@ -127,11 +134,28 @@ def cached_scorer(func: Callable[..., T]) -> Callable[..., T]:
                         sorted_kwargs.append(("already_checked_first", str(already_checked[0].path)))
             cache_key += f":{sorted_kwargs}"
 
-        cached_result = _scorer_cache.get(Path(cache_key))
+        cached_result = _scorer_cache.get(cache_key)
         if cached_result is not None:
+            if trace:
+                tree.tick(
+                    "scorer",
+                    {"cache": "hit", "scorer": func.__name__, "path": str(tree.rel_path)},
+                )
             return cached_result
+
+        start = time.perf_counter() if trace else 0.0
         result = func(tree, *args, **kwargs)
-        _scorer_cache.set(Path(cache_key), result)
+        _scorer_cache.set(cache_key, result)
+        if trace:
+            tree.tick(
+                "scorer",
+                {
+                    "cache": "miss",
+                    "scorer": func.__name__,
+                    "path": str(tree.rel_path),
+                    "elapsed_ms": round((time.perf_counter() - start) * 1000, 3),
+                },
+            )
         return result
 
     return wrapper

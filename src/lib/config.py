@@ -488,6 +488,11 @@ class Config:
 
     DEBUG = _DEBUG
 
+    @env_property(typ=bool, default=False)
+    def _SCORER_TRACE(self): ...
+
+    SCORER_TRACE = _SCORER_TRACE
+
     @env_property(typ=bool, default=True)
     def _BACKUP(self): ...
 
