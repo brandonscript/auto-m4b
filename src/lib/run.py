@@ -240,15 +240,16 @@ def print_footer(b: int):
 
 # @cachetools.func.ttl_cache(maxsize=1, ttl=SCAN_TTL)
 def audio_files_found():
-    from src.lib.fs_utils import only_audio_files, filter_ignored
+    from src.lib.fs_utils import any_audio_files_under
 
     inbox_dir = cfg.inbox_dir
     if not inbox_dir.exists():
         return False
     # Check disk directly rather than the filtered tree so that a match_filter
     # of "--none--" (which empties the tree) doesn't make the app think the
-    # inbox is empty when audio files are physically present.
-    return any(True for _ in only_audio_files(filter_ignored(inbox_dir.rglob("*"))))
+    # inbox is empty when audio files are physically present. Early-exit scandir
+    # avoids a full rglob when the first audio file is near the top of the tree.
+    return any_audio_files_under(inbox_dir)
 
 
 def fail_book(book: Audiobook, reason: str = "unknown"):

@@ -1174,21 +1174,102 @@ def inbox_was_recently_modified(within_seconds: float = 0) -> bool:
     return was_recently_modified(cfg.inbox_dir, within_seconds=within_seconds, only_file_exts=cfg.AUDIO_EXTS)
 
 
+def walk_dirs_and_files(path: Path) -> tuple[list[Path], list[Path], dict[Path, int]]:
+    """Recursively list paths via scandir, classifying dirs/files and capturing sizes.
+
+    Returns ``(dirs, files, file_sizes)``. Uses DirEntry metadata so callers avoid a
+    second ``Path.is_dir()`` / ``stat()`` pass (expensive over SMB).
+    """
+    dirs: list[Path] = []
+    files: list[Path] = []
+    sizes: dict[Path, int] = {}
+    try:
+        if not path.is_dir():
+            if path.is_file():
+                files.append(path)
+                try:
+                    sizes[path] = path.stat().st_size
+                except OSError:
+                    pass
+            return dirs, files, sizes
+    except OSError:
+        return dirs, files, sizes
+
+    dirs.append(path)
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    child = Path(entry.path)
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            dirs.append(child)
+                            pending.append(child)
+                        else:
+                            files.append(child)
+                            try:
+                                sizes[child] = entry.stat(follow_symlinks=False).st_size
+                            except OSError:
+                                pass
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return dirs, files, sizes
+
+
+def hash_path_from_file_sizes(
+    path: Path,
+    file_sizes: dict[Path, int],
+    *,
+    only_file_exts: list[str] = [],
+    debug: bool = False,
+    n: int = 8,
+) -> str:
+    """Hash ``relpath|size`` fingerprints from a prebuilt inventory (same digest as hash_path)."""
+    import hashlib
+
+    def make_hashable(f: Path, size: int | None) -> str:
+        if size is None or f.name.startswith(".") or (only_file_exts and f.suffix not in only_file_exts):
+            return ""
+        try:
+            return f"{f.relative_to(path)}|{size}"
+        except ValueError:
+            return ""
+
+    def hash_raw(*raw: str) -> str:
+        _s = raw[0] if len(raw) == 1 else ":".join(raw)
+        return sh(hashlib.md5(_s.encode()).hexdigest(), n)
+
+    fingerprint = isorted(
+        list(filter(None, [make_hashable(f, file_sizes.get(f)) for f in filter_ignored(list(file_sizes))]))
+    )
+    if debug:
+        return fingerprint  # type: ignore
+    return hash_raw(*fingerprint) if fingerprint else hash_raw("")
+
+
 def hash_path(path: Path, *, only_file_exts: list[str] = [], debug: bool = False, n: int = 8) -> str:
-    """Makes a has of the dir's contents of filenames and file sizes in an array, sorted by filename
+    """Makes a hash of the dir's contents of filenames and file sizes in an array, sorted by filename
     then hashes the array"""
     import hashlib
 
-    def make_hashable(f: Path) -> str:
-        if any(
-            [
-                not f.is_file(),
-                f.name.startswith("."),
-                only_file_exts and f.suffix not in only_file_exts,
-            ]
-        ):
+    def make_hashable(f: Path, size: int | None = None) -> str:
+        if f.name.startswith(".") or (only_file_exts and f.suffix not in only_file_exts):
             return ""
-        return f"{f.relative_to(path)}|{f.stat().st_size}"
+        if size is None:
+            try:
+                if not f.is_file():
+                    return ""
+                size = f.stat().st_size
+            except OSError:
+                return ""
+        try:
+            return f"{f.relative_to(path)}|{size}"
+        except ValueError:
+            return ""
 
     def hash_raw(*raw: str) -> str:
         _s = raw[0] if len(raw) == 1 else ":".join(raw)
@@ -1197,16 +1278,53 @@ def hash_path(path: Path, *, only_file_exts: list[str] = [], debug: bool = False
     if path.is_file():
         return hash_raw(make_hashable(path))
 
-    files = isorted(list(filter(None, [make_hashable(f) for f in filter_ignored(path.rglob("*"))])))
+    _dirs, files, sizes = walk_dirs_and_files(path)
+    fingerprint = isorted(
+        list(filter(None, [make_hashable(f, sizes.get(f)) for f in filter_ignored(files)]))
+    )
     if debug:
-        return files  # type: ignore
-    return hash_raw(*files)
+        return fingerprint  # type: ignore
+    return hash_raw(*fingerprint) if fingerprint else hash_raw("")
 
 
 def hash_path_audio_files(path: Path, *, debug: bool = False) -> str:
     """Makes a hash of the path's audio files' filenames and file sizes in an array, sorted by filename
     then hashes the array"""
     return hash_path(path, only_file_exts=AUDIO_EXTS, debug=debug)
+
+
+def any_audio_files_under(path: Path) -> bool:
+    """True if any non-ignored audio file exists under path (early-exit scandir walk)."""
+    from src.lib.config import cfg
+
+    if not path.exists():
+        return False
+    try:
+        if path.is_file():
+            return bool(only_audio_files(filter_ignored([path])))
+    except OSError:
+        return False
+
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    child = Path(entry.path)
+                    # Cheap ignore: skip ignored names before descending.
+                    if any(fnmatch.filter([child.name], pat) for pat in cfg.IGNORE_FILES):
+                        continue
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(child)
+                        elif is_audio_file(child) and not any(part.startswith(".") for part in child.parts):
+                            return True
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return False
 
 
 def audio_fingerprints_match(path_a: Path, path_b: Path) -> bool:

@@ -58,7 +58,8 @@ def _probe_audio_tech(path_str: str) -> AudioTechProbe:
         sample_rate = 0
 
     has_pic = any(
-        (s.get("disposition") or {}).get("attached_pic") or s.get("codec_type") == "video" for s in streams
+        s.get("codec_name") in ("mjpeg", "png") and (s.get("disposition") or {}).get("attached_pic")
+        for s in streams
     )
     return AudioTechProbe(duration, bitrate, sample_rate, bool(has_pic))
 

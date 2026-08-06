@@ -43,8 +43,11 @@ class Hasher:
             return last_updated_audio_files_at(self.path)
 
     def scan(self):
+        self.record_hash(self.next_hash)
+
+    def record_hash(self, new_hash: str):
+        """Record a precomputed fingerprint without walking the filesystem again."""
         with threading.Lock():
-            new_hash = self.next_hash
             if new_hash != self.curr_hash:
                 self._hashes.insert(0, (new_hash, time.time()))
                 if len(self._hashes) > self.max_hashes:
