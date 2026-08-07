@@ -348,8 +348,8 @@ class Config:
     def _MAX_PROBE_THREADS(self):
         """Parallel workers for post-encode duration/title probes.
 
-        0 / unset = ``min(CPU_CORES, 16)``. Caps concurrent ffprobe/mutagen
-        reads after per-chapter encode.
+        0 / unset = ``max(min(CPU_CORES, 16), 4)`` (clamp to 4–16).
+        Caps concurrent ffprobe/mutagen reads after per-chapter encode.
         """
         ...
 
@@ -360,7 +360,8 @@ class Config:
         """Resolved probe pool size for merge post-encode I/O."""
         if self.MAX_PROBE_THREADS and self.MAX_PROBE_THREADS > 0:
             return max(1, int(self.MAX_PROBE_THREADS))
-        return min(max(1, int(self.CPU_CORES or 1)), 16)
+        # Floor at 4 so tiny hosts still parallelize probes; cap at 16.
+        return max(min(int(self.CPU_CORES or 1), 16), 4)
 
     @env_property(typ=int, default=1)
     def _MAX_CONVERT_JOBS(self):
