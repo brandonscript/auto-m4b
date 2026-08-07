@@ -308,11 +308,62 @@ def write_mp3_tags(
         raise HeaderNotFoundError(f"Error: Could not load '{file}' for tagging, it may be corrupt or not an audio file")
 
 
+def _read_m4b_tags_for_verify(m4b_path: Path) -> Any:
+    """Tag-only snapshot of a converted m4b — no provider re-lookup."""
+    from types import SimpleNamespace
+
+    from src.lib.ffmpeg_utils import probe_audio_tech
+    from src.lib.id3_tags import Id3Tags
+
+    tags = Id3Tags.from_file(m4b_path, throw=False)
+    data = (tags.to_dict() if tags else {}) or {}
+    has_cover = False
+    try:
+        has_cover = probe_audio_tech(m4b_path).has_attached_pic or bool(_extract_cover_art_mutagen(m4b_path))
+    except Exception:
+        has_cover = bool(_extract_cover_art_mutagen(m4b_path))
+    return SimpleNamespace(
+        id3_title=data.get("title") or "",
+        id3_artist=data.get("artist") or "",
+        id3_album=data.get("album") or "",
+        id3_albumartist=data.get("albumartist") or "",
+        id3_composer=data.get("composer") or "",
+        id3_date=data.get("date") or "",
+        id3_comment=data.get("comment") or "",
+        id3_sortalbum=data.get("sortalbum") or "",
+        has_id3_cover=has_cover,
+    )
+
+
+def _early_still_matches_gr(book: "Audiobook", early_gr: "MetadataCandidate | None") -> bool:
+    from src.lib.ol_lookup import _title_sim
+
+    if not early_gr or early_gr.status != "match" or not early_gr.title:
+        return False
+    if _title_sim(book.title or "", early_gr.title)[0] < 0.85:
+        return False
+    if early_gr.author and _title_sim(book.author or book.artist or "", early_gr.author)[0] < 0.85:
+        return False
+    return True
+
+
+def _early_still_matches_ol(book: "Audiobook", early_ol: Any) -> bool:
+    from src.lib.ol_lookup import _title_sim
+
+    if not early_ol or not getattr(early_ol, "has_match", False):
+        return False
+    ol_title = getattr(early_ol, "title", "") or ""
+    ol_author = getattr(early_ol, "author", "") or ""
+    if not ol_title or _title_sim(book.title or "", ol_title)[0] < 0.85:
+        return False
+    if ol_author and _title_sim(book.author or book.artist or "", ol_author)[0] < 0.85:
+        return False
+    return True
+
+
 def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "converted"]) -> None:
     # takes the inbound book, then checks the converted file and verifies that the id3 tags match the extracted metadata
     # if they do not match, it will print a notice and update the id3 tags
-
-    from src.lib.audiobook import Audiobook
 
     m4b_to_check = book.converted_file if in_dir == "converted" else book.build_file
 
@@ -332,7 +383,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
             book.album = _strip_ol_edition_suffix(book.album)
     ensure_title_and_album(book)
 
-    book_to_check = Audiobook(m4b_to_check).extract_metadata()
+    book_to_check = _read_m4b_tags_for_verify(m4b_to_check)
 
     title_needs_updating = False
     author_needs_updating = False
@@ -348,25 +399,28 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     new_tags.pop("track_num", None)
     new_tags.pop("disc_num", None)
 
-    ol_author_candidates = [
-        (open_library_lookup_author(book.author, method="score"), "author"),
-        (open_library_lookup_author(book.author, method="similarity"), "author"),
-        (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
-    ]
-    ol_title = open_library_lookup_title(book.title, author=book.author, narrator=book.narrator, method="similarity")
-    ol_status = ol_match_band(ol_title)
-    goodreads_match = lookup_metadata(
-        book.title,
-        author=book.author,
-        narrator=book.narrator,
-        lookup_goodreads=True,
-        lookup_open_library=False,
-    ).selected
+    from src.lib.ol_lookup import _title_sim
+
+    early_gr = getattr(book, "_early_gr", None)
+    early_ol = getattr(book, "_early_ol", None)
+
+    if _early_still_matches_gr(book, early_gr):
+        goodreads_match = early_gr
+        print_debug("verify: reusing early Goodreads match")
+    else:
+        goodreads_match = lookup_metadata(
+            book.title,
+            author=book.author,
+            narrator=book.narrator,
+            lookup_goodreads=True,
+            lookup_open_library=False,
+        ).selected
+
     if goodreads_match and goodreads_match.status == "match":
-        if ol_title and (
-            _title_sim(goodreads_match.title, ol_title.title)[0] < 0.85
-            or _title_sim(goodreads_match.author, ol_title.author)[0] < 0.85
-            or (goodreads_match.year and ol_title.date and goodreads_match.year != ol_title.date)
+        if early_ol and getattr(early_ol, "has_match", False) and (
+            _title_sim(goodreads_match.title, early_ol.title)[0] < 0.85
+            or _title_sim(goodreads_match.author, early_ol.author)[0] < 0.85
+            or (goodreads_match.year and early_ol.date and goodreads_match.year != early_ol.date)
         ):
             print_debug(
                 "Goodreads/Open Library disagreement during verification; "
@@ -383,6 +437,22 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         ol_title = None
         ol_author_candidates = []
         ol_status = "none"
+    elif _early_still_matches_ol(book, early_ol):
+        ol_title = early_ol
+        ol_status = ol_match_band(ol_title)
+        ol_author_candidates = []
+        print_debug("verify: reusing early Open Library match")
+    else:
+        ol_author_candidates = [
+            (open_library_lookup_author(book.author, method="score"), "author"),
+            (open_library_lookup_author(book.author, method="similarity"), "author"),
+            (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
+        ]
+        ol_title = open_library_lookup_title(
+            book.title, author=book.author, narrator=book.narrator, method="similarity"
+        )
+        ol_status = ol_match_band(ol_title)
+
     shared_ol_title = ""
     if ol_status in ("match", "low_confidence") and not book.path.is_file():
         from src.lib.config import cfg
@@ -414,7 +484,10 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
             fs_files=book.orig_file_name,
         )
         if cfg.OPEN_LIBRARY_USER_AGENT:
-            _attach_open_library(shared_plan, minimalist=True)
+            ol_ref = None
+            if early_ol and getattr(early_ol, "has_match", False):
+                ol_ref = getattr(early_ol, "key", None) or None
+            _attach_open_library(shared_plan, minimalist=True, ol_ref=ol_ref)
             if shared_plan.ol_status in ("match", "low_confidence", "forced"):
                 shared_ol_title = shared_plan.desired_title
                 if shared_plan.desired_author:
@@ -791,7 +864,11 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
             return dest
         return data
 
-    # 1. Prefer ffmpeg stream demux when attached_pic streams are present.
+    # 1. Prefer mutagen covr/APIC — avoids O(filesize) ffmpeg mdat demux on large m4b/SMB.
+    if mutagen_cover := _extract_cover_art_mutagen(path):
+        return _finish(*mutagen_cover)
+
+    # 2. Fallback: ffmpeg stream demux when attached_pic streams are present but mutagen cannot read them.
     try:
         from src.lib.constants import COVER_STREAM_CODECS
 
@@ -821,7 +898,6 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                         subprocess.check_output([*common_steps, dest])
                         if dest.is_file() and dest.stat().st_size > 0:
                             return dest
-                        # ffmpeg reported success but wrote nothing usable — try mutagen
                         continue
                     pipe_vcodec = {"png": "png", "webp": "webp"}.get(content_type or "", "mjpeg")
                     data = subprocess.check_output(
@@ -839,10 +915,6 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
     except (KeyError, subprocess.CalledProcessError, OSError):
         if cfg.DEBUG:
             print_debug(f"Could not extract cover art from {file}'s streams")
-
-    # 2. Mutagen fallback for covr/APIC atoms ffmpeg cannot demux.
-    if mutagen_cover := _extract_cover_art_mutagen(path):
-        return _finish(*mutagen_cover)
 
     return out_file.with_suffix(".jpg") if save_to_file else b""
 
@@ -1115,6 +1187,9 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
             if variant and variant not in title_cands:
                 title_cands.append(variant)
 
+    # Cap fan-out: enough variants for anthology/story cases without unbounded RTTs.
+    title_cands = title_cands[:4]
+
     if not title_cands:
         return None
 
@@ -1202,6 +1277,8 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     best_ol: "OpenLibraryTitle | None" = None
     best_score = 0.0
     best_query = ""
+    title_lookups = 0
+    max_title_lookups = 8
 
     # Never title-only when we have a preferred author — that is how Toyne/Storr wins.
     author_hints: list[str | None]
@@ -1217,6 +1294,9 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
 
     for title_cand in title_cands:
         for author_hint in author_hints:
+            if title_lookups >= max_title_lookups:
+                break
+            title_lookups += 1
             ol = open_library_lookup_title(
                 title_cand,
                 author=author_hint,
@@ -1283,7 +1363,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
                 best_query = title_cand
             if best_score >= 0.9:
                 break
-        if best_score >= 0.9:
+        if best_score >= 0.9 or title_lookups >= max_title_lookups:
             break
 
     if best_ol is None or not best_ol.title or not best_ol.author:
@@ -1366,7 +1446,11 @@ def _goodreads_early_extraction(
     return result
 
 
-def _bookpeek_early_extraction(book: "Audiobook") -> MetadataCandidate | None:
+def _bookpeek_early_extraction(
+    book: "Audiobook",
+    *,
+    online: bool | None = None,
+) -> MetadataCandidate | None:
     """Optional bookpeek ASR/Audnexus signal (narrator + fallback title/author)."""
     from pathlib import Path
 
@@ -1384,10 +1468,41 @@ def _bookpeek_early_extraction(book: "Audiobook") -> MetadataCandidate | None:
         return None
     if not sample:
         return None
-    result = scan_bookpeek(Path(sample))
+    result = scan_bookpeek(Path(sample), online=online)
     if result is None:
         return None
     return bookpeek_to_candidate(result)
+
+
+def _early_narrator_hint(book: "Audiobook", tag1: Any, tag2: Any, *, author: str = "") -> str:
+    """Cheap local narrator guess used to gate bookpeek ASR before full heuristics."""
+
+    def _clean(v: str) -> str:
+        return _READ_BY_PATTERN.sub("", (v or "").strip()).strip()
+
+    author_l = (author or "").strip().lower()
+    for v in [
+        book.fs_narrator,
+        book.id3_composer,
+        getattr(tag2, "composer", None),
+        tag1.composer,
+    ]:
+        cleaned = _clean(v or "")
+        if cleaned and cleaned.lower() != author_l:
+            return cleaned
+    # tag2.artist is only a narrator hint when it differs from the known author
+    # (multi-file books sometimes put the narrator on later tracks).
+    for v in [getattr(tag2, "artist", None)]:
+        cleaned = _clean(v or "")
+        if cleaned and author_l and cleaned.lower() != author_l:
+            return cleaned
+    for v in [tag1.artist, tag1.composer]:
+        raw = (v or "").strip()
+        if raw and _READ_BY_PATTERN.search(raw):
+            cleaned = _clean(raw)
+            if cleaned and cleaned.lower() != author_l:
+                return cleaned
+    return ""
 
 
 def _narrator_from_remaining_tags(book: "Audiobook") -> str:
@@ -1510,14 +1625,23 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     )
 
     # ── Provider-first extraction ──────────────────────────────────────────────
-    # Query both enabled providers before heuristic scoring. Goodreads wins when
-    # confident; Open Library remains the fallback.
+    # Query OL + GR in parallel before heuristic scoring. Goodreads wins when
+    # confident; Open Library remains the fallback. bookpeek runs after only when
+    # needed (narrator fill or no GR/OL), so ASR does not block every convert.
     # OL knows the canonical title/author, so a confident match avoids
     # misassigning fields (e.g. album="Laurie R. King", title="The God of
     # the Hive" → OL confirms title and author rather than guessing).
-    ol_match = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
-    goodreads_match = _goodreads_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
-    bookpeek_match = _bookpeek_early_extraction(book)
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.lib.metadata.bookpeek_provider import bookpeek_enabled
+    from src.lib.ol_lookup import _title_sim
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ol_fut = pool.submit(_ol_early_extraction, book, sample_audio1_tags, sample_audio2_tags)
+        gr_fut = pool.submit(_goodreads_early_extraction, book, sample_audio1_tags, sample_audio2_tags)
+        ol_match = ol_fut.result()
+        goodreads_match = gr_fut.result()
+
     provider_resolved = goodreads_match is not None or ol_match is not None
     if goodreads_match:
         if ol_match and (
@@ -1535,7 +1659,27 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
         if goodreads_match.author:
             book.artist = goodreads_match.author
             book.albumartist = goodreads_match.author
-    elif not provider_resolved and bookpeek_match and bookpeek_match.status == "match" and bookpeek_match.title:
+
+    bookpeek_match = None
+    if bookpeek_enabled():
+        author_now = (book.artist or "").strip()
+        # If OL/GR resolved but mocks/return-only left artist empty, use match author.
+        if not author_now and goodreads_match and goodreads_match.author:
+            author_now = goodreads_match.author.strip()
+        if not author_now and ol_match and getattr(ol_match, "author", None):
+            author_now = str(ol_match.author).strip()
+        narr_hint = _early_narrator_hint(
+            book, sample_audio1_tags, sample_audio2_tags, author=author_now
+        )
+        if provider_resolved and narr_hint and author_now and narr_hint.lower() != author_now.lower():
+            print_debug("bookpeek: skip ASR (GR/OL resolved with local narrator)")
+        elif provider_resolved:
+            # Need narrator/ASIN only — skip nested GR/OL inside bookpeek.
+            bookpeek_match = _bookpeek_early_extraction(book, online=False)
+        else:
+            bookpeek_match = _bookpeek_early_extraction(book)
+
+    if not provider_resolved and bookpeek_match and bookpeek_match.status == "match" and bookpeek_match.title:
         # Fallback only when GR/OL did not resolve
         book.title = _normalize_ol_title(bookpeek_match.title)
         book.album = book.title
@@ -1545,6 +1689,19 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             book.albumartist = bookpeek_match.author
         provider_resolved = True
         print_debug(f"bookpeek fallback title/author: {book.title!r} / {book.artist!r}")
+
+    if goodreads_match:
+        book._early_resolved_by = "goodreads"
+    elif ol_match:
+        book._early_resolved_by = "openlibrary"
+    elif bookpeek_match and bookpeek_match.status == "match" and bookpeek_match.title:
+        book._early_resolved_by = "bookpeek"
+    else:
+        book._early_resolved_by = None
+    book._early_ol = ol_match
+    book._early_gr = goodreads_match
+    book._early_bookpeek = bookpeek_match
+
     if provider_resolved:
         if re.search(r"\s{2,}", book.basename):
             folder_title = re.split(r"\s{2,}", book.basename, maxsplit=1)[-1].strip()

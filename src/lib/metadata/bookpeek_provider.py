@@ -4,17 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING
 
+from cachetools import TTLCache
 from rapidfuzz import fuzz
 
 from src.lib.config import cfg
 from src.lib.term import print_debug, print_warning
+from src.lib.typing import MEMO_TTL
 
 if TYPE_CHECKING:
     from bookpeek.models import BookPeekResult
 
     from src.lib.metadata.providers import MetadataCandidate, MetadataComparison
+
+_BOOKPEEK_SCAN_CACHE: TTLCache[tuple[object, ...], object] = TTLCache(maxsize=64, ttl=MEMO_TTL)
+_BOOKPEEK_SCAN_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,17 @@ def bookpeek_enabled() -> bool:
 def bookpeek_should_run_online() -> bool:
     """Online by default when auto-m4b already has GR and/or OL user agents."""
     return bool(cfg.GOODSCRAPS_USER_AGENT or cfg.OPEN_LIBRARY_USER_AGENT)
+
+
+def clear_bookpeek_scan_cache() -> None:
+    with _BOOKPEEK_SCAN_LOCK:
+        _BOOKPEEK_SCAN_CACHE.clear()
+
+
+def _bookpeek_scan_cache_key(audio_path: Path, online: bool) -> tuple[object, ...]:
+    path = Path(audio_path)
+    st = path.stat()
+    return (str(path.resolve()), st.st_size, st.st_mtime_ns, online)
 
 
 def build_bookpeek_config():
@@ -70,12 +87,28 @@ def scan_bookpeek(audio_path: Path, *, online: bool | None = None) -> BookPeekRe
 
     run_online = bookpeek_should_run_online() if online is None else online
     try:
+        cache_key = _bookpeek_scan_cache_key(Path(audio_path), run_online)
+    except OSError:
+        cache_key = None
+    if cache_key is not None:
+        with _BOOKPEEK_SCAN_LOCK:
+            cached = _BOOKPEEK_SCAN_CACHE.get(cache_key)
+        if cached is not None:
+            print_debug(f"bookpeek: cache hit for {Path(audio_path).name}")
+            return cached  # type: ignore[return-value]
+
+    try:
         client = BookPeek(build_bookpeek_config())
-        return client.scan(Path(audio_path), online=run_online)
+        result = client.scan(Path(audio_path), online=run_online)
     except Exception as exc:
         print_warning(f"bookpeek scan failed for {Path(audio_path).name}: {exc}")
         print_debug(f"bookpeek error detail: {exc!r}")
         return None
+
+    if result is not None and cache_key is not None:
+        with _BOOKPEEK_SCAN_LOCK:
+            _BOOKPEEK_SCAN_CACHE[cache_key] = result
+    return result
 
 
 def _similarity(left: str, right: str) -> float:

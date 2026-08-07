@@ -23,6 +23,39 @@ from src.lib.audiobook import Audiobook
 from src.lib.misc import get_git_root, load_env
 
 
+# Host/Phantom shells often export these; tests must use .env.test defaults unless
+# a test explicitly monkeypatches them. Empty .env.test values pop the key.
+_TEST_ISOLATED_ENV_KEYS = (
+    "CLEANUP_FILENAMES",
+    "BOOKPEEK",
+    "COVER_OCR",
+    "OPEN_LIBRARY_USER_AGENT",
+    "GOODSCRAPS_USER_AGENT",
+)
+
+
+def _apply_test_env_isolation() -> None:
+    """Force metadata toggles to test defaults and drop stale cfg._env entries.
+
+    Host/Phantom shells often export CLEANUP_FILENAMES / provider user-agents.
+    ``load_env`` writes ``os.environ`` for keys in ``.env.test`` but does not
+    invalidate ``cfg._env``, so a value read from the host before the session
+    fixture (or left by a prior test) can stick. Explicitly reset the isolated
+    keys and clear the cache so the next property access re-reads test defaults.
+    """
+    from src.lib.config import cfg
+    from src.lib.misc import set_typed_env_var
+
+    # Booleans default off; empty user-agents disable live provider lookups.
+    set_typed_env_var("CLEANUP_FILENAMES", "N")
+    set_typed_env_var("BOOKPEEK", "N")
+    set_typed_env_var("COVER_OCR", "N")
+    set_typed_env_var("OPEN_LIBRARY_USER_AGENT", "")
+    set_typed_env_var("GOODSCRAPS_USER_AGENT", "")
+    for key in _TEST_ISOLATED_ENV_KEYS:
+        cfg._env.pop(key, None)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def setup_teardown():
     from src.lib.config import cfg
@@ -38,6 +71,7 @@ def setup_teardown():
 
     with testutils.set_on_complete("test_do_nothing"):
         load_env(GIT_ROOT / ".env.test", clean_working_dirs=True)
+        _apply_test_env_isolation()
 
         yield
 
@@ -103,6 +137,7 @@ def _clear_all_caches():
 @pytest.fixture(autouse=True, scope="function")
 def clear_scorer_caches():
     _clear_all_caches()
+    _apply_test_env_isolation()
     # Clean inbox before each test to prevent leftover fixtures from accumulating
     # and causing BooksTree scans to hang on a polluted inbox.
     for item in TEST_DIRS.inbox.iterdir() if TEST_DIRS.inbox.exists() else []:
