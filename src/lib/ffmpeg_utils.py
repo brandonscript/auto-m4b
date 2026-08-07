@@ -57,8 +57,10 @@ def _probe_audio_tech(path_str: str) -> AudioTechProbe:
     except (TypeError, ValueError):
         sample_rate = 0
 
+    from src.lib.constants import COVER_STREAM_CODECS
+
     has_pic = any(
-        s.get("codec_name") in ("mjpeg", "png") and (s.get("disposition") or {}).get("attached_pic")
+        s.get("codec_name") in COVER_STREAM_CODECS and (s.get("disposition") or {}).get("attached_pic")
         for s in streams
     )
     return AudioTechProbe(duration, bitrate, sample_rate, bool(has_pic))

@@ -1,13 +1,32 @@
 AUDIO_EXTS = [".mp3", ".m4a", ".m4b", ".aac", ".wma"]
-OTHER_EXTS = [
+# Sidecar / folder cover images we will discover. Formats outside JPEG/PNG are
+# normalized to JPEG before mutagen/ffmpeg embedding (containers only accept those).
+IMAGE_EXTS = [
     ".jpg",
     ".jpeg",
+    ".jpe",
+    ".jfif",
     ".png",
+    ".apng",
+    ".webp",
+    ".avif",
+    ".avifs",
+    ".heic",
+    ".heif",
     ".gif",
     ".bmp",
+    ".dib",
+    ".tif",
     ".tiff",
-    ".webp",
-    ".heic",
+    ".jp2",
+    ".j2k",
+    ".jpf",
+    ".jpx",
+]
+# Codecs ffprobe may report for attached_pic / cover streams.
+COVER_STREAM_CODECS = frozenset({"mjpeg", "png", "webp", "bmp", "gif"})
+OTHER_EXTS = [
+    *IMAGE_EXTS,
     ".svg",
     ".epub",
     ".mobi",

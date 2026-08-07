@@ -1018,10 +1018,11 @@ def find_next_audio_file(
 
 
 def find_cover_art_file(path: Path) -> Path | None:
-    supported_image_exts = [".jpg", ".jpeg", ".png"]
-    all_images_in_dir = [f for f in path.rglob("*") if f.suffix in supported_image_exts]
+    from src.lib.constants import IMAGE_EXTS
 
-    # Prefer files named cover/folder (match stem so cover.png / folder.jpg work)
+    all_images_in_dir = [f for f in path.rglob("*") if f.suffix.lower() in IMAGE_EXTS]
+
+    # Prefer files named cover/folder (match stem so cover.webp / folder.avif work)
     img = next((i for i in all_images_in_dir if i.stem.lower() in ["cover", "folder"]), None)
 
     # otherwise, find the biggest image

@@ -190,18 +190,21 @@ def write_m4b_tags(
         f["\xa9cmt"] = comment
         f["\xa9too"] = "brandonscript/auto-m4b"
 
-        # if cover exists, determine if it is jpg or png and set it
+        # if cover exists, normalize to JPEG/PNG (mutagen only accepts those) and set it
         if cover and cover.is_file():
-            with open(cover, "rb") as img_in:
+            from src.lib.cover_images import ensure_embeddable_cover
+
+            embed_cover = ensure_embeddable_cover(cover)
+            with open(embed_cover, "rb") as img_in:
                 image_data = img_in.read()
 
-            if cover.suffix in [".jpg", ".jpeg"]:
+            suffix = embed_cover.suffix.lower()
+            if suffix in {".jpg", ".jpeg"}:
                 mime_type = MP4Cover.FORMAT_JPEG
-            elif cover.suffix == ".png":
+            elif suffix == ".png":
                 mime_type = MP4Cover.FORMAT_PNG
             else:
-                raise IOError(f"Error: Could not set cover art, '{cover}' is not a valid .jpg or .png file")
-                return
+                raise IOError(f"Error: Could not set cover art, '{cover}' is not a supported image file")
             f["covr"] = [MP4Cover(image_data, mime_type)]
 
         f.save()
@@ -276,18 +279,21 @@ def write_mp3_tags(
 
         f.save()
 
-        # if cover exists, determine if it is jpg or png and set it
+        # if cover exists, normalize to JPEG/PNG (APIC only accepts those) and set it
         if cover and cover.is_file() and (f := ID3(file)):
-            with open(cover, "rb") as img_in:
+            from src.lib.cover_images import ensure_embeddable_cover
+
+            embed_cover = ensure_embeddable_cover(cover)
+            with open(embed_cover, "rb") as img_in:
                 image_data = img_in.read()
 
-            if cover.suffix == ".jpg":
+            suffix = embed_cover.suffix.lower()
+            if suffix in {".jpg", ".jpeg"}:
                 mime_type = "image/jpeg"
-            elif cover.suffix == ".png":
+            elif suffix == ".png":
                 mime_type = "image/png"
             else:
-                raise IOError(f"Error: Could not set cover art, '{cover}' is not a valid .jpg or .png file")
-                return
+                raise IOError(f"Error: Could not set cover art, '{cover}' is not a supported image file")
             image = APIC(
                 encoding=3,
                 mime=mime_type,
@@ -787,12 +793,17 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
 
     # 1. Prefer ffmpeg stream demux when attached_pic streams are present.
     try:
+        from src.lib.constants import COVER_STREAM_CODECS
+
         if ffresult := ffprobe_file(path):
-            # find a stream that is jpg or png and has a disposition of attached_pic
+            # Prefer common still-image cover codecs with attached_pic disposition.
             for stream in ffresult.get("streams", []):
-                if stream.get("codec_name") in ["mjpeg", "png"] and stream.get("disposition", {}).get("attached_pic"):
-                    content_type = stream.get("codec_name")
-                    ext: Literal["jpg", "png"] = "png" if content_type == "png" else "jpg"
+                codec = stream.get("codec_name")
+                if codec in COVER_STREAM_CODECS and stream.get("disposition", {}).get("attached_pic"):
+                    content_type = codec
+                    ext: Literal["jpg", "png", "webp"] = (
+                        "png" if content_type == "png" else "webp" if content_type == "webp" else "jpg"
+                    )
                     common_steps = [
                         "ffmpeg",
                         "-hide_banner",
@@ -812,13 +823,14 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
                             return dest
                         # ffmpeg reported success but wrote nothing usable — try mutagen
                         continue
+                    pipe_vcodec = {"png": "png", "webp": "webp"}.get(content_type or "", "mjpeg")
                     data = subprocess.check_output(
                         [
                             *common_steps,
                             "-f",
                             "image2pipe",
                             "-vcodec",
-                            "png" if content_type == "png" else "mjpeg",
+                            pipe_vcodec,
                             "-",
                         ]
                     )

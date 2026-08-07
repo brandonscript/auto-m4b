@@ -176,6 +176,11 @@ def _embed_metadata_and_cover(
     ]
 
     if cover and cover.is_file():
+        # Normalize modern codecs (webp/avif/heic/…) to JPEG — ffmpeg AVIF/HEIC
+        # decode is unreliable, and mutagen only accepts JPEG/PNG.
+        from src.lib.cover_images import ensure_embeddable_cover
+
+        cover = ensure_embeddable_cover(cover, dest=output.parent / f"{output.stem}.cover.jpg")
         cmd += ["-i", str(cover)]
         cmd += [
             "-map",
