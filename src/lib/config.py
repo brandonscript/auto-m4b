@@ -821,4 +821,12 @@ class Config:
 
 cfg = Config()
 
+try:
+    from fixm4b.settings import set_settings, settings_from_cfg
+
+    set_settings(settings_from_cfg(cfg))
+except Exception:
+    # Standalone / early import before fixm4b is available.
+    pass
+
 __all__ = ["cfg"]

@@ -74,10 +74,10 @@ def _stem_matches_book_title(stem: str, title: str, author: str = "") -> bool:
     matches title ``The Searcher: A Novel``. Trailing ``(YYYY)`` on the stem is
     ignored for the comparison so a yearful filename still matches a yearless title.
     """
-    from src.lib.ol_lookup import _subtitle_sep_normalized
+    from src.lib.ol_lookup import subtitle_sep_normalized
 
     s_bare = _YEAR_SUFFIX.sub("", stem or "").strip()
-    s_norm = _subtitle_sep_normalized(s_bare)
+    s_norm = subtitle_sep_normalized(s_bare)
     if not s_norm:
         return False
     candidates: list[str] = []
@@ -91,7 +91,7 @@ def _stem_matches_book_title(stem: str, title: str, author: str = "") -> bool:
         candidates.append(f"{a} - {title_fs}")
         candidates.append(safe_filename(f"{a} - {t}"))
     for c in candidates:
-        if c and s_norm == _subtitle_sep_normalized(c):
+        if c and s_norm == subtitle_sep_normalized(c):
             return True
     return False
 

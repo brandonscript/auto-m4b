@@ -72,7 +72,7 @@ def test_strip_boundary_number_keeps_meaningful_title_only():
 
 def test_numeric_title_lookup_uses_stripped_fallback():
     with (
-        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
             "src.lib.ol_lookup.requests.get",
             side_effect=_mock_title_search({"elantris": [_ol_doc("/works/OL5738147W", "Elantris")]}),
@@ -87,7 +87,7 @@ def test_numeric_title_lookup_uses_stripped_fallback():
 
 def test_leading_numeric_title_lookup_uses_stripped_fallback():
     with (
-        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
             "src.lib.ol_lookup.requests.get",
             side_effect=_mock_title_search({"elantris": [_ol_doc("/works/OL5738147W", "Elantris")]}),
@@ -101,7 +101,7 @@ def test_leading_numeric_title_lookup_uses_stripped_fallback():
 
 def test_numeric_title_lookup_prefers_original_numbered_title():
     with (
-        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
             "src.lib.ol_lookup.requests.get",
             side_effect=_mock_title_search(
@@ -121,7 +121,7 @@ def test_numeric_title_lookup_prefers_original_numbered_title():
 
 def test_numeric_title_lookup_rejects_ambiguous_numbered_fallbacks():
     with (
-        patch("src.lib.ol_lookup._get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
             "src.lib.ol_lookup.requests.get",
             side_effect=_mock_title_search(

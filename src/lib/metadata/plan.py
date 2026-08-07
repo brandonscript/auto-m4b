@@ -37,20 +37,20 @@ from src.lib.metadata.apply import _desc_needs_rewrite
 
 def _apply_cleanup_filename(plan: FixPlan, local_title: str) -> None:
     """Prefer a near-identical Open Library title for cleaned filenames."""
-    from src.lib.config import cfg
+    from src.lib.metadata.settings import get_settings
 
-    if not cfg.CLEANUP_FILENAMES:
+    if not get_settings().cleanup_filenames:
         return
 
     article_variant = is_trailing_article_variant(local_title, plan.ol_title)
     numeric_local_title = None
     if plan.ol_title:
-        from src.lib.ol_lookup import _strip_boundary_number, _title_sim
+        from src.lib.ol_lookup import strip_boundary_number, title_sim
 
-        numeric_local_title = _strip_boundary_number(local_title)
+        numeric_local_title = strip_boundary_number(local_title)
         numeric_fallback = bool(
             numeric_local_title
-            and _title_sim(numeric_local_title, plan.ol_title)[0] >= 0.9
+            and title_sim(numeric_local_title, plan.ol_title)[0] >= 0.9
         )
     else:
         numeric_fallback = False
@@ -411,9 +411,10 @@ def plan_fix(
         stem = yearful
 
     # fix-metadata must not rename files unless explicit cleanup was enabled.
-    from src.lib.config import cfg
+    from src.lib.metadata.settings import get_settings
 
-    if not cfg.CLEANUP_FILENAMES:
+    settings = get_settings()
+    if not settings.cleanup_filenames:
         stem = m4b.stem
 
     rename_to = m4b.with_name(ensure_audio_ext(stem, ".m4b")) if stem and m4b.stem != stem else None
@@ -455,10 +456,8 @@ def plan_fix(
         if "update description txt contents" not in plan.reasons:
             plan.reasons.append("update description txt contents")
 
-    from src.lib.config import cfg
-
     if lookup_goodreads is None:
-        lookup_goodreads = bool(cfg.GOODSCRAPS_USER_AGENT)
+        lookup_goodreads = bool(settings.goodscraps_user_agent)
     if goodreads_ref and not lookup_goodreads:
         lookup_goodreads = True
     if lookup_bookpeek is None:
@@ -473,7 +472,7 @@ def plan_fix(
         _attach_open_library(
             plan, ol_ref=ol_ref, apply_ol_tags=True, minimalist=minimalist
         )
-    elif goodreads_ref or (lookup_goodreads and cfg.GOODSCRAPS_USER_AGENT) or lookup_bookpeek:
+    elif goodreads_ref or (lookup_goodreads and settings.goodscraps_user_agent) or lookup_bookpeek:
         comparison = lookup_metadata(
             title,
             author=author,

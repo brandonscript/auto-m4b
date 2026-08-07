@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.cleaners import fix_smart_quotes
 from src.lib.metadata.models import CliPaths, FixPlan
+from src.lib.tag_write import write_id3_tags
 from src.lib.term import LIGHT_GREY_COLOR, print_green, print_orange
 
 
@@ -94,7 +94,7 @@ def apply_fix(
     if plan.needs_tag_write:
         if progress:
             progress("Writing tags...")
-        write_id3_tags_mutagen(target, tags)
+        write_id3_tags(target, tags, encoder_tag="brandonscript/auto-m4b")
         if not quiet:
             print_green(f"  ✓ wrote tags → [[{target.name}]]", highlight_color=LIGHT_GREY_COLOR)
 

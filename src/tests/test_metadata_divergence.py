@@ -377,19 +377,19 @@ def test_contract_shared_edition_enrich_when_corpus_attests(tmp_path: Path, monk
         lambda *a, **k: ol,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test-agent/1.0",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._desired_matches_edition_title",
+        "src.lib.ol_lookup.desired_matches_edition_title",
         lambda *a, **k: False,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_base_title",
+        "src.lib.ol_lookup.best_matching_edition_base_title",
         lambda *a, **k: "Eon",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        "src.lib.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: "Dragoneye Reborn",
     )
     monkeypatch.setattr(
@@ -447,19 +447,19 @@ def test_contract_shared_auto_ol_does_not_overwrite_tags(tmp_path: Path, monkeyp
         lambda *a, **k: ol,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test-agent/1.0",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._desired_matches_edition_title",
+        "src.lib.ol_lookup.desired_matches_edition_title",
         lambda *a, **k: True,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_base_title",
+        "src.lib.ol_lookup.best_matching_edition_base_title",
         lambda *a, **k: "Some Book",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        "src.lib.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: None,
     )
 

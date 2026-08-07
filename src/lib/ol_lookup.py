@@ -1,8 +1,10 @@
+import os
 import re
 import sys
 import urllib.parse
 from datetime import timedelta
 from math import log10
+from pathlib import Path
 from typing import Any, Literal, NotRequired, overload, TypedDict
 
 import requests
@@ -12,11 +14,35 @@ from rapidfuzz import fuzz
 from src.lib.cleaners import fix_smart_quotes, strip_leading_articles
 from src.lib.misc import max_if, re_group
 from src.lib.term import print_debug
-from src.lib.config import cfg
 
-requests_cache.install_cache(
-    str(cfg.META_DIR / "ol_cache"), backend="sqlite", expire_after=timedelta(days=1), ignored_parameters=["User-Agent"]
-)
+_cache_installed = False
+
+
+def _ensure_ol_cache() -> None:
+    """Install requests_cache once, using injectable settings / XDG cache."""
+    global _cache_installed
+    if _cache_installed:
+        return
+    from src.lib.metadata.settings import get_settings
+
+    settings = get_settings()
+    cache_root = settings.cache_dir
+    if cache_root is None:
+        cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "fixm4b"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    requests_cache.install_cache(
+        str(cache_root / "ol_cache"),
+        backend="sqlite",
+        expire_after=timedelta(days=1),
+        ignored_parameters=["User-Agent"],
+    )
+    _cache_installed = True
+
+
+def _ol_timeout() -> float:
+    from src.lib.metadata.settings import get_settings
+
+    return float(get_settings().open_library_timeout or 15)
 
 OpenLibraryAuthorResult = TypedDict(
     "OpenLibraryAuthorResult",
@@ -93,16 +119,17 @@ def _generate_unique_app_name() -> str:
 
 
 def _get_open_library_user_agent() -> str | None:
-    """Get the user agent for the Open Library API from the env var and
+    """Get the user agent for the Open Library API from settings/env and
     validates that it matches the following format, and includes/generates
     a unique name.
 
     MyAppName/1.0 (myemail@example.com)
     """
-    from src.lib.config import cfg
+    from src.lib.metadata.settings import get_settings
     from src.lib.patterns import open_library_user_agent_pattern
 
-    if not (agent_string := cfg.OPEN_LIBRARY_USER_AGENT):
+    settings = get_settings()
+    if not (agent_string := settings.open_library_user_agent):
         return None
 
     match = open_library_user_agent_pattern.search(agent_string)
@@ -123,8 +150,12 @@ def _get_open_library_user_agent() -> str | None:
         raise ValueError("Please use your own email address for the Open Library API user agent")
 
     if app_name.lower() == "auto-m4b":
-        # Check cfg.META_DIR for a file called "app_name"
-        app_name_file = cfg.META_DIR / "app_name"
+        # Persist a unique app name under the settings cache dir (META_DIR in auto-m4b).
+        app_name_file = settings.app_name_path
+        if app_name_file is None:
+            cache_root = settings.cache_dir or (Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "fixm4b")
+            cache_root.mkdir(parents=True, exist_ok=True)
+            app_name_file = cache_root / "app_name"
         if app_name_file.exists():
             with open(app_name_file, "r") as f:
                 app_name = f.read().strip()
@@ -132,6 +163,7 @@ def _get_open_library_user_agent() -> str | None:
                 return f"{app_name}/{version} ({email})"
         else:
             app_name = f"auto-m4b-{_generate_unique_app_name()}"
+            app_name_file.parent.mkdir(parents=True, exist_ok=True)
             with open(app_name_file, "w") as f:
                 f.write(app_name)
 
@@ -292,12 +324,13 @@ def _edition_title_strings(edition: dict) -> list[str]:
 
 def _fetch_work_editions(work_key: str, *, agent: str) -> list[dict]:
     """Return edition entry dicts for a work key (``/works/OL…W``)."""
+    _ensure_ol_cache()
     if not work_key:
         return []
     key = work_key if work_key.startswith("/") else f"/works/{work_key}"
     try:
         url = f"https://openlibrary.org{key}/editions.json"
-        response = requests.get(url, headers={"User-Agent": agent}, timeout=cfg.OPEN_LIBRARY_TIMEOUT)
+        response = requests.get(url, headers={"User-Agent": agent}, timeout=_ol_timeout())
         response.raise_for_status()
         entries = response.json().get("entries") or []
     except Exception as e:
@@ -874,6 +907,7 @@ def open_library_lookup_author(
 
     OPEN_LIBRARY_USER_AGENT=MyAppName/1.0 (myemail@example.com)
     """
+    _ensure_ol_cache()
 
     agent_string = _get_open_library_user_agent()
     if not agent_string:
@@ -889,7 +923,7 @@ def open_library_lookup_author(
         for name in list(set([author_lower, author_no_periods, author_period_spaces])):
             url = f"https://openlibrary.org/search/authors.json?q={urllib.parse.quote_plus(name)}"
             response = requests.get(
-                url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+                url, headers={"User-Agent": agent_string}, timeout=_ol_timeout()
             )
             response.raise_for_status()
             data = response.json()
@@ -1107,6 +1141,7 @@ def open_library_lookup_title(
 
     OPEN_LIBRARY_USER_AGENT=MyAppName/1.0 (myemail@example.com)
     """
+    _ensure_ol_cache()
 
     from src.lib.patterns import junk_chars_title_pattern, title_chunk_pattern
 
@@ -1163,7 +1198,7 @@ def open_library_lookup_title(
                 )
                 for url in urls:
                     response = requests.get(
-                        url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+                        url, headers={"User-Agent": agent_string}, timeout=_ol_timeout()
                     )
                     response.raise_for_status()
                     data = response.json()
@@ -1184,7 +1219,7 @@ def open_library_lookup_title(
                     )
                     for url in urls:
                         response = requests.get(
-                            url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+                            url, headers={"User-Agent": agent_string}, timeout=_ol_timeout()
                         )
                         response.raise_for_status()
                         data = response.json()
@@ -1301,6 +1336,7 @@ def open_library_fetch_by_ref(
     Raises ``ValueError`` if *ref* cannot be parsed. Returns ``None`` if the user
     agent is unset or the API returns no usable doc.
     """
+    _ensure_ol_cache()
     parsed = parse_ol_ref(ref)
     if not parsed:
         raise ValueError(
@@ -1317,7 +1353,7 @@ def open_library_fetch_by_ref(
     try:
         # Search by key — returns author_name / title in one round-trip.
         url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(f'key:{key}')}"
-        response = requests.get(url, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT)
+        response = requests.get(url, headers={"User-Agent": agent_string}, timeout=_ol_timeout())
         response.raise_for_status()
         docs = response.json().get("docs") or []
         match = next((d for d in docs if d.get("key") == key), None)
@@ -1327,7 +1363,7 @@ def open_library_fetch_by_ref(
             # Fallback: direct works/books JSON (title only; authors may be keys)
             direct = f"https://openlibrary.org{key}.json"
             response = requests.get(
-                direct, headers={"User-Agent": agent_string}, timeout=cfg.OPEN_LIBRARY_TIMEOUT
+                direct, headers={"User-Agent": agent_string}, timeout=_ol_timeout()
             )
             response.raise_for_status()
             data = response.json()
@@ -1342,7 +1378,7 @@ def open_library_fetch_by_ref(
                     ar = requests.get(
                         f"https://openlibrary.org{akey}.json",
                         headers={"User-Agent": agent_string},
-                        timeout=cfg.OPEN_LIBRARY_TIMEOUT,
+                        timeout=_ol_timeout(),
                     )
                     if ar.ok:
                         author_names.append(ar.json().get("name") or "")
@@ -1385,3 +1421,11 @@ def open_library_fetch_by_ref(
         if "pytest" in sys.modules:
             raise e
         return None
+# Public aliases for metadata / standalone fixm4b package API.
+title_sim = _title_sim
+strip_boundary_number = _strip_boundary_number
+subtitle_sep_normalized = _subtitle_sep_normalized
+desired_matches_edition_title = _desired_matches_edition_title
+best_matching_edition_base_title = _best_matching_edition_base_title
+best_matching_edition_subtitle = _best_matching_edition_subtitle
+get_open_library_user_agent = _get_open_library_user_agent

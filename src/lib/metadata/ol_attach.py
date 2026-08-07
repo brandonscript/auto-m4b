@@ -22,18 +22,18 @@ def _attach_open_library(
 ) -> FixPlan:
     """Lookup or fetch Open Library metadata onto *plan* (mutates and returns it)."""
     from src.lib.ol_lookup import (
-        _best_matching_edition_base_title,
-        _best_matching_edition_subtitle,
-        _desired_matches_edition_title,
-        _get_open_library_user_agent,
+        best_matching_edition_base_title,
+        best_matching_edition_subtitle,
+        desired_matches_edition_title,
+        get_open_library_user_agent,
         id3_prefer_colon_separator,
         join_title_subtitle,
         ol_match_band,
         ol_title_uses_dash_separator,
         open_library_fetch_by_ref,
         open_library_lookup_title,
-        _strip_boundary_number,
-        _title_sim,
+        strip_boundary_number,
+        title_sim,
     )
 
     try:
@@ -106,7 +106,7 @@ def _attach_open_library(
     # Prefer an edition base closest to local naming (e.g. Eon) over a regional
     # alternate work title (e.g. The Two Pearls of Wisdom). Never use a marketing
     # source-only title (e.g. Dragoneye Reborn alone) as the join base.
-    agent = _get_open_library_user_agent()
+    agent = get_open_library_user_agent()
     if agent and plan.ol_key and plan.ol_status in ("match", "low_confidence", "forced"):
         work_title = (plan.ol_title or "").strip()
         corpus = " ".join(
@@ -124,9 +124,9 @@ def _attach_open_library(
         # Keep a local title that already matches an edition form (US Eon vs AU work title).
         already_good = bool(
             prefer_local
-            and _desired_matches_edition_title(plan.ol_key, prefer_local, agent=agent)
+            and desired_matches_edition_title(plan.ol_key, prefer_local, agent=agent)
         )
-        base_title = _best_matching_edition_base_title(
+        base_title = best_matching_edition_base_title(
             plan.ol_key,
             corpus,
             work_title=work_title,
@@ -135,7 +135,7 @@ def _attach_open_library(
         )
         sub = None
         if not already_good:
-            sub = _best_matching_edition_subtitle(
+            sub = best_matching_edition_subtitle(
                 plan.ol_key,
                 corpus,
                 base_title=base_title,
@@ -194,7 +194,7 @@ def _attach_open_library(
     if plan.ol_status == "match" and plan.ol_author:
         id3_author_support = max(
             (
-                _title_sim(plan.ol_author, value)[0]
+                title_sim(plan.ol_author, value)[0]
                 for value in (
                     plan.current.artist,
                     plan.current.albumartist,
@@ -214,7 +214,7 @@ def _attach_open_library(
         if plan.ol_narrator:
             id3_narrator_support = max(
                 (
-                    _title_sim(plan.ol_narrator, value)[0]
+                    title_sim(plan.ol_narrator, value)[0]
                     for value in (
                         plan.current.artist,
                         plan.current.albumartist,
@@ -236,8 +236,8 @@ def _attach_open_library(
         not apply_ol_tags
         and plan.ol_status == "match"
         and plan.ol_title
-        and (numeric_title := _strip_boundary_number(plan.desired_title))
-        and _title_sim(numeric_title, plan.ol_title)[0] >= 0.9
+        and (numeric_title := strip_boundary_number(plan.desired_title))
+        and title_sim(numeric_title, plan.ol_title)[0] >= 0.9
     ):
         local_numeric_title = plan.desired_title
         id3_values = (
@@ -248,7 +248,7 @@ def _attach_open_library(
             plan.current.composer,
         )
         id3_support = max(
-            (_title_sim(plan.ol_title, value)[0] for value in id3_values if value),
+            (title_sim(plan.ol_title, value)[0] for value in id3_values if value),
             default=0.0,
         )
         if id3_support >= 0.9:

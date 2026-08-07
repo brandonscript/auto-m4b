@@ -13,7 +13,7 @@ from goodscraps import Goodscraps
 from rapidfuzz import fuzz
 
 from src.lib.cleaners import fix_smart_quotes, minimalist_title
-from src.lib.config import cfg
+from src.lib.metadata.settings import get_settings
 from src.lib.term import print_debug
 from src.lib.typing import MEMO_TTL
 
@@ -119,7 +119,8 @@ def _goodreads_lookup(
     *,
     ref: str | None = None,
 ) -> MetadataCandidate:
-    if not cfg.GOODSCRAPS_USER_AGENT:
+    settings = get_settings()
+    if not settings.goodscraps_user_agent:
         return MetadataCandidate(provider="goodreads", status="skipped")
 
     try:
@@ -128,8 +129,8 @@ def _goodreads_lookup(
             match = re.search(r"/book/(?:show/)?(\d+)", ref)
             normalized_ref = match.group(1) if match else ref
         with Goodscraps(
-            timeout=cfg.GOODSCRAPS_TIMEOUT,
-            user_agent=cfg.GOODSCRAPS_USER_AGENT,
+            timeout=settings.goodscraps_timeout,
+            user_agent=settings.goodscraps_user_agent,
         ) as client:
             if ref:
                 score = 1.0
@@ -294,6 +295,7 @@ def lookup_metadata(
     if lookup_bookpeek is None:
         lookup_bookpeek = bookpeek_enabled() and bool(audio_path)
 
+    settings = get_settings()
     cache_key = (
         title,
         author,
@@ -303,10 +305,10 @@ def lookup_metadata(
         lookup_bookpeek,
         goodreads_ref,
         str(audio_path) if audio_path else "",
-        cfg.GOODSCRAPS_USER_AGENT,
-        cfg.GOODSCRAPS_TIMEOUT,
-        cfg.OPEN_LIBRARY_TIMEOUT,
-        cfg.BOOKPEEK,
+        settings.goodscraps_user_agent,
+        settings.goodscraps_timeout,
+        settings.open_library_timeout,
+        settings.bookpeek,
     )
     with _PROVIDER_CACHE_LOCK:
         if cached := _PROVIDER_CACHE.get(cache_key):

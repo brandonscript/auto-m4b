@@ -769,6 +769,32 @@ testing = ["covdefaults (>=2.3)", "coverage (>=7.6.10)", "diff-cover (>=9.2.1)",
 typing = ["typing-extensions (>=4.12.2) ; python_version < \"3.11\""]
 
 [[package]]
+name = "fixm4b"
+version = "0.1.0"
+description = "Retag converted audiobooks (ID3 / filenames) without re-encoding."
+optional = false
+python-versions = "^3.12"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+cachetools = "^5.5.2"
+goodscraps = "^0.1.4"
+mutagen = "^1.47.0"
+pydantic = "^2.11.5"
+rapidfuzz = "^3.13.0"
+regex = "^2024.11.6"
+requests = "^2.32.3"
+requests-cache = "^1.2.1"
+tinta = "^1.1.0"
+titlecase = "^2.4.1"
+
+[package.source]
+type = "directory"
+url = "../fixm4b"
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 description = "The FlatBuffers serialization format for Python"
@@ -3982,4 +4008,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "1f86d3afaa29e0045ec54937fe088b28bc346da09b5e6e0615f0181a88adf281"
+content-hash = "d5815c9d996d4bb45be03f16cecdad8658b80de609c280a43d4d1ef3e0079373"
