@@ -22,6 +22,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Checkout path-dependency siblings
+        working-directory: ..
+        run: |
+          # pyproject path deps resolve as ../goodscraps, ../bookpeek, ../fixm4b
+          for repo in goodscraps bookpeek fixm4b; do
+            if [ ! -d "$repo" ]; then
+              git clone --depth 1 "https://github.com/brandonscript/${repo}.git" "$repo"
+            fi
+          done
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
@@ -86,6 +96,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Checkout path-dependency siblings
+        working-directory: ..
+        run: |
+          # pyproject path deps resolve as ../goodscraps, ../bookpeek, ../fixm4b
+          for repo in goodscraps bookpeek fixm4b; do
+            if [ ! -d "$repo" ]; then
+              git clone --depth 1 "https://github.com/brandonscript/${repo}.git" "$repo"
+            fi
+          done
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v6

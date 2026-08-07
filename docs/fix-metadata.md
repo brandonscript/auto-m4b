@@ -2,12 +2,12 @@
 
 > **Standalone package:** [`brandonscript/fixm4b`](https://github.com/brandonscript/fixm4b)  
 > Install with `pip install fixm4b` or `brew install brandonscript/tap/fixm4b`.  
-> In this repo, `poetry run fixm4b` uses the path dependency on `../fixm4b`.
+> In this repo, `poetry run fixm4b` uses the path dependency on `../fixm4b` (**`dev`**). On **`main`**, pin the latest PyPI release instead (`fixm4b = "^x.y"`).
 
 Standalone CLI for correcting ID3 tags, `.m4b` filenames, and companion quality `.txt` files **after** conversion. It does not re-encode audio.
 
 - Package / CLI: [`../fixm4b`](../../fixm4b) (`poetry run fixm4b`)
-- Shared planner still also lives under [`src/lib/metadata/`](../src/lib/metadata/) for the convert path (unify later)
+- Convert imports the same planner via shims under [`src/lib/metadata/`](../src/lib/metadata/) (re-exports `fixm4b`)
 - Convert ↔ shared divergences (manual review): [`metadata-conflicts.md`](metadata-conflicts.md)
 
 Convert always runs **minimalist** title cleanup. The CLI still honors `--minimalist` / `--no-minimalist` / `CLI_MINIMALIST`.
