@@ -445,37 +445,78 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     shared_ol_title = ""
     if ol_status in ("match", "low_confidence") and not book.path.is_file():
         from src.lib.config import cfg
-        from src.lib.metadata.models import FixPlan, TagSnapshot
-        from src.lib.metadata.ol_attach import _attach_open_library
 
-        shared_plan = FixPlan(
-            book_dir=book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent,
-            m4b=m4b_to_check,
-            source=None,
-            desired_title=book.title,
-            desired_author=book.author,
-            desired_album=book.album,
-            desired_date=book.date,
-            desired_narrator=book.narrator,
-            desired_stem=book.output_filename_stem,
-            current=TagSnapshot(
-                title=book_to_check.id3_title,
-                artist=book_to_check.id3_artist,
-                album=book_to_check.id3_album,
-                albumartist=book_to_check.id3_albumartist,
-                composer=book_to_check.id3_composer,
-                date=book_to_check.id3_date,
-                path=m4b_to_check,
-            ),
-            fs_title=book.fs_title,
-            fs_author=book.fs_author,
-            fs_date=book.fs_year,
-            fs_files=book.orig_file_name,
-        )
-        if cfg.OPEN_LIBRARY_USER_AGENT:
-            ol_ref = None
-            if early_ol and getattr(early_ol, "has_match", False):
-                ol_ref = getattr(early_ol, "key", None) or None
+        ol_ref = None
+        if early_ol and getattr(early_ol, "has_match", False):
+            ol_ref = getattr(early_ol, "key", None) or None
+
+        if cfg.USE_PLAN_FIX_IN_VERIFY and cfg.OPEN_LIBRARY_USER_AGENT:
+            # Phase 6 experiment: full shared planner (edition enrich, stem priors,
+            # provider comparison) instead of a hand-rolled FixPlan shell.
+            from src.lib.metadata import CliPaths, plan_fix
+
+            book_dir = m4b_to_check.parent if m4b_to_check.parent.is_dir() else (
+                book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent
+            )
+            try:
+                shared_plan = plan_fix(
+                    book_dir,
+                    cli=CliPaths(
+                        converted=cfg.converted_dir,
+                        archive=cfg.archive_dir,
+                        inbox=cfg.inbox_dir,
+                    ),
+                    require_source=False,
+                    lookup_ol=True,
+                    minimalist=True,
+                    force_dirty=True,
+                    ol_ref=ol_ref,
+                )
+            except Exception as e:
+                print_debug(f"verify: plan_fix failed ({e}); falling back to attach-only")
+                shared_plan = None
+            if shared_plan and shared_plan.ol_status in ("match", "low_confidence", "forced"):
+                shared_ol_title = shared_plan.desired_title
+                # Convert adapter: auto-apply desired fields (shared auto OL is
+                # display-only unless forced via ol_ref).
+                if shared_plan.desired_author:
+                    book.artist = book.albumartist = shared_plan.desired_author
+                if shared_plan.desired_date:
+                    book.date = shared_plan.desired_date
+                if shared_plan.desired_narrator:
+                    book.narrator = shared_plan.desired_narrator
+                print_debug(
+                    f"verify: plan_fix ol={shared_plan.ol_status!r} "
+                    f"title={shared_plan.desired_title!r} reasons={shared_plan.reasons}"
+                )
+        elif cfg.OPEN_LIBRARY_USER_AGENT:
+            from src.lib.metadata.models import FixPlan, TagSnapshot
+            from src.lib.metadata.ol_attach import _attach_open_library
+
+            shared_plan = FixPlan(
+                book_dir=book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent,
+                m4b=m4b_to_check,
+                source=None,
+                desired_title=book.title,
+                desired_author=book.author,
+                desired_album=book.album,
+                desired_date=book.date,
+                desired_narrator=book.narrator,
+                desired_stem=book.output_filename_stem,
+                current=TagSnapshot(
+                    title=book_to_check.id3_title,
+                    artist=book_to_check.id3_artist,
+                    album=book_to_check.id3_album,
+                    albumartist=book_to_check.id3_albumartist,
+                    composer=book_to_check.id3_composer,
+                    date=book_to_check.id3_date,
+                    path=m4b_to_check,
+                ),
+                fs_title=book.fs_title,
+                fs_author=book.fs_author,
+                fs_date=book.fs_year,
+                fs_files=book.orig_file_name,
+            )
             _attach_open_library(shared_plan, minimalist=True, ol_ref=ol_ref)
             if shared_plan.ol_status in ("match", "low_confidence", "forced"):
                 shared_ol_title = shared_plan.desired_title
@@ -1022,7 +1063,7 @@ def _finalize_convert_title(title: str, author: str | None = None) -> str:
 
     Phase 3 wires convert outputs through ``id3_prefer_colon_separator`` and
     ``minimalist_title`` without replacing OCR / MetadataScore / OL-early
-    selection. Phase 4 may replace that selection path with ``plan_fix``.
+    selection. Phase 6: post-build verify may use ``plan_fix`` when USE_PLAN_FIX_IN_VERIFY is on.
     """
     if not (title or "").strip():
         return title or ""
@@ -1759,7 +1800,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     # Phase 3: shared colon + always-minimalist transforms on the resolved
     # title/album. Selection stays OCR / MetadataScore / OL-early for now;
-    # Phase 4 may replace that path with plan_fix.
+    # Phase 6: verify may use plan_fix when USE_PLAN_FIX_IN_VERIFY is on.
     _author_for_title = book.artist or book.author or ""
     _pre_title = (book.title or "").strip()
     if book.title:

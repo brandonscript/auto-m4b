@@ -518,6 +518,18 @@ class Config:
 
     CLEANUP_FILENAMES = _CLEANUP_FILENAMES
 
+    @env_property(typ=bool, default=True)
+    def _USE_PLAN_FIX_IN_VERIFY(self):
+        """Phase 6 experiment: use shared ``plan_fix`` during post-build ID3 verify.
+
+        When on (default), verify builds desired tags via ``plan_fix`` instead of a
+        hand-rolled FixPlan + ``_attach_open_library``. Set ``USE_PLAN_FIX_IN_VERIFY=0``
+        to fall back to the previous path.
+        """
+        ...
+
+    USE_PLAN_FIX_IN_VERIFY = _USE_PLAN_FIX_IN_VERIFY
+
     @env_property(
         typ=str,
         default="15,30",
