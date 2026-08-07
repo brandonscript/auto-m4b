@@ -1,3 +1,6 @@
+# syntax=docker/dockerfile:1
+# Requires BuildKit additional_contexts (see docker-compose.template.yml):
+#   goodscraps → sibling checkout, bookpeek → sibling checkout
 # ── Stage 1: base (system deps + Python packages + NLP models) ───────────────
 FROM python:3.12-slim AS base
 
@@ -8,6 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir poetry
 
 WORKDIR /app
+
+# Path deps in pyproject.toml are ../goodscraps and ../bookpeek relative to /app
+COPY --from=goodscraps . /goodscraps/
+COPY --from=bookpeek . /bookpeek/
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \

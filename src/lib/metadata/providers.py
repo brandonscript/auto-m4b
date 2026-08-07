@@ -58,6 +58,11 @@ class MetadataComparison:
     candidates: dict[str, MetadataCandidate] = field(default_factory=dict)
     selected: MetadataCandidate | None = None
     conflicts: list[str] = field(default_factory=list)
+    # bookpeek display / corroboration (not separate GR/OL sections)
+    bookpeek_engine: str = ""
+    bookpeek_seconds: float = 0.0
+    bookpeek_corroborated_goodreads: bool = False
+    bookpeek_corroborated_openlibrary: bool = False
 
     @property
     def status(self) -> str:
@@ -266,19 +271,42 @@ def lookup_metadata(
     narrator: str = "",
     lookup_goodreads: bool = True,
     lookup_open_library: bool = True,
+    lookup_bookpeek: bool | None = None,
     goodreads_ref: str | None = None,
+    audio_path: "Path | None" = None,
 ) -> MetadataComparison:
-    """Query enabled providers and select Goodreads before Open Library."""
+    """Query enabled providers and select Goodreads before Open Library.
+
+    When ``audio_path`` is set and BOOKPEEK is enabled, also runs bookpeek for
+    ASR/Audnexus corroboration (nested GR/OL hits are folded into direct candidates).
+    """
+    from pathlib import Path
+
+    from src.lib.metadata.bookpeek_provider import (
+        bookpeek_conflicts_against_selected,
+        bookpeek_enabled,
+        bookpeek_to_candidate,
+        corroborate_providers,
+        maybe_apply_bookpeek_fallback,
+        scan_bookpeek,
+    )
+
+    if lookup_bookpeek is None:
+        lookup_bookpeek = bookpeek_enabled() and bool(audio_path)
+
     cache_key = (
         title,
         author,
         narrator,
         lookup_goodreads,
         lookup_open_library,
+        lookup_bookpeek,
         goodreads_ref,
+        str(audio_path) if audio_path else "",
         cfg.GOODSCRAPS_USER_AGENT,
         cfg.GOODSCRAPS_TIMEOUT,
         cfg.OPEN_LIBRARY_TIMEOUT,
+        cfg.BOOKPEEK,
     )
     with _PROVIDER_CACHE_LOCK:
         if cached := _PROVIDER_CACHE.get(cache_key):
@@ -286,7 +314,8 @@ def lookup_metadata(
 
     comparison = MetadataComparison()
     lookups = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    max_workers = 3 if lookup_bookpeek else 2
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         if lookup_goodreads:
             lookups["goodreads"] = executor.submit(
                 _goodreads_lookup,
@@ -302,6 +331,9 @@ def lookup_metadata(
                 author,
                 narrator,
             )
+        bp_future = None
+        if lookup_bookpeek and audio_path:
+            bp_future = executor.submit(scan_bookpeek, Path(audio_path))
         for provider, future in lookups.items():
             comparison.candidates[provider] = future.result()
 
@@ -316,6 +348,51 @@ def lookup_metadata(
         comparison.selected = goodreads
     elif open_library and open_library.status == "low_confidence":
         comparison.selected = open_library
+
+    if lookup_bookpeek and audio_path:
+        bp_result = bp_future.result() if bp_future is not None else None
+        if bp_result is not None:
+            bp_candidate = bookpeek_to_candidate(bp_result)
+            comparison.candidates["bookpeek"] = bp_candidate
+            corr = corroborate_providers(comparison, bp_result)
+            comparison.bookpeek_corroborated_goodreads = corr.goodreads
+            comparison.bookpeek_corroborated_openlibrary = corr.openlibrary
+            transcript = getattr(bp_result, "transcript", None)
+            if transcript is not None:
+                comparison.bookpeek_engine = str(getattr(transcript, "engine", "") or "")
+                try:
+                    comparison.bookpeek_seconds = float(getattr(transcript, "seconds", 0) or 0)
+                except (TypeError, ValueError):
+                    comparison.bookpeek_seconds = 0.0
+            # Re-select after corroboration score bumps if needed
+            goodreads = comparison.candidates.get("goodreads")
+            open_library = comparison.candidates.get("openlibrary")
+            if goodreads and goodreads.status in ("match", "forced"):
+                comparison.selected = goodreads
+            elif open_library and open_library.status == "match":
+                comparison.selected = open_library
+            maybe_apply_bookpeek_fallback(comparison, bp_candidate)
+            for conflict in bookpeek_conflicts_against_selected(comparison, bp_candidate):
+                if conflict not in comparison.conflicts:
+                    comparison.conflicts.append(conflict)
+            # Prefer bookpeek narrator when selected has none
+            selected = comparison.selected
+            if selected and not selected.narrator and bp_candidate.narrator:
+                comparison.selected = MetadataCandidate(
+                    provider=selected.provider,
+                    title=selected.title,
+                    author=selected.author,
+                    narrator=bp_candidate.narrator,
+                    year=selected.year,
+                    ref=selected.ref,
+                    url=selected.url,
+                    score=selected.score,
+                    status=selected.status,
+                    error=selected.error,
+                )
+            elif not selected and bp_candidate.narrator:
+                comparison.selected = bp_candidate
+
     with _PROVIDER_CACHE_LOCK:
         _PROVIDER_CACHE[cache_key] = deepcopy(comparison)
     return comparison

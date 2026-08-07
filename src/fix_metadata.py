@@ -550,6 +550,8 @@ def print_plan(
             header = "openlibrary (forced)"
         else:
             header = "openlibrary"
+        if plan.bookpeek_corroborated_openlibrary:
+            header = f"{header} · corroborated by bookpeek"
         _framed_header(header, style="light_grey")
         if plan.ol_status == "none":
             smart_print(
@@ -628,6 +630,8 @@ def print_plan(
 
     if plan.goodreads_status in ("match", "forced", "none", "low_confidence", "error"):
         header = "goodreads (forced)" if plan.goodreads_status == "forced" else "goodreads"
+        if plan.bookpeek_corroborated_goodreads:
+            header = f"{header} · corroborated by bookpeek"
         _framed_header(header, style="light_grey")
         if plan.goodreads_status in ("none", "error"):
             message = "(No matches found)" if plan.goodreads_status == "none" else "(lookup failed)"
@@ -671,6 +675,57 @@ def print_plan(
                     .dark_grey("│ ", sep="")
                     .grey("Link: ", sep="")
                     .purple(plan.goodreads_url, sep="")
+                    .to_str()
+                )
+        _framed_footer(style="light_grey")
+
+    if plan.bookpeek_status in ("match", "forced", "none", "low_confidence", "error"):
+        _framed_header("bookpeek", style="light_grey")
+        if plan.bookpeek_status in ("none", "error"):
+            message = "(No matches found)" if plan.bookpeek_status == "none" else "(lookup failed)"
+            smart_print(
+                Tinta()
+                .dark_grey("│ ", sep="")
+                .pink(message, sep="")
+                .to_str()
+            )
+        else:
+            low = plan.bookpeek_status == "low_confidence"
+
+            def _bp_row(label: str, value: str, truth_val: str = "") -> None:
+                empty = not (value or "").strip()
+                display = value if not empty else "(missing)"
+                s = Tinta().dark_grey("│ ", sep="").grey(f"{label}: ", sep="")
+                if empty:
+                    s.dark_grey(display, sep="")
+                elif low and truth_val and not _prop_equal(value, truth_val):
+                    s.amber(display, sep="")
+                elif truth_val and _prop_equal(value, truth_val):
+                    s.mint(display, sep="")
+                else:
+                    s.grey(display, sep="") if not truth_val else s.amber(display, sep="")
+                smart_print(s.to_str())
+
+            _bp_row("Narrator", plan.bookpeek_narrator, truth["narrator"])
+            if plan.bookpeek_asin:
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .grey("ASIN: ", sep="")
+                    .grey(plan.bookpeek_asin, sep="")
+                    .to_str()
+                )
+            meta_bits = []
+            if plan.bookpeek_engine:
+                meta_bits.append(plan.bookpeek_engine)
+            if plan.bookpeek_seconds:
+                meta_bits.append(f"{plan.bookpeek_seconds:g}s")
+            if meta_bits:
+                smart_print(
+                    Tinta()
+                    .dark_grey("│ ", sep="")
+                    .grey("ASR: ", sep="")
+                    .dark_grey(" · ".join(meta_bits), sep="")
                     .to_str()
                 )
         _framed_footer(style="light_grey")
@@ -1075,18 +1130,30 @@ def prompt_goodreads_ref() -> str | None:
 
 
 
-def print_ol_session_notice(*, no_ol: bool = False, no_goodreads: bool = False) -> None:
+def print_ol_session_notice(
+    *, no_ol: bool = False, no_goodreads: bool = False, no_bookpeek: bool = False
+) -> None:
     """Session-level metadata provider status (below auto-recursive, once)."""
     if no_ol:
         print_dark_grey("openlibrary  (disabled via --no-ol)")
-        return
-    ua = (os.environ.get("OPEN_LIBRARY_USER_AGENT") or "").strip()
-    if not ua:
-        print_dark_grey("openlibrary unavailable (set OPEN_LIBRARY_USER_AGENT to enable)")
+    else:
+        ua = (os.environ.get("OPEN_LIBRARY_USER_AGENT") or "").strip()
+        if not ua:
+            print_dark_grey("openlibrary unavailable (set OPEN_LIBRARY_USER_AGENT to enable)")
     if no_goodreads:
         print_dark_grey("goodreads  (disabled via --no-goodreads)")
     elif not (os.environ.get("GOODSCRAPS_USER_AGENT") or "").strip():
         print_dark_grey("goodreads unavailable (set GOODSCRAPS_USER_AGENT to enable)")
+    if no_bookpeek:
+        print_dark_grey("bookpeek  (disabled via --no-bookpeek)")
+    else:
+        from src.lib.config import cfg
+
+        if not cfg.BOOKPEEK:
+            print_dark_grey("bookpeek unavailable (set BOOKPEEK=1 to enable)")
+        else:
+            online = bool(cfg.GOODSCRAPS_USER_AGENT or cfg.OPEN_LIBRARY_USER_AGENT)
+            print_dark_grey(f"bookpeek  (on · {'online' if online else 'ASR/Audnexus only'})")
 
 
 
@@ -1370,6 +1437,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Skip automatic Goodreads lookup (still allows -g)",
     )
     parser.add_argument(
+        "--no-bookpeek",
+        action="store_true",
+        help="Skip bookpeek ASR/Audnexus enrichment (even if BOOKPEEK=1)",
+    )
+    parser.add_argument(
+        "--bookpeek",
+        action="store_true",
+        help="Force bookpeek for this run (overrides BOOKPEEK=0 for this process)",
+    )
+    parser.add_argument(
         "--minimalist",
         action="store_true",
         help="Prefer core titles; strip series/Book N/(Unabridged) junk (or set CLI_MINIMALIST=1)",
@@ -1416,6 +1493,7 @@ def main(argv: list[str] | None = None) -> int:
     print_ol_session_notice(
         no_ol=bool(args.no_ol),
         no_goodreads=bool(args.no_goodreads),
+        no_bookpeek=bool(args.no_bookpeek),
     )
 
     source_root = args.source.resolve() if args.source else None
@@ -1447,6 +1525,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     lookup_ol_upfront = (not args.no_ol or bool(ol_ref)) and not defer_ol
     lookup_goodreads_upfront = not args.no_goodreads or bool(goodreads_ref)
+    if args.bookpeek:
+        # Force-enable for this process without requiring BOOKPEEK=1 in the environment.
+        cfg_mod = __import__("src.lib.config", fromlist=["cfg"]).cfg
+        cfg_mod.BOOKPEEK = True
+    lookup_bookpeek_upfront = (not args.no_bookpeek) and (
+        bool(args.bookpeek)
+        or bool(__import__("src.lib.config", fromlist=["cfg"]).cfg.BOOKPEEK)
+    )
 
     plans: list[FixPlan] = []
     failures: list[SourceResolutionError] = []
@@ -1467,6 +1553,7 @@ def main(argv: list[str] | None = None) -> int:
                 lookup_ol=lookup_ol_upfront,
                 goodreads_ref=goodreads_ref,
                 lookup_goodreads=lookup_goodreads_upfront,
+                lookup_bookpeek=lookup_bookpeek_upfront,
                 minimalist=minimalist,
                 force_dirty=args.force_dirty,
             )

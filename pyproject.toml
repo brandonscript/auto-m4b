@@ -154,6 +154,7 @@ sentencepiece = "^0.2.0"
 watchdog = ">=4.0"
 titlecase = "^2.4.1"
 goodscraps = {path = "../goodscraps", develop = true}
+bookpeek = {path = "../bookpeek", develop = true, extras = ["whisper", "online"]}
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"
