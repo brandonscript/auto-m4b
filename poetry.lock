@@ -26,6 +26,7 @@ files = [
 
 [package.dependencies]
 idna = ">=2.8"
+typing_extensions = {version = ">=4.5", markers = "python_version < \"3.13\""}
 
 [package.extras]
 trio = ["trio (>=0.32.0)"]
@@ -2333,6 +2334,7 @@ files = [
 
 [package.dependencies]
 pytest = ">=8.4,<10"
+typing-extensions = {version = ">=4.12", markers = "python_version < \"3.13\""}
 
 [package.extras]
 docs = ["sphinx (>=5.3)", "sphinx-rtd-theme (>=1)", "sphinx-tabs (>=3.5)"]
@@ -3979,5 +3981,5 @@ files = [
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.14,<3.15"
-content-hash = "b79d2a5c73523e24a8bcbea3e240616b1bf5577dd2075f53dda3f5db228d97d1"
+python-versions = ">=3.12,<3.15"
+content-hash = "1f86d3afaa29e0045ec54937fe088b28bc346da09b5e6e0615f0181a88adf281"
