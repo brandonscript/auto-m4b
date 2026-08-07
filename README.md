@@ -189,7 +189,9 @@ All options are set via environment variables (`.env` file or shell environment)
 | `WORKING_FOLDER`              | system temp   | Scratch space for merge/build steps                                                                                                               |
 | `SLEEP_TIME`                  | `10`          | Seconds between inbox scans                                                                                                                       |
 | `WAIT_TIME`                   | `5`           | Seconds to wait after a folder is modified before processing                                                                                      |
-| `CPU_CORES`                   | all cores     | Number of parallel ffmpeg jobs                                                                                                                    |
+| `CPU_CORES`                   | all cores     | Max parallel ffmpeg encode jobs **per book**                                                                                                      |
+| `MAX_PROBE_THREADS`           | `min(CPU_CORES, 16)` | Parallel workers for post-encode duration/title probes (`0` = auto)                                                                        |
+| `MAX_CONVERT_JOBS`            | `1`           | Max books converting at once. `>1` parallelizes standalone (non-series) books; per-book encode workers are scaled down to fit `CPU_CORES`       |
 | `MAX_BITRATE`                 | `0`           | Max output bitrate in kbps; `0`/unset keeps the source rate. Sources above the cap are re-encoded (m4b passthrough/stream-copy is skipped)        |
 | `MAX_CHAPTER_LENGTH`          | `15,30`       | Min/max chapter length in minutes                                                                                                                 |
 | `AUDIO_EXTS`                  | mp3,m4a,m4b,… | Comma-separated list of audio extensions to process                                                                                               |

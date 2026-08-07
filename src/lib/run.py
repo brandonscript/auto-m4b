@@ -1387,92 +1387,128 @@ def process_inbox():
     queue: list[InboxItem] = list(inbox.matched_ok_books.values())
     seen: set[str] = set()
 
-    while queue:
-        item = queue.pop(0)
-        if item.key in seen:
-            continue
-        if item.status in ("gone", "processed") or item.is_gone:
-            continue
-        seen.add(item.key)
+    max_jobs = max(1, int(cfg.MAX_CONVERT_JOBS or 1))
+    # Series mid-flight rescan/cleanup assumes sequential process_book — keep
+    # that path serial. Parallelize only when every queued book is standalone.
+    can_parallel = max_jobs > 1 and all(
+        not item.is_series_book and not getattr(item, "is_series_parent", False) for item in queue
+    )
 
-        b = process_book(b, item)
-        divider("\n", "\n")
+    if can_parallel and len(queue) > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from src.lib.converter.merge import reset_encode_cores_override, set_encode_cores_override
 
-        if item.is_series_book:
-            parent = item.series_parent
-            parent_key = (parent.key if parent else None) or item.series_key
+        jobs = min(max_jobs, len(queue))
+        per_book_cores = max(1, int(cfg.CPU_CORES or 1) // jobs)
 
-            def _unseen_sibling_dirs(p: InboxItem | None, key: str | None) -> list[Path]:
-                """Return on-disk sibling dirs that are not already known to the inbox.
+        def _convert_standalone(item: InboxItem) -> int:
+            token = set_encode_cores_override(per_book_cores)
+            try:
+                # Each worker starts its own counter; we sum successes after.
+                return process_book(0, item)
+            finally:
+                reset_encode_cores_override(token)
 
-                Excludes dirs already processed (seen), queued, or present in
-                ``_items`` — so normal in-flight siblings do not trigger a
-                force-rescan. Only truly new mid-flight drops do.
-
-                Also treats standalone audio filenames as known by stem, so that
-                ``move_standalone_into_dir`` (which turns ``Book.m4a`` into a
-                ``Book/`` folder) does not look like a brand-new sibling.
-                """
-                if not key or not p or not p.path.is_dir():
-                    return []
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            futures = {pool.submit(_convert_standalone, item): item for item in queue}
+            for fut in as_completed(futures):
+                item = futures[fut]
+                seen.add(item.key)
                 try:
-                    from src.lib.config import AUDIO_EXTS
+                    converted = fut.result()
+                    if converted:
+                        b += int(converted)
+                        divider("\n", "\n")
+                except Exception as e:
+                    print_error(f"Parallel convert failed for {item.key}: {e}")
+        queue.clear()
+    else:
+        while queue:
+            item = queue.pop(0)
+            if item.key in seen:
+                continue
+            if item.status in ("gone", "processed") or item.is_gone:
+                continue
+            seen.add(item.key)
 
-                    def _names_for(entry: str) -> set[str]:
-                        names = {entry}
-                        path = Path(entry)
-                        if path.suffix.lower() in AUDIO_EXTS:
-                            names.add(path.stem)
-                        return names
+            b = process_book(b, item)
+            divider("\n", "\n")
 
-                    known_names: set[str] = set()
-                    for k in seen:
-                        if k == key or k.startswith(key + "/"):
-                            known_names |= _names_for(Path(k).name)
-                    for s in inbox.series_items_for_key(key):
-                        if s.key:
-                            known_names |= _names_for(Path(s.key).name)
-                    for i in queue:
-                        if i.key and (i.key == key or i.key.startswith(key + "/")):
-                            known_names |= _names_for(Path(i.key).name)
+            if item.is_series_book:
+                parent = item.series_parent
+                parent_key = (parent.key if parent else None) or item.series_key
 
-                    return [
-                        d
-                        for d in p.path.iterdir()
-                        if d.is_dir()
-                        and not d.name.startswith(".")
-                        and d.name not in known_names
-                    ]
-                except OSError:
-                    return []
+                def _unseen_sibling_dirs(p: InboxItem | None, key: str | None) -> list[Path]:
+                    """Return on-disk sibling dirs that are not already known to the inbox.
 
-            # Only force-rescan when new sibling dirs appear on disk. Blindly
-            # rescanning after every book reclassifies an empty(ish) parent and
-            # can drop the series_parent structure, which then skips cleanup.
-            unseen = _unseen_sibling_dirs(parent, parent_key)
-            if unseen:
-                inbox.scan(force=True)
-                parent = (inbox.get(parent_key) if parent_key else None) or parent
+                    Excludes dirs already processed (seen), queued, or present in
+                    ``_items`` — so normal in-flight siblings do not trigger a
+                    force-rescan. Only truly new mid-flight drops do.
+
+                    Also treats standalone audio filenames as known by stem, so that
+                    ``move_standalone_into_dir`` (which turns ``Book.m4a`` into a
+                    ``Book/`` folder) does not look like a brand-new sibling.
+                    """
+                    if not key or not p or not p.path.is_dir():
+                        return []
+                    try:
+                        from src.lib.config import AUDIO_EXTS
+
+                        def _names_for(entry: str) -> set[str]:
+                            names = {entry}
+                            path = Path(entry)
+                            if path.suffix.lower() in AUDIO_EXTS:
+                                names.add(path.stem)
+                            return names
+
+                        known_names: set[str] = set()
+                        for k in seen:
+                            if k == key or k.startswith(key + "/"):
+                                known_names |= _names_for(Path(k).name)
+                        for s in inbox.series_items_for_key(key):
+                            if s.key:
+                                known_names |= _names_for(Path(s.key).name)
+                        for i in queue:
+                            if i.key and (i.key == key or i.key.startswith(key + "/")):
+                                known_names |= _names_for(Path(i.key).name)
+
+                        return [
+                            d
+                            for d in p.path.iterdir()
+                            if d.is_dir()
+                            and not d.name.startswith(".")
+                            and d.name not in known_names
+                        ]
+                    except OSError:
+                        return []
+
+                # Only force-rescan when new sibling dirs appear on disk. Blindly
+                # rescanning after every book reclassifies an empty(ish) parent and
+                # can drop the series_parent structure, which then skips cleanup.
+                unseen = _unseen_sibling_dirs(parent, parent_key)
+                if unseen:
+                    inbox.scan(force=True)
+                    parent = (inbox.get(parent_key) if parent_key else None) or parent
+                    if parent_key:
+                        for sibling in inbox.series_items_for_key(parent_key):
+                            if (
+                                sibling.key not in seen
+                                and sibling.status in ("ok", "new", "needs_retry")
+                                and not sibling.is_filtered
+                                and sibling.tree.is_book_root
+                            ):
+                                queue.append(sibling)
+
                 if parent_key:
-                    for sibling in inbox.series_items_for_key(parent_key):
-                        if (
-                            sibling.key not in seen
-                            and sibling.status in ("ok", "new", "needs_retry")
-                            and not sibling.is_filtered
-                            and sibling.tree.is_book_root
-                        ):
-                            queue.append(sibling)
-
-            if parent_key:
-                pending = [
-                    s
-                    for s in inbox.series_items_for_key(parent_key)
-                    if not s.is_gone and s.status not in ("gone", "processed")
-                ]
-                # Still-unseen on-disk dirs mean mid-flight drops aren't in
-                # _items yet — defer cleanup so we don't archive them.
-                if not pending and not _unseen_sibling_dirs(parent, parent_key) and parent:
-                    cleanup_series_dir(parent)
+                    pending = [
+                        s
+                        for s in inbox.series_items_for_key(parent_key)
+                        if not s.is_gone and s.status not in ("gone", "processed")
+                    ]
+                    # Still-unseen on-disk dirs mean mid-flight drops aren't in
+                    # _items yet — defer cleanup so we don't archive them.
+                    if not pending and not _unseen_sibling_dirs(parent, parent_key) and parent:
+                        cleanup_series_dir(parent)
 
     # Sweep 1: series/container parents still in _items whose inbox dir became
     # empty (ignoring .DS_Store / empty book shells) during this run.

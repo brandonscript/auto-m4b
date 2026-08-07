@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import subprocess
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
@@ -20,6 +21,24 @@ from src.lib.converter.naturalsort import natural_sort_files
 if TYPE_CHECKING:
     from src.lib.audiobook import Audiobook
 
+# When MAX_CONVERT_JOBS > 1, process_inbox shrinks per-book encode workers so
+# concurrent books don't each claim full CPU_CORES.
+_encode_cores_override: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "encode_cores_override", default=None
+)
+
+
+def get_encode_cores_override() -> int | None:
+    return _encode_cores_override.get()
+
+
+def set_encode_cores_override(cores: int | None):
+    """Return a token for ``reset_encode_cores_override``."""
+    return _encode_cores_override.set(cores)
+
+
+def reset_encode_cores_override(token) -> None:
+    _encode_cores_override.reset(token)
 
 def _ffprobe_duration_ms(path: Path) -> int:
     """Return the exact duration of *path* in milliseconds via ffprobe."""
@@ -60,6 +79,31 @@ def _ffprobe_title_tag(path: Path) -> Optional[str]:
         return tags.get("title") or tags.get("Title")
     except Exception:
         return None
+
+
+def _audio_title_tag(path: Path) -> Optional[str]:
+    """Prefer mutagen/Id3Tags for chapter titles; fall back to ffprobe."""
+    try:
+        from src.lib.id3_tags import Id3Tags
+
+        tags = Id3Tags.from_file(path, throw=False)
+        title = getattr(tags, "title", None) if tags is not None else None
+        if title and str(title).strip():
+            return str(title).strip()
+    except Exception:
+        pass
+    return _ffprobe_title_tag(path)
+
+
+def _map_parallel(fn, items: list, max_workers: int) -> list:
+    """Apply *fn* to each item, preserving order. Serial when workers/items ≤ 1."""
+    if not items:
+        return []
+    workers = min(max(1, max_workers), len(items))
+    if workers == 1 or len(items) == 1:
+        return [fn(x) for x in items]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(fn, items))
 
 
 def _convert_file_to_mp4(
@@ -307,7 +351,7 @@ def convert_book_native(book: "Audiobook") -> int:
         return i, dst
 
     ordered: dict[int, Path] = {}
-    max_workers = _conversion_worker_count(len(src_files), cfg.CPU_CORES)
+    max_workers = _conversion_worker_count(len(src_files), cfg.encode_cores)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_convert_one, i, f): i for i, f in enumerate(src_files)}
         for fut in as_completed(futures):
@@ -316,8 +360,9 @@ def convert_book_native(book: "Audiobook") -> int:
 
     tmp_files = [ordered[i] for i in sorted(ordered)]
 
-    # ── 4. Get exact durations via ffprobe ────────────────────────────────────
-    durations_ms = [_ffprobe_duration_ms(f) for f in tmp_files]
+    # ── 4. Get exact durations via ffprobe (parallel) ─────────────────────────
+    probe_workers = cfg.probe_threads
+    durations_ms = _map_parallel(_ffprobe_duration_ms, tmp_files, probe_workers)
 
     # ── 5. Build chapters ─────────────────────────────────────────────────────
     chapters_txt = _find_chapters_txt(merge_dir)
@@ -330,7 +375,8 @@ def convert_book_native(book: "Audiobook") -> int:
         if use_filenames:
             tag_titles = None
         else:
-            tag_titles = [_ffprobe_title_tag(f) for f in src_files]
+            # Mutagen-first titles (parallel); avoids N serial ffprobes on SMB.
+            tag_titles = _map_parallel(_audio_title_tag, src_files, probe_workers)
 
         chapters = build_chapters_from_files(
             src_files, durations_ms, use_filenames=use_filenames, tag_titles=tag_titles
