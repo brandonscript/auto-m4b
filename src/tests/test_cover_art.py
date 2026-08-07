@@ -1,4 +1,4 @@
-"""Cover art extraction — ffmpeg demux + mutagen covr/APIC fallback."""
+"""Cover art extraction — mutagen-first + ffmpeg stream fallback."""
 
 from __future__ import annotations
 
@@ -32,17 +32,55 @@ def test_extract_cover_art_from_m4b(m4b_with_cover: Path):
     assert out.suffix.lower() in {".jpg", ".jpeg", ".png"}
 
 
+def test_extract_cover_art_mutagen_first_skips_ffmpeg(m4b_with_cover: Path):
+    """When mutagen can read covr, ffmpeg must not be invoked."""
+    with patch("src.lib.id3_utils.subprocess.check_output") as ffmpeg_mock:
+        data = extract_cover_art(m4b_with_cover, save_to_file=False)
+
+    assert isinstance(data, bytes)
+    assert len(data) > 1000
+    ffmpeg_mock.assert_not_called()
+
+
 def test_extract_cover_art_mutagen_fallback_when_ffmpeg_fails(m4b_with_cover: Path):
     """Sea of Silver Light case: ffprobe sees attached_pic, but ffmpeg demux is empty."""
 
     def _ffmpeg_fails(*_args, **_kwargs):
         raise subprocess.CalledProcessError(1, "ffmpeg")
 
+    # mutagen-first still succeeds even if ffmpeg would fail.
     with patch("src.lib.id3_utils.subprocess.check_output", side_effect=_ffmpeg_fails):
         data = extract_cover_art(m4b_with_cover, save_to_file=False)
 
     assert isinstance(data, bytes)
     assert len(data) > 1000
+
+
+def test_extract_cover_art_ffmpeg_fallback_when_mutagen_misses(m4b_with_cover: Path):
+    """If mutagen cannot read covers, ffmpeg demux is still attempted."""
+    cover_bytes = b"\xff\xd8\xff" + b"x" * 2000  # fake jpeg
+
+    def _ffmpeg_pipe(cmd, *args, **kwargs):
+        if cmd and "-f" in cmd and "image2pipe" in cmd:
+            return cover_bytes
+        if cmd and str(cmd[-1]).endswith((".jpg", ".png", ".webp")):
+            Path(cmd[-1]).write_bytes(cover_bytes)
+            return b""
+        return b""
+
+    fake_probe = {
+        "streams": [
+            {"index": 1, "codec_name": "mjpeg", "disposition": {"attached_pic": 1}},
+        ]
+    }
+    with (
+        patch("src.lib.id3_utils._extract_cover_art_mutagen", return_value=None),
+        patch("src.lib.id3_utils.ffprobe_file", return_value=fake_probe),
+        patch("src.lib.id3_utils.subprocess.check_output", side_effect=_ffmpeg_pipe),
+    ):
+        data = extract_cover_art(m4b_with_cover, save_to_file=False)
+
+    assert data == cover_bytes
 
 
 def test_extract_cover_art_mutagen_fallback_when_ffmpeg_writes_empty(m4b_with_cover: Path, tmp_path: Path):

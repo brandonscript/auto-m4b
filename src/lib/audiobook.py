@@ -2,7 +2,7 @@ from math import floor
 from pathlib import Path
 from typing import Literal, overload
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from src.lib.books_tree import BooksTree
 from src.lib.cleaners import minimalist_title
@@ -73,6 +73,11 @@ class Audiobook(BaseModel):
     disc_num: tuple[int, int] = (1, 1)
     m4b_num_parts: int = 1
     _active_dir: DirName | None = None
+    # Stashed early-provider results for verify_and_update_id3_tags reuse (not serialized).
+    _early_ol: object | None = PrivateAttr(default=None)
+    _early_gr: object | None = PrivateAttr(default=None)
+    _early_bookpeek: object | None = PrivateAttr(default=None)
+    _early_resolved_by: Literal["goodreads", "openlibrary", "bookpeek"] | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
