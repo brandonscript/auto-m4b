@@ -822,9 +822,11 @@ class Config:
 cfg = Config()
 
 try:
-    from fixm4b.settings import set_settings, settings_from_cfg
+    # Live cfg adapter: package code calls get_settings() which consults this provider.
+    import fixm4b.settings as _fixm4b_settings
+    from src.lib.metadata.settings import get_settings as _am4b_get_settings
 
-    set_settings(settings_from_cfg(cfg))
+    _fixm4b_settings.set_settings_provider(_am4b_get_settings)
 except Exception:
     # Standalone / early import before fixm4b is available.
     pass

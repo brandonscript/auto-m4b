@@ -5,7 +5,7 @@ from src.fix_metadata import build_arg_parser
 from src.lib import id3_utils
 from src.lib.config import cfg
 from src.lib.metadata.settings import Fixm4bSettings, set_settings
-from src.lib.metadata import providers
+from fixm4b.metadata import providers
 
 
 def test_metadata_candidate_normalizes_smart_quotes():

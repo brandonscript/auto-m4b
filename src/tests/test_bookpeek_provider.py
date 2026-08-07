@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from src.fix_metadata import build_arg_parser, print_plan
 from src.lib.config import cfg
-from src.lib.metadata import providers
+from fixm4b.metadata import providers
 from src.lib.metadata.bookpeek_provider import (
     bookpeek_to_candidate,
     build_bookpeek_config,
@@ -113,7 +113,7 @@ def test_scan_bookpeek_injects_online_and_ua(monkeypatch, tmp_path):
             captured["online"] = online
             return _fake_result()
 
-    import src.lib.metadata.bookpeek_provider as bp
+    import fixm4b.metadata.bookpeek_provider as bp
 
     monkeypatch.setattr(bp, "BookPeek", _FakeBookPeek, raising=False)
     # Patch the import site inside scan_bookpeek
@@ -171,7 +171,7 @@ def test_lookup_metadata_folds_bookpeek_without_duplicate_sections(monkeypatch, 
     audio = tmp_path / "x.mp3"
     audio.write_bytes(b"x")
 
-    import src.lib.metadata.bookpeek_provider as bp
+    import fixm4b.metadata.bookpeek_provider as bp
 
     monkeypatch.setattr(
         bp,

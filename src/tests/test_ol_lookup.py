@@ -72,9 +72,9 @@ def test_strip_boundary_number_keeps_meaningful_title_only():
 
 def test_numeric_title_lookup_uses_stripped_fallback():
     with (
-        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("fixm4b.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
-            "src.lib.ol_lookup.requests.get",
+            "fixm4b.ol_lookup.requests.get",
             side_effect=_mock_title_search({"elantris": [_ol_doc("/works/OL5738147W", "Elantris")]}),
         ),
     ):
@@ -87,9 +87,9 @@ def test_numeric_title_lookup_uses_stripped_fallback():
 
 def test_leading_numeric_title_lookup_uses_stripped_fallback():
     with (
-        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("fixm4b.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
-            "src.lib.ol_lookup.requests.get",
+            "fixm4b.ol_lookup.requests.get",
             side_effect=_mock_title_search({"elantris": [_ol_doc("/works/OL5738147W", "Elantris")]}),
         ),
     ):
@@ -101,9 +101,9 @@ def test_leading_numeric_title_lookup_uses_stripped_fallback():
 
 def test_numeric_title_lookup_prefers_original_numbered_title():
     with (
-        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("fixm4b.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
-            "src.lib.ol_lookup.requests.get",
+            "fixm4b.ol_lookup.requests.get",
             side_effect=_mock_title_search(
                 {
                     "the 100": [_ol_doc("/works/OL100W", "The 100")],
@@ -121,9 +121,9 @@ def test_numeric_title_lookup_prefers_original_numbered_title():
 
 def test_numeric_title_lookup_rejects_ambiguous_numbered_fallbacks():
     with (
-        patch("src.lib.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
+        patch("fixm4b.ol_lookup.get_open_library_user_agent", return_value="test/1.0 (t@e.com)"),
         patch(
-            "src.lib.ol_lookup.requests.get",
+            "fixm4b.ol_lookup.requests.get",
             side_effect=_mock_title_search(
                 {
                     "elantris": [
@@ -245,7 +245,7 @@ def test_best_edition_title_score_from_mocked_editions():
             {"title": "Eon"},
         ]
     }
-    with patch("src.lib.ol_lookup.requests.get", return_value=resp) as get:
+    with patch("fixm4b.ol_lookup.requests.get", return_value=resp) as get:
         score = _best_edition_title_score(
             "/works/OL123W", "Dragoneye Reborn", agent="test/1.0 (t@e.com)"
         )
@@ -267,7 +267,7 @@ def test_boost_via_editions_when_author_solid():
         }
     ]
     with patch(
-        "src.lib.ol_lookup._best_edition_title_score", return_value=0.87
+        "fixm4b.ol_lookup._best_edition_title_score", return_value=0.87
     ) as ed_score:
         boosted = _boost_title_score_via_editions(
             "Dragoneye Reborn",
@@ -294,7 +294,7 @@ def test_boost_skipped_when_author_weak_or_missing():
             "name": "Eon",
         }
     ]
-    with patch("src.lib.ol_lookup._best_edition_title_score", return_value=0.99) as ed_score:
+    with patch("fixm4b.ol_lookup._best_edition_title_score", return_value=0.99) as ed_score:
         assert (
             _boost_title_score_via_editions(
                 "Dragoneye Reborn",
@@ -332,7 +332,7 @@ def test_boost_skipped_when_title_already_confident():
             "name": "The Searcher",
         }
     ]
-    with patch("src.lib.ol_lookup._best_edition_title_score", return_value=1.0) as ed_score:
+    with patch("fixm4b.ol_lookup._best_edition_title_score", return_value=1.0) as ed_score:
         assert (
             _boost_title_score_via_editions(
                 "The Searcher",
@@ -389,7 +389,7 @@ def test_best_matching_edition_subtitle_requires_local_tokens():
             {"title": "Eona"},
         ]
     }
-    with patch("src.lib.ol_lookup.requests.get", return_value=resp):
+    with patch("fixm4b.ol_lookup.requests.get", return_value=resp):
         hit = _best_matching_edition_subtitle(
             "/works/OL16116601W",
             "Eon 02 - Eona - The Last Dragoneye (2011)",
@@ -426,7 +426,7 @@ def test_eon_prefers_dragoneye_reborn_not_rise_subtitle():
         ]
     }
     corpus = "Eon 01 - Eon - Dragoneye Reborn (2008) Dragoneye Reborn.m4b"
-    with patch("src.lib.ol_lookup.requests.get", return_value=resp):
+    with patch("fixm4b.ol_lookup.requests.get", return_value=resp):
         sub = _best_matching_edition_subtitle(
             "/works/OL29358192W",
             corpus,
@@ -451,7 +451,7 @@ def test_eona_joins_last_dragoneye_onto_work_title():
         ]
     }
     corpus = "Eon 02 - Eona - The Last Dragoneye (2011) Eona.m4b"
-    with patch("src.lib.ol_lookup.requests.get", return_value=resp):
+    with patch("fixm4b.ol_lookup.requests.get", return_value=resp):
         sub = _best_matching_edition_subtitle(
             "/works/OL16116601W",
             corpus,
@@ -478,7 +478,7 @@ def test_desired_matches_edition_title_full_form_only():
         {"title": "Eon", "subtitle": "Dragoneye Reborn"},
         {"title": "Eon: Dragoneye Reborn"},
     ]
-    with patch("src.lib.ol_lookup._fetch_work_editions", return_value=editions):
+    with patch("fixm4b.ol_lookup._fetch_work_editions", return_value=editions):
         assert _desired_matches_edition_title(
             "/works/OL5954753W",
             "Eon: Dragoneye Reborn",
@@ -503,7 +503,7 @@ def test_best_matching_edition_base_prefers_local_eon_over_au_work():
         {"title": "Eon", "subtitle": "Dragoneye Reborn"},
     ]
     corpus = "Eon 01 - Eon - Dragoneye Reborn (2008) Dragoneye Reborn.m4b"
-    with patch("src.lib.ol_lookup._fetch_work_editions", return_value=editions):
+    with patch("fixm4b.ol_lookup._fetch_work_editions", return_value=editions):
         base = _best_matching_edition_base_title(
             "/works/OL5954753W",
             corpus,

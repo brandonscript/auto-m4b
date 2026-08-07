@@ -214,7 +214,7 @@ def test_contract_shared_and_convert_refuse_author_only_stem(tmp_path: Path, mon
 
     monkeypatch.setattr(TagSnapshot, "from_file", classmethod(fake_from_file))
     monkeypatch.setattr(
-        "src.lib.metadata.plan.source_common_filename",
+        "fixm4b.metadata.plan.source_common_filename",
         lambda *a, **k: author,
     )
     plan = plan_fix(
@@ -373,27 +373,27 @@ def test_contract_shared_edition_enrich_when_corpus_attests(tmp_path: Path, monk
     ol.score = MagicMock(return_value=0.95)
 
     monkeypatch.setattr(
-        "src.lib.ol_lookup.open_library_lookup_title",
+        "fixm4b.ol_lookup.open_library_lookup_title",
         lambda *a, **k: ol,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.get_open_library_user_agent",
+        "fixm4b.ol_lookup.get_open_library_user_agent",
         lambda: "test-agent/1.0",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.desired_matches_edition_title",
+        "fixm4b.ol_lookup.desired_matches_edition_title",
         lambda *a, **k: False,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.best_matching_edition_base_title",
+        "fixm4b.ol_lookup.best_matching_edition_base_title",
         lambda *a, **k: "Eon",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.best_matching_edition_subtitle",
+        "fixm4b.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: "Dragoneye Reborn",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.ol_title_uses_dash_separator",
+        "fixm4b.ol_lookup.ol_title_uses_dash_separator",
         lambda *a, **k: False,
     )
 
@@ -443,23 +443,23 @@ def test_contract_shared_auto_ol_does_not_overwrite_tags(tmp_path: Path, monkeyp
     ol.score = MagicMock(return_value=0.99)
 
     monkeypatch.setattr(
-        "src.lib.ol_lookup.open_library_lookup_title",
+        "fixm4b.ol_lookup.open_library_lookup_title",
         lambda *a, **k: ol,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.get_open_library_user_agent",
+        "fixm4b.ol_lookup.get_open_library_user_agent",
         lambda: "test-agent/1.0",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.desired_matches_edition_title",
+        "fixm4b.ol_lookup.desired_matches_edition_title",
         lambda *a, **k: True,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.best_matching_edition_base_title",
+        "fixm4b.ol_lookup.best_matching_edition_base_title",
         lambda *a, **k: "Some Book",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup.best_matching_edition_subtitle",
+        "fixm4b.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: None,
     )
 
