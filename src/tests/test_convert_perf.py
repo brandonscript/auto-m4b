@@ -300,11 +300,17 @@ def test_map_parallel_preserves_order_and_serializes_when_small():
 def test_probe_threads_defaults_and_override(monkeypatch):
     from src.lib.config import cfg
 
-    monkeypatch.setattr(cfg, "CPU_CORES", 32)
     monkeypatch.setattr(cfg, "MAX_PROBE_THREADS", 0)
     cfg._env.pop("MAX_PROBE_THREADS", None)
-    # Property may be cached via setattr; use direct override on instance.
+
+    monkeypatch.setattr(cfg, "CPU_CORES", 32)
     assert cfg.probe_threads == 16  # capped
+
+    monkeypatch.setattr(cfg, "CPU_CORES", 8)
+    assert cfg.probe_threads == 8
+
+    monkeypatch.setattr(cfg, "CPU_CORES", 2)
+    assert cfg.probe_threads == 4  # floored
 
     monkeypatch.setattr(cfg, "MAX_PROBE_THREADS", 3)
     assert cfg.probe_threads == 3
