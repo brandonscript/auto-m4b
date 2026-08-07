@@ -287,3 +287,36 @@ def test_gr_wins_over_ol_in_parallel_selection(
     assert book.artist == "GR Author"
     assert book._early_resolved_by == "goodreads"
     assert book._early_gr is gr
+
+
+def test_map_parallel_preserves_order_and_serializes_when_small():
+    from src.lib.converter.merge import _map_parallel
+
+    assert _map_parallel(lambda x: x * 2, [1, 2, 3, 4], max_workers=4) == [2, 4, 6, 8]
+    assert _map_parallel(lambda x: x + 1, [10], max_workers=8) == [11]
+    assert _map_parallel(lambda x: x, [], max_workers=4) == []
+
+
+def test_probe_threads_defaults_and_override(monkeypatch):
+    from src.lib.config import cfg
+
+    monkeypatch.setattr(cfg, "CPU_CORES", 32)
+    monkeypatch.setattr(cfg, "MAX_PROBE_THREADS", 0)
+    cfg._env.pop("MAX_PROBE_THREADS", None)
+    # Property may be cached via setattr; use direct override on instance.
+    assert cfg.probe_threads == 16  # capped
+
+    monkeypatch.setattr(cfg, "MAX_PROBE_THREADS", 3)
+    assert cfg.probe_threads == 3
+
+
+def test_encode_cores_override_context():
+    from src.lib.config import cfg
+    from src.lib.converter.merge import reset_encode_cores_override, set_encode_cores_override
+
+    token = set_encode_cores_override(2)
+    try:
+        assert cfg.encode_cores == 2
+    finally:
+        reset_encode_cores_override(token)
+    assert cfg.encode_cores == max(1, int(cfg.CPU_CORES or 1))

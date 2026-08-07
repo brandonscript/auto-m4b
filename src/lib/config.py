@@ -338,9 +338,51 @@ class Config:
     NO_CATS = _NO_CATS
 
     @env_property(typ=int, default=cpu_count())
-    def _CPU_CORES(self): ...
+    def _CPU_CORES(self):
+        """Max parallel ffmpeg encode processes per book (chapter converts)."""
+        ...
 
     CPU_CORES = _CPU_CORES
+
+    @env_property(typ=int, default=0)
+    def _MAX_PROBE_THREADS(self):
+        """Parallel workers for post-encode duration/title probes.
+
+        0 / unset = ``min(CPU_CORES, 16)``. Caps concurrent ffprobe/mutagen
+        reads after per-chapter encode.
+        """
+        ...
+
+    MAX_PROBE_THREADS = _MAX_PROBE_THREADS
+
+    @property
+    def probe_threads(self) -> int:
+        """Resolved probe pool size for merge post-encode I/O."""
+        if self.MAX_PROBE_THREADS and self.MAX_PROBE_THREADS > 0:
+            return max(1, int(self.MAX_PROBE_THREADS))
+        return min(max(1, int(self.CPU_CORES or 1)), 16)
+
+    @env_property(typ=int, default=1)
+    def _MAX_CONVERT_JOBS(self):
+        """Max books converting at once. Default 1 (sequential inbox).
+
+        When >1, independent (non-series) books may convert in parallel.
+        Per-book ffmpeg workers are scaled so
+        ``active_jobs × CPU_CORES_budget ≤ CPU_CORES``.
+        """
+        ...
+
+    MAX_CONVERT_JOBS = _MAX_CONVERT_JOBS
+
+    @property
+    def encode_cores(self) -> int:
+        """Per-book ffmpeg worker budget (may be reduced under MAX_CONVERT_JOBS)."""
+        from src.lib.converter.merge import get_encode_cores_override
+
+        override = get_encode_cores_override()
+        if override is not None:
+            return max(1, int(override))
+        return max(1, int(self.CPU_CORES or 1))
 
     @env_property(typ=int, default=0)
     def _MAX_BITRATE(self):
