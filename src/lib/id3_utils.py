@@ -1366,6 +1366,30 @@ def _goodreads_early_extraction(
     return result
 
 
+def _bookpeek_early_extraction(book: "Audiobook") -> MetadataCandidate | None:
+    """Optional bookpeek ASR/Audnexus signal (narrator + fallback title/author)."""
+    from pathlib import Path
+
+    from src.lib.metadata.bookpeek_provider import (
+        bookpeek_enabled,
+        bookpeek_to_candidate,
+        scan_bookpeek,
+    )
+
+    if not bookpeek_enabled():
+        return None
+    try:
+        sample = book.sample_audio1
+    except Exception:
+        return None
+    if not sample:
+        return None
+    result = scan_bookpeek(Path(sample))
+    if result is None:
+        return None
+    return bookpeek_to_candidate(result)
+
+
 def _narrator_from_remaining_tags(book: "Audiobook") -> str:
     """Post-OL narrator detection: once the author is known, scan ID3 fields for
     the narrator.  Handles cases the heuristic scorer misses, e.g. the artist
@@ -1493,6 +1517,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # the Hive" → OL confirms title and author rather than guessing).
     ol_match = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
     goodreads_match = _goodreads_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
+    bookpeek_match = _bookpeek_early_extraction(book)
     provider_resolved = goodreads_match is not None or ol_match is not None
     if goodreads_match:
         if ol_match and (
@@ -1510,6 +1535,16 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
         if goodreads_match.author:
             book.artist = goodreads_match.author
             book.albumartist = goodreads_match.author
+    elif not provider_resolved and bookpeek_match and bookpeek_match.status == "match" and bookpeek_match.title:
+        # Fallback only when GR/OL did not resolve
+        book.title = _normalize_ol_title(bookpeek_match.title)
+        book.album = book.title
+        book.sortalbum = strip_leading_articles(book.title)
+        if bookpeek_match.author:
+            book.artist = bookpeek_match.author
+            book.albumartist = bookpeek_match.author
+        provider_resolved = True
+        print_debug(f"bookpeek fallback title/author: {book.title!r} / {book.artist!r}")
     if provider_resolved:
         if re.search(r"\s{2,}", book.basename):
             folder_title = re.split(r"\s{2,}", book.basename, maxsplit=1)[-1].strip()
@@ -1539,6 +1574,13 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
         )
     else:
         book.narrator = id3_score.determine_narrator(fallback=book.fs_narrator)
+
+    # Prefer Audnexus/ASR narrator from bookpeek when local narrator is empty
+    # or matches the author (common ID3 mistake).
+    if bookpeek_match and bookpeek_match.narrator:
+        if not book.narrator or book.narrator.lower() == (book.artist or "").lower():
+            book.narrator = bookpeek_match.narrator
+            print_debug(f"bookpeek narrator: {book.narrator!r}")
 
     # Guard: author == narrator is almost never correct.  Clear it to avoid
     # a person appearing in both roles.

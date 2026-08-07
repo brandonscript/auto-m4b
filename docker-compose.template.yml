@@ -1,7 +1,13 @@
 services:
   auto-m4b:
     image: brandonscript/auto-m4b
-    # build: .  # uncomment to build locally instead of pulling from Docker Hub
+    # Uncomment to build locally (needs sibling ../goodscraps and ../bookpeek checkouts):
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   additional_contexts:
+    #     goodscraps: ../goodscraps
+    #     bookpeek: ../bookpeek
     container_name: auto-m4b
     restart: unless-stopped
     volumes:
@@ -26,6 +32,7 @@ services:
       # - OPEN_LIBRARY_TIMEOUT=30
       # - GOODSCRAPS_USER_AGENT=auto-m4b/1.0 (you@example.com)
       # - GOODSCRAPS_TIMEOUT=30
+      # - BOOKPEEK=1  # ASR + Audnexus; online when GOODSCRAPS/OPEN_LIBRARY UAs are set (reuses those agents)
       # - MAX_BITRATE=64
       # - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
       # - POST_CONVERT_SCRIPT_TIMEOUT=30

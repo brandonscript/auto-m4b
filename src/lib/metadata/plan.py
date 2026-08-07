@@ -129,6 +129,7 @@ def _attach_provider_comparison(
     """Attach both provider results while preserving OL's existing enrichments."""
     goodreads = comparison.candidates.get("goodreads")
     open_library = comparison.candidates.get("openlibrary")
+    bookpeek = comparison.candidates.get("bookpeek")
     if goodreads:
         plan.goodreads_title = goodreads.title
         plan.goodreads_author = goodreads.author
@@ -145,6 +146,20 @@ def _attach_provider_comparison(
         plan.ol_url = open_library.url
         plan.ol_score = open_library.score
         plan.ol_status = open_library.status
+    if bookpeek:
+        plan.bookpeek_status = bookpeek.status
+        plan.bookpeek_title = bookpeek.title
+        plan.bookpeek_author = bookpeek.author
+        plan.bookpeek_narrator = bookpeek.narrator
+        plan.bookpeek_asin = bookpeek.ref
+        plan.bookpeek_score = bookpeek.score
+        plan.bookpeek_engine = comparison.bookpeek_engine
+        plan.bookpeek_seconds = comparison.bookpeek_seconds
+        plan.bookpeek_corroborated_goodreads = comparison.bookpeek_corroborated_goodreads
+        plan.bookpeek_corroborated_openlibrary = comparison.bookpeek_corroborated_openlibrary
+        if bookpeek.narrator and not (plan.desired_narrator or "").strip():
+            plan.desired_narrator = bookpeek.narrator
+            plan.reasons.append("use bookpeek narrator")
     plan.provider_conflicts.extend(comparison.conflicts)
     for conflict in comparison.conflicts:
         plan.reasons.append(f"provider disagreement ({conflict})")
@@ -189,6 +204,20 @@ def _attach_provider_comparison(
     if not selected:
         return
     plan.selected_provider = selected.provider
+    if selected.provider == "bookpeek":
+        if selected.title and not apply_goodreads:
+            # Fallback only: fill missing desired fields
+            if not (plan.desired_title or "").strip():
+                plan.desired_title = selected.title
+                plan.desired_album = selected.title
+                plan.reasons.append("use bookpeek title (fallback)")
+            if selected.author and not (plan.desired_author or "").strip():
+                plan.desired_author = selected.author
+                plan.reasons.append("use bookpeek author (fallback)")
+        if selected.narrator and not (plan.desired_narrator or "").strip():
+            plan.desired_narrator = selected.narrator
+            plan.reasons.append("use bookpeek narrator")
+        return
     if selected.provider == "openlibrary":
         _attach_open_library(plan, apply_ol_tags=False, minimalist=minimalist)
         return
@@ -222,6 +251,7 @@ def plan_fix(
     lookup_ol: bool = True,
     goodreads_ref: str | None = None,
     lookup_goodreads: bool | None = None,
+    lookup_bookpeek: bool | None = None,
     minimalist: bool = False,
     force_dirty: bool = False,
 ) -> FixPlan | None:
@@ -431,19 +461,28 @@ def plan_fix(
         lookup_goodreads = bool(cfg.GOODSCRAPS_USER_AGENT)
     if goodreads_ref and not lookup_goodreads:
         lookup_goodreads = True
+    if lookup_bookpeek is None:
+        from src.lib.metadata.bookpeek_provider import bookpeek_enabled
+
+        lookup_bookpeek = bookpeek_enabled()
+
+    # Prefer source audio for bookpeek ASR; fall back to the converted m4b.
+    bookpeek_audio = source_path if source_path and source_path.is_file() else m4b
 
     if ol_ref:
         _attach_open_library(
             plan, ol_ref=ol_ref, apply_ol_tags=True, minimalist=minimalist
         )
-    elif goodreads_ref or (lookup_goodreads and cfg.GOODSCRAPS_USER_AGENT):
+    elif goodreads_ref or (lookup_goodreads and cfg.GOODSCRAPS_USER_AGENT) or lookup_bookpeek:
         comparison = lookup_metadata(
             title,
             author=author,
             narrator=narrator,
             lookup_goodreads=lookup_goodreads,
             lookup_open_library=lookup_ol,
+            lookup_bookpeek=lookup_bookpeek,
             goodreads_ref=goodreads_ref,
+            audio_path=bookpeek_audio if lookup_bookpeek else None,
         )
         _attach_provider_comparison(
             plan,

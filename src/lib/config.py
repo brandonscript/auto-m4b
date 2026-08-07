@@ -268,6 +268,11 @@ class Config:
                     print_grey(self.info_str)
                     if self.OPEN_LIBRARY_USER_AGENT:
                         print_grey(f"openlibrary.org UserAgent: {self.OPEN_LIBRARY_USER_AGENT}")
+                    if self.GOODSCRAPS_USER_AGENT:
+                        print_grey(f"Goodreads UserAgent: {self.GOODSCRAPS_USER_AGENT}")
+                    if self.BOOKPEEK:
+                        online = bool(self.GOODSCRAPS_USER_AGENT or self.OPEN_LIBRARY_USER_AGENT)
+                        print_grey(f"bookpeek: on ({'online' if online else 'ASR/Audnexus only'})")
                     if env_msg:
                         print_dark_grey(env_msg)
 
@@ -440,6 +445,18 @@ class Config:
         ...
 
     GOODSCRAPS_TIMEOUT = _GOODSCRAPS_TIMEOUT
+
+    @env_property(typ=bool, default=False)
+    def _BOOKPEEK(self):
+        """Enable optional bookpeek ASR + Audnexus metadata enrichment.
+
+        When enabled alongside GOODSCRAPS_USER_AGENT and/or OPEN_LIBRARY_USER_AGENT,
+        bookpeek runs online by default and reuses those user agents (no duplicate
+        BOOKPEEK_* agent env vars). Default off.
+        """
+        ...
+
+    BOOKPEEK = _BOOKPEEK
 
     @env_property(typ=bool, default=False)
     def _COVER_OCR(self):

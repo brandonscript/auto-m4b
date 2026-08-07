@@ -114,6 +114,17 @@ class FixPlan:
     goodreads_status: str = ""  # match | low_confidence | none | skipped | forced
     selected_provider: str = ""
     provider_conflicts: list[str] = field(default_factory=list)
+    # bookpeek (ASR / Audnexus display; nested GR/OL folded into sections above)
+    bookpeek_status: str = ""
+    bookpeek_title: str = ""
+    bookpeek_author: str = ""
+    bookpeek_narrator: str = ""
+    bookpeek_asin: str = ""
+    bookpeek_score: float = 0.0
+    bookpeek_engine: str = ""
+    bookpeek_seconds: float = 0.0
+    bookpeek_corroborated_goodreads: bool = False
+    bookpeek_corroborated_openlibrary: bool = False
 
     @property
     def needs_tag_write(self) -> bool:
