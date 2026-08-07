@@ -51,3 +51,14 @@ Tagged in `test_metadata_plan.py` for Phase 4 triage:
 - Colon + always-minimalist are **post-selection** transforms; convert selection is still OCR / MetadataScore / OL-early (not full `plan_fix`).
 - `minimalist_title` drops unbalanced `(Series, Book N)` paren tails.
 - `test_parse_combo_id3_tags[…expected3]` can fail when `OPEN_LIBRARY_USER_AGENT` is set (OL early overwrites Album Artist narrator) — tracked under **OL auto-write**.
+
+## Phase 6 notes (experiment)
+
+- Post-build `verify_and_update_id3_tags` can call shared `plan_fix` when
+  `USE_PLAN_FIX_IN_VERIFY=1` (default on `dev`). Pre-convert `extract_metadata`
+  selection is unchanged.
+- Convert still auto-applies desired fields after the plan (shared auto OL remains
+  display-only unless `ol_ref` forces attach). Passthrough / basename stem adapters
+  stay convert-side.
+- Disable with `USE_PLAN_FIX_IN_VERIFY=0` to restore the hand-rolled FixPlan attach path.
+
