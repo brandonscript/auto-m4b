@@ -8,6 +8,7 @@ services:
     #   additional_contexts:
     #     goodscraps: ../goodscraps
     #     bookpeek: ../bookpeek
+    #     fixm4b: ../fixm4b
     container_name: auto-m4b
     restart: unless-stopped
     volumes:

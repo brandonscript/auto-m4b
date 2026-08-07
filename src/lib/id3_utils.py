@@ -217,27 +217,16 @@ def write_id3_tags_mutagen(
     cover: Path | None = None,
 ) -> None:
     from src.lib.id3_tags import Id3Tags
+    from src.lib.tag_write import write_id3_tags
 
     path = file.path if isinstance(file, BooksTree) else file
-    # Absolute last line of defense: never write blank Title/Album to disk.
-    tags = _sanitize_tags_for_write(tags, fallback_stem=path.stem)
-    if path.suffix.lower() in [".m4b", ".m4a"]:
-        try:
-            write_m4b_tags(path, tags, cover=cover)
-        except Exception as e:
-            # Some inbox/fixture files are MP3/ADTS content with an .m4b extension
-            # (common with incomplete remuxes). Fall back to the MP3 writer so we
-            # can still fill Title/Album instead of fatally crashing.
-            if "not a MP4" not in str(e) and e.__class__.__name__ != "MP4StreamInfoError":
-                raise
-            print_debug(f"write_m4b_tags failed ({e}); falling back to mp3 tag writer for {path.name}")
-            write_mp3_tags(path, tags, cover=cover)
-    else:
-        write_mp3_tags(path, tags, cover=cover)
-    # Delete from tags cache
-    Id3Tags.rm_from_cache(path)
-    ...
-    ...
+    write_id3_tags(
+        path,
+        tags,
+        cover=cover,
+        on_write=Id3Tags.rm_from_cache,
+        encoder_tag="brandonscript/auto-m4b",
+    )
 
 
 def write_mp3_tags(

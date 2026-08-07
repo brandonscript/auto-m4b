@@ -591,11 +591,11 @@ def test_attach_ol_dual_ol_lookup_stripped_fallback(tmp_path: Path, monkeypatch)
         lambda cand, *a, **k: "match" if cand is match else "none",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        "src.lib.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test/1.0 (t@e.com)",
     )
 
@@ -672,7 +672,7 @@ def test_auto_ol_numeric_fallback_promotes_canonical_title_when_id3_supports_it(
     match = _numeric_ol_match()
     monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
     monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
-    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    monkeypatch.setattr("src.lib.ol_lookup.get_open_library_user_agent", lambda: None)
     plan = _numeric_ol_plan(
         tmp_path,
         current=TagSnapshot(title="Elantis", artist="Brandon Sanderson"),
@@ -691,7 +691,7 @@ def test_auto_ol_numeric_fallback_keeps_filesystem_title_without_id3_support(
     match = _numeric_ol_match()
     monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
     monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
-    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    monkeypatch.setattr("src.lib.ol_lookup.get_open_library_user_agent", lambda: None)
     plan = _numeric_ol_plan(
         tmp_path,
         current=TagSnapshot(title="Unrelated title", artist="Unrelated author"),
@@ -710,7 +710,7 @@ def test_auto_ol_uses_canonical_casing_for_unanimous_case_insensitive_title(
     match.title = "The Litigators"
     monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
     monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
-    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    monkeypatch.setattr("src.lib.ol_lookup.get_open_library_user_agent", lambda: None)
     m4b = _touch(tmp_path / "The LItigators.m4b")
     plan = FixPlan(
         book_dir=tmp_path,
@@ -738,7 +738,7 @@ def test_auto_ol_promotes_author_when_id3_author_field_supports_it(
     match = _numeric_ol_match()
     monkeypatch.setattr("src.lib.ol_lookup.open_library_lookup_title", lambda *a, **k: match)
     monkeypatch.setattr("src.lib.ol_lookup.ol_match_band", lambda *a, **k: "match")
-    monkeypatch.setattr("src.lib.ol_lookup._get_open_library_user_agent", lambda: None)
+    monkeypatch.setattr("src.lib.ol_lookup.get_open_library_user_agent", lambda: None)
     plan = _numeric_ol_plan(
         tmp_path,
         current=TagSnapshot(
@@ -1333,11 +1333,11 @@ def test_attach_ol_enriches_title_with_edition_subtitle(tmp_path: Path, monkeypa
         lambda *a, **k: [{"title": "Eona", "subtitle": "the last Dragoneye"}],
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        "src.lib.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: "the last Dragoneye",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test/1.0 (t@e.com)",
     )
 
@@ -1388,11 +1388,11 @@ def test_attach_ol_eon_uses_work_title_not_marketing_base(tmp_path: Path, monkey
         ],
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        "src.lib.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: "Dragoneye Reborn",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test/1.0 (t@e.com)",
     )
 
@@ -1449,11 +1449,11 @@ def test_attach_ol_keeps_eon_over_au_work_title(tmp_path: Path, monkeypatch):
         lambda *a, **k: editions,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        "src.lib.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: "Dragoneye Reborn",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test/1.0 (t@e.com)",
     )
 
@@ -1513,7 +1513,7 @@ def test_attach_ol_enriches_with_local_edition_base_not_au_work(
         lambda *a, **k: editions,
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test/1.0 (t@e.com)",
     )
 
@@ -1583,11 +1583,11 @@ def test_plan_fix_defers_ol_then_attach(tmp_path: Path, monkeypatch):
         lambda *a, **k: [{"title": "Eon", "subtitle": "Dragoneye Reborn"}],
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._best_matching_edition_subtitle",
+        "src.lib.ol_lookup.best_matching_edition_subtitle",
         lambda *a, **k: "Dragoneye Reborn",
     )
     monkeypatch.setattr(
-        "src.lib.ol_lookup._get_open_library_user_agent",
+        "src.lib.ol_lookup.get_open_library_user_agent",
         lambda: "test/1.0 (t@e.com)",
     )
 

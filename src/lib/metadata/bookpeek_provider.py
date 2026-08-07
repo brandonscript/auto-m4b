@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from cachetools import TTLCache
 from rapidfuzz import fuzz
 
-from src.lib.config import cfg
+from src.lib.metadata.settings import get_settings
 from src.lib.term import print_debug, print_warning
 from src.lib.typing import MEMO_TTL
 
@@ -32,12 +32,13 @@ class BookPeekCorroboration:
 
 
 def bookpeek_enabled() -> bool:
-    return bool(getattr(cfg, "BOOKPEEK", False))
+    return bool(get_settings().bookpeek)
 
 
 def bookpeek_should_run_online() -> bool:
     """Online by default when auto-m4b already has GR and/or OL user agents."""
-    return bool(cfg.GOODSCRAPS_USER_AGENT or cfg.OPEN_LIBRARY_USER_AGENT)
+    settings = get_settings()
+    return bool(settings.goodscraps_user_agent or settings.open_library_user_agent)
 
 
 def clear_bookpeek_scan_cache() -> None:
@@ -52,11 +53,12 @@ def _bookpeek_scan_cache_key(audio_path: Path, online: bool) -> tuple[object, ..
 
 
 def build_bookpeek_config():
-    """Build BookPeekConfig from auto-m4b settings (reuses GR/OL UAs; no duplicate env)."""
+    """Build BookPeekConfig from planner settings (reuses GR/OL UAs; no duplicate env)."""
     from bookpeek import BookPeekConfig, EnrichConfig
 
-    gr_ua = (cfg.GOODSCRAPS_USER_AGENT or "").strip() or None
-    ol_ua = (cfg.OPEN_LIBRARY_USER_AGENT or "").strip() or None
+    settings = get_settings()
+    gr_ua = (settings.goodscraps_user_agent or "").strip() or None
+    ol_ua = (settings.open_library_user_agent or "").strip() or None
     online = bookpeek_should_run_online()
     return BookPeekConfig(
         enrich=EnrichConfig(
@@ -66,8 +68,8 @@ def build_bookpeek_config():
             audnexus=True,
             goodreads_user_agent=gr_ua,
             openlibrary_user_agent=ol_ua,
-            goodreads_timeout=float(cfg.GOODSCRAPS_TIMEOUT or 30),
-            openlibrary_timeout=float(cfg.OPEN_LIBRARY_TIMEOUT or 15),
+            goodreads_timeout=float(settings.goodscraps_timeout or 30),
+            openlibrary_timeout=float(settings.open_library_timeout or 15),
         )
     )
 

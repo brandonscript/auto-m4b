@@ -144,7 +144,7 @@ def _pick_desired(
             title = deauthored
 
     if minimalist and title:
-        from src.lib.ol_lookup import _subtitle_sep_normalized, id3_prefer_colon_separator
+        from src.lib.ol_lookup import subtitle_sep_normalized, id3_prefer_colon_separator
 
         stripped = minimalist_title(title, author=provisional_author)
         candidates: list[str] = []
@@ -171,7 +171,7 @@ def _pick_desired(
         # Prefer colon form when candidates only differ by ": " vs " - "
         chosen = candidates[0]
         for cand in candidates:
-            if _subtitle_sep_normalized(cand) != _subtitle_sep_normalized(chosen):
+            if subtitle_sep_normalized(cand) != subtitle_sep_normalized(chosen):
                 continue
             if ": " in cand and ": " not in chosen:
                 chosen = cand

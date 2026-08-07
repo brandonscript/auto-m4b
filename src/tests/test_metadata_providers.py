@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from src.fix_metadata import build_arg_parser
 from src.lib import id3_utils
 from src.lib.config import cfg
+from src.lib.metadata.settings import Fixm4bSettings, set_settings
 from src.lib.metadata import providers
 
 
@@ -264,7 +265,7 @@ class _CanonicalPhantomGoodscraps(_FakeGoodscraps):
 
 def test_goodreads_lookup_normalizes_and_scores(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _FakeGoodscraps)
-    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+    monkeypatch.setattr(providers, "get_settings", lambda: Fixm4bSettings(goodscraps_user_agent="auto-m4b/1.0 (test@example.com)"))
 
     result = providers._goodreads_lookup("The Hobbit", "J. R. R. Tolkien", "")
 
@@ -279,7 +280,7 @@ def test_goodreads_lookup_normalizes_and_scores(monkeypatch):
 
 def test_goodreads_prefers_a_similar_author_over_top_title(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _AuthorAwareGoodscraps)
-    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+    monkeypatch.setattr(providers, "get_settings", lambda: Fixm4bSettings(goodscraps_user_agent="auto-m4b/1.0 (test@example.com)"))
 
     result = providers._goodreads_lookup("By the Sword", "Mercedes Lackey", "")
 
@@ -291,7 +292,7 @@ def test_goodreads_prefers_a_similar_author_over_top_title(monkeypatch):
 def test_goodreads_prefers_exact_title_over_longer_containing_title(monkeypatch):
     """A companion title containing the query must not beat the actual book."""
     monkeypatch.setattr(providers, "Goodscraps", _TitleCollisionGoodscraps)
-    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+    monkeypatch.setattr(providers, "get_settings", lambda: Fixm4bSettings(goodscraps_user_agent="auto-m4b/1.0 (test@example.com)"))
 
     result = providers._goodreads_lookup("Arrow's Fall", "Mercedes Lackey", "")
 
@@ -302,7 +303,7 @@ def test_goodreads_prefers_exact_title_over_longer_containing_title(monkeypatch)
 
 def test_goodreads_prefers_exact_title_over_exact_author_collection(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _ItalianGirlGoodscraps)
-    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+    monkeypatch.setattr(providers, "get_settings", lambda: Fixm4bSettings(goodscraps_user_agent="auto-m4b/1.0 (test@example.com)"))
 
     result = providers._goodreads_lookup("The Italian Girl", "Lucinda Riley", "")
 
@@ -314,7 +315,7 @@ def test_goodreads_prefers_exact_title_over_exact_author_collection(monkeypatch)
 def test_goodreads_falls_back_to_series_core_title(monkeypatch):
     client = _SeriesPrefixedGoodscraps()
     monkeypatch.setattr(providers, "Goodscraps", lambda **_kwargs: client)
-    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+    monkeypatch.setattr(providers, "get_settings", lambda: Fixm4bSettings(goodscraps_user_agent="auto-m4b/1.0 (test@example.com)"))
 
     result = providers._goodreads_lookup("Harry Hole 02: Cockroaches", "Jo Nesbø", "")
 
@@ -326,7 +327,7 @@ def test_goodreads_falls_back_to_series_core_title(monkeypatch):
 
 def test_goodreads_resolves_search_result_to_canonical_book(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _CanonicalPhantomGoodscraps)
-    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+    monkeypatch.setattr(providers, "get_settings", lambda: Fixm4bSettings(goodscraps_user_agent="auto-m4b/1.0 (test@example.com)"))
 
     result = providers._goodreads_lookup("Phantom", "Jo Nesbø", "")
 
@@ -337,7 +338,7 @@ def test_goodreads_resolves_search_result_to_canonical_book(monkeypatch):
 
 def test_goodreads_forced_lookup_skips_search(monkeypatch):
     monkeypatch.setattr(providers, "Goodscraps", _FakeGoodscraps)
-    monkeypatch.setattr(providers.cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (test@example.com)")
+    monkeypatch.setattr(providers, "get_settings", lambda: Fixm4bSettings(goodscraps_user_agent="auto-m4b/1.0 (test@example.com)"))
 
     result = providers._goodreads_lookup("ignored", "", "", ref="42")
 
