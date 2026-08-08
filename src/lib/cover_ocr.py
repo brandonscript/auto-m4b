@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rapidfuzz import fuzz
+from fixm4b.metadata.ocr_signals import ocr_mentions_name, ocr_supports_title
 
 from src.lib.term import print_debug
 
@@ -20,8 +20,14 @@ if TYPE_CHECKING:
     from src.lib.audiobook import Audiobook
 
 _MIN_IMAGE_PX = 200
-_AUTHOR_PARTIAL_MIN = 70
-_TITLE_TOKEN_MIN = 0.55
+
+__all__ = [
+    "cover_ocr_available",
+    "extract_cover_ocr_text",
+    "ocr_image_bytes",
+    "ocr_mentions_name",
+    "ocr_supports_title",
+]
 
 
 def cover_ocr_available() -> bool:
@@ -123,23 +129,3 @@ def extract_cover_ocr_text(book: "Audiobook") -> str:
 
     return ""
 
-
-def ocr_mentions_name(ocr_text: str, name: str) -> bool:
-    """True if *name* (or a substantial last-name token) appears in OCR text."""
-    blob = (ocr_text or "").lower()
-    n = (name or "").strip()
-    if not blob or not n:
-        return False
-    if n.lower() in blob:
-        return True
-    tokens = [t for t in re.split(r"[\s,]+", n) if len(t) >= 4]
-    if tokens and tokens[-1].lower() in blob:
-        return True
-    return fuzz.partial_ratio(n.lower(), blob) >= _AUTHOR_PARTIAL_MIN
-
-
-def ocr_supports_title(ocr_text: str, title: str) -> bool:
-    """True when OCR text is reasonably similar to a story title candidate."""
-    if not ocr_text or not (title or "").strip():
-        return False
-    return fuzz.token_set_ratio(title.strip().lower(), ocr_text.lower()) / 100 >= _TITLE_TOKEN_MIN

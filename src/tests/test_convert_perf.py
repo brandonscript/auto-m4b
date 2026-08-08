@@ -13,6 +13,11 @@ from src.lib.audiobook import Audiobook
 from src.lib.metadata.providers import MetadataCandidate
 
 
+def _ol_early_match(ol):
+    from src.lib.metadata.ol_early import OlEarlyMatch
+    return OlEarlyMatch(ol=ol, preferred_author=getattr(ol, "author", None), preferred_canonical=None)
+
+
 def _make_ol_result(*, score=1.0, title="Map of Bones", author="James Rollins", date="2005", author_score=1.0):
     from unittest.mock import MagicMock
 
@@ -39,65 +44,6 @@ def _mock_ol_author(name: str):
     a.work_count = 10
     a.score = MagicMock(return_value=2.0)
     return a
-
-
-def test_ol_early_extraction_caps_title_lookups(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """Nested title×author OL searches must stop at 8 lookups even with many candidates."""
-    from src.lib.id3_tags import Id3Tags
-    from src.lib.id3_utils import _ol_early_extraction
-    from src.lib.config import cfg as real_cfg
-
-    book = book_in_author_named_folder
-    # Distinct title/album/sortalbum/fs/basename so variants multiply before the hard cap.
-    mock_id3_tags(
-        (
-            book.sample_audio1,
-            {
-                "title": "Alpha Title One",
-                "artist": "Author A",
-                "album": "Beta Album Two",
-                "albumartist": "Author A",
-                "sortalbum": "Gamma Sort Three",
-            },
-        ),
-        (
-            book.sample_audio2,
-            {
-                "title": "Alpha Title One",
-                "artist": "Author A",
-                "album": "Beta Album Two",
-                "albumartist": "Author A",
-            },
-        ),
-    )
-    book.extract_path_info()
-    book.fs_title = "Delta FS Four"
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-
-    calls: list[str] = []
-
-    def _counting_lookup(title, *args, **kwargs):
-        calls.append(title)
-        # Never accept — force the loop to keep trying until the hard cap.
-        return None
-
-    with (
-        patch("src.lib.id3_utils.open_library_lookup_title", side_effect=_counting_lookup),
-        patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author("Author A")),
-        patch.object(
-            type(real_cfg),
-            "OPEN_LIBRARY_USER_AGENT",
-            new_callable=PropertyMock,
-            return_value="test-agent/1.0",
-        ),
-    ):
-        result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
-    assert len(calls) <= 8, f"expected ≤8 OL title lookups, got {len(calls)}: {calls}"
 
 
 def test_bookpeek_skipped_when_provider_resolved_with_narrator(
@@ -132,7 +78,7 @@ def test_bookpeek_skipped_when_provider_resolved_with_narrator(
 
     ol = _make_ol_result()
     with (
-        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol) as ol_mock,
+        patch("src.lib.metadata.ol_early.extract_ol_early", return_value=_ol_early_match(ol)) as ol_mock,
         patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None),
         patch("src.lib.id3_utils._bookpeek_early_extraction") as bp_mock,
         patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=True),
@@ -173,7 +119,7 @@ def test_bookpeek_online_false_when_narrator_missing(
         status="match",
     )
     with (
-        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol),
+        patch("src.lib.metadata.ol_early.extract_ol_early", return_value=_ol_early_match(ol)),
         patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None),
         patch("src.lib.id3_utils._bookpeek_early_extraction", return_value=bp) as bp_mock,
         patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=True),
@@ -348,7 +294,7 @@ def test_extract_skips_metadata_score_when_provider_resolved(
 
     ol = _make_ol_result()
     with (
-        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol),
+        patch("src.lib.metadata.ol_early.extract_ol_early", return_value=_ol_early_match(ol)),
         patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None),
         patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=False),
         patch("src.lib.id3_utils.MetadataScore") as score_mock,
@@ -387,7 +333,7 @@ def test_gr_match_skips_ol_early(
         status="match",
     )
     with (
-        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol) as ol_mock,
+        patch("src.lib.metadata.ol_early.extract_ol_early", return_value=_ol_early_match(ol)) as ol_mock,
         patch("src.lib.id3_utils._goodreads_early_extraction", return_value=gr),
         patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=False),
     ):
@@ -420,7 +366,7 @@ def test_ol_early_runs_when_gr_misses(
 
     ol = _make_ol_result()
     with (
-        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol) as ol_mock,
+        patch("src.lib.metadata.ol_early.extract_ol_early", return_value=_ol_early_match(ol)) as ol_mock,
         patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None),
         patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=False),
     ):

@@ -838,12 +838,11 @@ def test_ol_first_extraction_album_is_author(
     ol_result.author_score = MagicMock(return_value=0.95)
 
     # Simulate OL-first returning a confident match (return-only; extract applies).
-    def _fake_ol(b, t1, t2):
-        ol_result._convert_preferred_author = author
-        ol_result._convert_preferred_canonical = author
-        return ol_result
+    from src.lib.metadata.ol_early import OlEarlyMatch
 
-    with patch("src.lib.id3_utils._ol_early_extraction", side_effect=_fake_ol):
+    fake = OlEarlyMatch(ol=ol_result, preferred_author=author, preferred_canonical=author)
+
+    with patch("src.lib.metadata.ol_early.extract_ol_early", return_value=fake):
         with patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None):
             book.extract_metadata()
 
@@ -868,7 +867,7 @@ def _make_ol_result(
     swapped: bool = False,
     narrator: str = "",
 ) -> "MagicMock":
-    """Helper to build a mock OpenLibraryTitle for _ol_early_extraction tests."""
+    """Helper to build a mock OpenLibraryTitle for OL-early tests."""
     from unittest.mock import MagicMock
 
     r = MagicMock()
@@ -899,16 +898,11 @@ def test_ol_early_extraction_accepts_high_similarity_score(
     book_in_author_named_folder: Audiobook,
     mock_id3_tags: Callable[..., list[dict[str, str]]],
 ):
-    """_ol_early_extraction must accept a high-similarity OL result (score >= 0.85).
-
-    Regression: the scoring convention was inverted — a perfect fuzz.ratio match
-    returns score=1.0, but the old code checked `score < best_score` starting from
-    1.0 so 1.0 < 1.0 is False and best_ol was never set, causing all good matches
-    (including exact ones like 'Map of Bones') to be silently rejected.
-    """
+    """extract_ol_early + apply must accept a high-similarity OL result (score >= 0.85)."""
     from unittest.mock import PropertyMock, patch
 
-    from src.lib.id3_utils import _apply_ol_early_to_book, _ol_early_extraction
+    from src.lib.id3_utils import _apply_ol_early_to_book, _ol_early_hints_from_book
+    from src.lib.metadata.ol_early import extract_ol_early
 
     book = book_in_author_named_folder
     title = "Map of Bones"
@@ -926,324 +920,15 @@ def test_ol_early_extraction_accepts_high_similarity_score(
     from src.lib.id3_tags import Id3Tags
 
     tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
+    with patch("fixm4b.metadata.ol_early.open_library_lookup_title", return_value=ol_result):
+        with patch("fixm4b.metadata.ol_early.open_library_lookup_author", return_value=_mock_ol_author(author)):
             with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
+                result = extract_ol_early(_ol_early_hints_from_book(book, tag1, tag1))
 
     assert result is not None, "High-similarity OL match (score=1.0) must be accepted"
     _apply_ol_early_to_book(book, result)
     assert book.title == title, f"Expected title '{title}', got '{book.title}'"
     assert book.artist == author, f"Expected author '{author}', got '{book.artist}'"
-
-
-def test_ol_early_extraction_rejects_low_similarity_score(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """_ol_early_extraction must reject a low-similarity OL result (score < 0.85)."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    mock_id3_tags(
-        (book.sample_audio1, {"title": "Some Book", "artist": "Some Author", "album": "", "albumartist": ""}),
-        (book.sample_audio2, {"title": "Some Book", "artist": "Some Author", "album": "", "albumartist": ""}),
-    )
-    book.extract_path_info()
-
-    ol_result = _make_ol_result(score=0.3, title="Completely Different Book", author="Wrong Author", author_score=0.0)
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author("Some Author")):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None, "Low-similarity OL match (score=0.3) must be rejected"
-
-
-def test_ol_early_extraction_rejects_mid_similarity_without_token_set(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """Scores between 0.5 and 0.85 must not be accepted on ratio alone."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    mock_id3_tags(
-        (book.sample_audio1, {"title": "Some Book", "artist": "Some Author", "album": "Some Book", "albumartist": "Some Author"}),
-        (book.sample_audio2, {"title": "Some Book", "artist": "Some Author", "album": "Some Book", "albumartist": "Some Author"}),
-    )
-    book.extract_path_info()
-
-    # Dissimilar title so token_set also fails the floor.
-    ol_result = _make_ol_result(
-        score=0.72,
-        title="Completely Unrelated Anthology Volume Three",
-        author="Some Author",
-        author_score=1.0,
-    )
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author("Some Author")):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
-
-
-def test_ol_rejects_wrong_author_same_title_searcher(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """Tana French The Searcher must not be overwritten by Simon Toyne / Solomon Creed."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    title = "The Searcher: A Novel"
-    author = "Tana French"
-    mock_id3_tags(
-        (
-            book.sample_audio1,
-            {
-                "title": title,
-                "artist": author,
-                "album": title,
-                "albumartist": author,
-                "copyright": "©2020 Tana French (P)2020 Penguin Audio",
-            },
-        ),
-        (book.sample_audio2, {"title": title, "artist": author, "album": title, "albumartist": author}),
-    )
-    book.extract_path_info()
-    book.fs_author = "French, Tana"
-
-    ol_result = _make_ol_result(
-        score=0.95,
-        title="The Searcher: A Novel (Solomon Creed)",
-        author="Simon Toyne",
-        author_score=0.1,
-    )
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
-    assert book.artist != "Simon Toyne"
-
-
-def test_ol_rejects_wrong_author_same_title_solitude(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """Le Guin Solitude must not become Anthony Storr; Le Guin must not be demoted to narrator."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    title = "Solitude"
-    author = "Ursula K. Le Guin"
-    mock_id3_tags(
-        (
-            book.sample_audio1,
-            {"title": title, "artist": author, "album": "Nebula Awards 31", "albumartist": author},
-        ),
-        (book.sample_audio2, {"title": title, "artist": author, "album": "Nebula Awards 31", "albumartist": author}),
-    )
-    book.extract_path_info()
-    book.fs_author = "Le Guin, Ursula K."
-    book.narrator = ""
-
-    ol_result = _make_ol_result(score=1.0, title=title, author="Anthony Storr", author_score=0.05)
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
-    assert (book.artist or "") != "Anthony Storr"
-    assert (book.narrator or "").lower() != author.lower()
-
-
-def test_ol_rejects_near_miss_diary_of_the_rose(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """Diary of the Rose must not become Diary of Robert Rose / Rose, Robert."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    title = "The Diary of the Rose"
-    author = "Ursula K. Le Guin"
-    mock_id3_tags(
-        (book.sample_audio1, {"title": title, "artist": author, "album": "BBC Radio 7", "albumartist": author}),
-        (book.sample_audio2, {"title": title, "artist": author, "album": "BBC Radio 7", "albumartist": author}),
-    )
-    book.extract_path_info()
-    book.fs_author = "Le Guin, Ursula K."
-
-    ol_result = _make_ol_result(
-        score=0.88,
-        title="The Diary of Robert Rose",
-        author="Rose, Robert",
-        author_score=0.1,
-    )
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
-
-
-def test_ol_rejects_anthology_album_as_title(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """About A Poem must not be replaced by its anthology album title."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    title = "About A Poem"
-    album = "The Best American Spiritual Writing 2008"
-    author = "Ursula K. Le Guin"
-    mock_id3_tags(
-        (book.sample_audio1, {"title": title, "artist": author, "album": album, "albumartist": author}),
-        (book.sample_audio2, {"title": title, "artist": author, "album": album, "albumartist": author}),
-    )
-    book.extract_path_info()
-    book.fs_author = "Le Guin, Ursula K."
-    book.fs_title = title
-
-    # When title search fails, album search might return the anthology.
-    def _lookup(title_cand, author=None, narrator=None, method="similarity"):
-        if title_cand == album:
-            return _make_ol_result(score=1.0, title=album, author=author or "Someone", author_score=0.9)
-        return _make_ol_result(score=0.2, title="Unrelated", author=author or "Someone", author_score=0.9)
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", side_effect=_lookup):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
-    assert book.title != album
-
-
-def test_ol_rejects_mazes_epoch_narrator_bracket_confusion(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """Mazes / album Epoch / fs narrator Carter must not become Timothy Carter's Epoch."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    title = "Mazes"
-    album = "Epoch"
-    author = "Ursula K. Le Guin"
-    mock_id3_tags(
-        (book.sample_audio1, {"title": title, "artist": author, "album": album, "albumartist": author}),
-        (book.sample_audio2, {"title": title, "artist": author, "album": album, "albumartist": author}),
-    )
-    book.extract_path_info()
-    book.fs_author = "Le Guin, Ursula K."
-    book.fs_narrator = "Carter"
-    book.fs_title = title
-
-    def _lookup(title_cand, author=None, narrator=None, method="similarity"):
-        if title_cand == album:
-            return _make_ol_result(score=1.0, title=album, author="Timothy Carter", author_score=0.2)
-        return None
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", side_effect=_lookup):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
-    assert (book.artist or "") != "Timothy Carter"
-
-
-def test_ol_does_not_use_album_as_author_hint(
-    book_in_author_named_folder: Audiobook,
-    mock_id3_tags: Callable[..., list[dict[str, str]]],
-):
-    """Album title must never be passed as an author= hint to OL."""
-    from unittest.mock import PropertyMock, patch
-
-    from src.lib.id3_utils import _ol_early_extraction
-
-    book = book_in_author_named_folder
-    title = "The Searcher: A Novel"
-    author = "Tana French"
-    mock_id3_tags(
-        (book.sample_audio1, {"title": title, "artist": author, "album": title, "albumartist": author}),
-        (book.sample_audio2, {"title": title, "artist": author, "album": title, "albumartist": author}),
-    )
-    book.extract_path_info()
-    book.fs_author = author
-
-    seen_authors: list[str | None] = []
-
-    def _lookup(title_cand, author=None, narrator=None, method="similarity"):
-        seen_authors.append(author)
-        return _make_ol_result(score=1.0, title="The Searcher", author=author or "Tana French", author_score=1.0)
-
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", side_effect=_lookup):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
-            with patch.object(type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"):
-                _ol_early_extraction(book, tag1, tag1)
-
-    assert title not in seen_authors, f"Album/title string must not be an author hint; got {seen_authors}"
-    assert all(a is None or a == author or "French" in (a or "") for a in seen_authors)
 
 
 def test_verify_tags_applies_ol_with_perfect_similarity_score(
@@ -1370,7 +1055,8 @@ def test_ol_early_extraction_title_cases_sentence_case_ol_title(
 
     from src.lib.config import cfg as real_cfg
     from src.lib.id3_tags import Id3Tags
-    from src.lib.id3_utils import _apply_ol_early_to_book, _ol_early_extraction
+    from src.lib.id3_utils import _apply_ol_early_to_book, _ol_early_hints_from_book
+    from src.lib.metadata.ol_early import extract_ol_early
 
     book = book_in_author_named_folder
     # Seed ID3 with sentence case so OL is the authority for the match.
@@ -1403,9 +1089,9 @@ def test_ol_early_extraction_title_cases_sentence_case_ol_title(
         date="1982",
     )
     tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
+    with patch("fixm4b.metadata.ol_early.open_library_lookup_title", return_value=ol_result):
         with patch(
-            "src.lib.id3_utils.open_library_lookup_author",
+            "fixm4b.metadata.ol_early.open_library_lookup_author",
             return_value=_mock_ol_author("Sharon Kay Penman"),
         ):
             with patch.object(
@@ -1414,7 +1100,7 @@ def test_ol_early_extraction_title_cases_sentence_case_ol_title(
                 new_callable=PropertyMock,
                 return_value="test-agent/1.0",
             ):
-                result = _ol_early_extraction(book, tag1, tag1)
+                result = extract_ol_early(_ol_early_hints_from_book(book, tag1, tag1))
 
     assert result is not None
     _apply_ol_early_to_book(book, result)
