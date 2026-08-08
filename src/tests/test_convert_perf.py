@@ -206,7 +206,6 @@ def test_verify_reuses_early_providers_without_network(
     book.albumartist = "James Rollins"
     book.narrator = "Scott Brick"
 
-    ol = _make_ol_result()
     gr = MetadataCandidate(
         provider="goodreads",
         title="Map of Bones",
@@ -215,7 +214,7 @@ def test_verify_reuses_early_providers_without_network(
         score=0.95,
         status="match",
     )
-    book._early_ol = ol
+    book._early_ol = None
     book._early_gr = gr
     book._early_resolved_by = "goodreads"
 

@@ -837,18 +837,15 @@ def test_ol_first_extraction_album_is_author(
     ol_result.author_and_narrator_swapped = False
     ol_result.author_score = MagicMock(return_value=0.95)
 
-    # Simulate OL-first returning a confident match: title and author resolved.
-    # The function now returns the OpenLibraryTitle object (or None on failure).
+    # Simulate OL-first returning a confident match (return-only; extract applies).
     def _fake_ol(b, t1, t2):
-        b.title = book_title
-        b.album = book_title
-        b.sortalbum = book_title
-        b.artist = author
-        b.albumartist = author
-        return ol_result  # truthy → ol_resolved = True
+        ol_result._convert_preferred_author = author
+        ol_result._convert_preferred_canonical = author
+        return ol_result
 
     with patch("src.lib.id3_utils._ol_early_extraction", side_effect=_fake_ol):
-        book.extract_metadata()
+        with patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None):
+            book.extract_metadata()
 
     assert book.title == book_title, (
         f"OL-first: title should be '{book_title}', got '{book.title}'"
@@ -911,7 +908,7 @@ def test_ol_early_extraction_accepts_high_similarity_score(
     """
     from unittest.mock import PropertyMock, patch
 
-    from src.lib.id3_utils import _ol_early_extraction
+    from src.lib.id3_utils import _apply_ol_early_to_book, _ol_early_extraction
 
     book = book_in_author_named_folder
     title = "Map of Bones"
@@ -935,6 +932,7 @@ def test_ol_early_extraction_accepts_high_similarity_score(
                 result = _ol_early_extraction(book, tag1, tag1)
 
     assert result is not None, "High-similarity OL match (score=1.0) must be accepted"
+    _apply_ol_early_to_book(book, result)
     assert book.title == title, f"Expected title '{title}', got '{book.title}'"
     assert book.artist == author, f"Expected author '{author}', got '{book.artist}'"
 
@@ -1372,7 +1370,7 @@ def test_ol_early_extraction_title_cases_sentence_case_ol_title(
 
     from src.lib.config import cfg as real_cfg
     from src.lib.id3_tags import Id3Tags
-    from src.lib.id3_utils import _ol_early_extraction
+    from src.lib.id3_utils import _apply_ol_early_to_book, _ol_early_extraction
 
     book = book_in_author_named_folder
     # Seed ID3 with sentence case so OL is the authority for the match.
@@ -1419,6 +1417,7 @@ def test_ol_early_extraction_title_cases_sentence_case_ol_title(
                 result = _ol_early_extraction(book, tag1, tag1)
 
     assert result is not None
+    _apply_ol_early_to_book(book, result)
     assert book.title == "The Sunne in Splendour", (
         f"Expected Title-Cased OL title, got '{book.title}'"
     )
