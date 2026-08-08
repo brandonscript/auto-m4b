@@ -1556,34 +1556,19 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     )
 
     # ── Provider-first extraction ──────────────────────────────────────────────
-    # Query OL + GR in parallel before heuristic scoring. Goodreads wins when
-    # confident; Open Library remains the fallback. bookpeek runs after only when
+    # Goodreads first when configured. Open Library early (strict convert floors,
+    # author-first, optional OCR) runs only on GR miss / GR disabled so we do not
+    # pay OL RTTs when Goodreads already resolved. bookpeek runs after only when
     # needed (narrator fill or no GR/OL), so ASR does not block every convert.
-    # OL knows the canonical title/author, so a confident match avoids
-    # misassigning fields (e.g. album="Laurie R. King", title="The God of
-    # the Hive" → OL confirms title and author rather than guessing).
-    from concurrent.futures import ThreadPoolExecutor
-
     from src.lib.metadata.bookpeek_provider import bookpeek_enabled
-    from src.lib.ol_lookup import _title_sim
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        ol_fut = pool.submit(_ol_early_extraction, book, sample_audio1_tags, sample_audio2_tags)
-        gr_fut = pool.submit(_goodreads_early_extraction, book, sample_audio1_tags, sample_audio2_tags)
-        ol_match = ol_fut.result()
-        goodreads_match = gr_fut.result()
+    goodreads_match = _goodreads_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
+    ol_match = None
+    if goodreads_match is None:
+        ol_match = _ol_early_extraction(book, sample_audio1_tags, sample_audio2_tags)
 
     provider_resolved = goodreads_match is not None or ol_match is not None
     if goodreads_match:
-        if ol_match and (
-            _title_sim(goodreads_match.title, ol_match.title)[0] < 0.85
-            or _title_sim(goodreads_match.author, ol_match.author)[0] < 0.85
-            or (goodreads_match.year and ol_match.date and goodreads_match.year != ol_match.date)
-        ):
-            print_debug(
-                "Goodreads/Open Library disagreement; preferring Goodreads: "
-                f"{goodreads_match.title!r} vs {ol_match.title!r}"
-            )
         book.title = _normalize_ol_title(goodreads_match.title)
         book.album = book.title
         book.sortalbum = strip_leading_articles(book.title)

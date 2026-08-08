@@ -360,10 +360,11 @@ def test_extract_skips_metadata_score_when_provider_resolved(
     assert book.narrator == "Scott Brick"
 
 
-def test_gr_wins_over_ol_in_parallel_selection(
+def test_gr_match_skips_ol_early(
     book_in_author_named_folder: Audiobook,
     mock_id3_tags: Callable[..., list[dict[str, str]]],
 ):
+    """When Goodreads resolves, do not call OL-early (GR-miss fallback only)."""
     book = book_in_author_named_folder
     mock_id3_tags(
         (
@@ -387,16 +388,48 @@ def test_gr_wins_over_ol_in_parallel_selection(
         status="match",
     )
     with (
-        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol),
+        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol) as ol_mock,
         patch("src.lib.id3_utils._goodreads_early_extraction", return_value=gr),
         patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=False),
     ):
         book.extract_metadata()
 
+    ol_mock.assert_not_called()
     assert book.title == "GR Title"
     assert book.artist == "GR Author"
     assert book._early_resolved_by == "goodreads"
     assert book._early_gr is gr
+    assert book._early_ol is None
+
+
+def test_ol_early_runs_when_gr_misses(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    book = book_in_author_named_folder
+    mock_id3_tags(
+        (
+            book.sample_audio1,
+            {"title": "Map of Bones", "artist": "James Rollins", "album": "Map of Bones", "albumartist": "James Rollins"},
+        ),
+        (
+            book.sample_audio2,
+            {"title": "Map of Bones", "artist": "James Rollins", "album": "Map of Bones", "albumartist": "James Rollins"},
+        ),
+    )
+    book.extract_path_info()
+
+    ol = _make_ol_result()
+    with (
+        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol) as ol_mock,
+        patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None),
+        patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=False),
+    ):
+        book.extract_metadata()
+
+    ol_mock.assert_called_once()
+    assert book._early_resolved_by == "openlibrary"
+    assert book._early_ol is ol
 
 
 def test_map_parallel_preserves_order_and_serializes_when_small():

@@ -26,8 +26,8 @@ Domain tests: [`src/tests/test_metadata_plan.py`](../src/tests/test_metadata_pla
 | **OL edition enrich** | Shared edition base+subtitle enrichment when `OPEN_LIBRARY_USER_AGENT` is set. | Edition base+subtitle when locally attested. | `adopt_shared` |
 | **Folder priors** | Pipeline roots are clamped using configured paths. | `#plex` / parent-author / loose author-dir / cli-root clamp. | `adopt_shared` |
 | **OL auto-write** | Auto-applies shared OL title/author/date when the user agent is configured. | Display-only unless forced. | `keep_convert_adapter` |
-| **Goodreads selection** | When enabled, queries both providers and prefers a confident Goodreads result; Open Library remains fallback. | Queries both providers and displays comparison; forced `--goodreads` applies the selected book. | `adopt_shared` |
-| **Provider disagreements** | Reports Goodreads/Open Library field conflicts and continues with Goodreads selected. | Reports field conflicts without blocking a dry-run or automatic plan. | `adopt_shared` |
+| **Goodreads selection** | When enabled, queries Goodreads first; Open Library early runs only on GR miss / GR disabled. | Queries both providers and displays comparison; forced `--goodreads` applies the selected book. | `adopt_shared` |
+| **Provider disagreements** | Convert no longer dual-queries OL when GR wins; GR-miss falls through to OL-early. | Reports field conflicts without blocking a dry-run or automatic plan. | `adopt_shared` |
 
 ## Non-minimalist tests (`@pytest.mark.non_minimalist`)
 
@@ -48,7 +48,7 @@ Tagged in `test_metadata_plan.py` for Phase 4 triage:
 
 ## Phase 3 notes
 
-- Colon + always-minimalist are **post-selection** transforms; convert selection is still OCR / MetadataScore / OL-early (not full `plan_fix`).
+- Colon + always-minimalist are **post-selection** transforms; convert selection is still OCR / MetadataScore / GR-then-OL-early (not full `plan_fix`).
 - `minimalist_title` drops unbalanced `(Series, Book N)` paren tails.
 - `test_parse_combo_id3_tags[…expected3]` can fail when `OPEN_LIBRARY_USER_AGENT` is set (OL early overwrites Album Artist narrator) — tracked under **OL auto-write**.
 
@@ -58,7 +58,8 @@ Tagged in `test_metadata_plan.py` for Phase 4 triage:
   GR/OL results are missing or no longer match `book.*`. When early providers still
   match, verify reuses the stash and skips `plan_fix` / re-lookups (no edition enrich
   in that short-circuit path).
-- Pre-convert `extract_metadata` selection is unchanged (OCR / MetadataScore / OL-early).
+- Pre-convert `extract_metadata`: Goodreads first; `_ol_early_extraction` only on GR miss
+  (keeps convert floors / OCR / author-first without parallel OL when GR wins).
 - Convert still auto-applies desired fields after the plan (shared auto OL remains
   display-only unless `ol_ref` forces attach). Passthrough / basename stem adapters
   stay convert-side.
