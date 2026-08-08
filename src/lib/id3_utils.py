@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import datetime
 import re
-import shutil
 import subprocess
 import time
 from pathlib import Path
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING, Union
 
-import bidict
 import ffmpeg
 from mutagen.mp3 import HeaderNotFoundError
 from tinta import Tinta
@@ -58,7 +56,7 @@ from src.lib.term import (
     print_list_item,
     smart_print,
 )
-from src.lib.typing import AdditionalTags, BadFileError, Id3TagDict, Id3TagDictWithDnumTnum, NotNone, TagSource
+from src.lib.typing import BadFileError, Id3TagDict, Id3TagDictWithDnumTnum, NotNone, TagSource
 
 MissingApplicationError = ValueError
 
@@ -66,27 +64,6 @@ if TYPE_CHECKING:
     from src.lib.audiobook import Audiobook
 
 CacheValue = Union[Id3TagDict, Literal["__BAD__"]]
-
-
-def write_id3_tags_exiftool(file: Path, exiftool_args: list[str]) -> None:
-    api_opts = ["-api", 'filter="s/ \\(approx\\)//"']  # remove (approx) from output
-
-    # if file doesn't exist, throw error
-    if not file.is_file():
-        raise RuntimeError(f"Error: Cannot write id3 tags, {file} does not exist")
-
-    # make sure the exiftool command exists
-    if not shutil.which("exiftool"):
-        raise RuntimeError(
-            "exiftool is not available, please install it with\n\n $ apt-get install exiftool\n\n...or make sure it is in your PATH variable, then try again"
-        )
-
-    # write tag to file, using eval so that quotes are not escaped
-    subprocess.run(
-        ["exiftool", "-overwrite_original"] + exiftool_args + api_opts + [str(file)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
 
 
 TagSet = NamedTuple(
@@ -354,6 +331,10 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     # takes the inbound book, then checks the converted file and verifies that the id3 tags match the extracted metadata
     # if they do not match, it will print a notice and update the id3 tags
 
+    t_verify_start = time.time()
+    ran_plan_fix = False
+    reused_early = False
+
     m4b_to_check = book.converted_file if in_dir == "converted" else book.build_file
 
     if not m4b_to_check.is_file():
@@ -392,20 +373,18 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
 
     early_gr = getattr(book, "_early_gr", None)
     early_ol = getattr(book, "_early_ol", None)
+    goodreads_match = None
+    ol_title = None
+    ol_author_candidates: list = []
+    ol_status = "none"
 
+    # Prefer stashed early providers (no network / no plan_fix) when they still
+    # agree with book.* after extract. Only re-lookup + plan_fix when early
+    # results are missing or diverged.
     if _early_still_matches_gr(book, early_gr):
         goodreads_match = early_gr
+        reused_early = True
         print_debug("verify: reusing early Goodreads match")
-    else:
-        goodreads_match = lookup_metadata(
-            book.title,
-            author=book.author,
-            narrator=book.narrator,
-            lookup_goodreads=True,
-            lookup_open_library=False,
-        ).selected
-
-    if goodreads_match and goodreads_match.status == "match":
         if early_ol and getattr(early_ol, "has_match", False) and (
             _title_sim(goodreads_match.title, early_ol.title)[0] < 0.85
             or _title_sim(goodreads_match.author, early_ol.author)[0] < 0.85
@@ -421,44 +400,68 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
             book.artist = book.albumartist = goodreads_match.author
         if goodreads_match.year:
             book.date = goodreads_match.year
-        # Existing checks use the OL result as the authoritative fallback.
-        # Goodreads is authoritative when it has a confident match.
-        ol_title = None
-        ol_author_candidates = []
-        ol_status = "none"
     elif _early_still_matches_ol(book, early_ol):
         ol_title = early_ol
         ol_status = ol_match_band(ol_title)
-        ol_author_candidates = []
+        reused_early = True
         print_debug("verify: reusing early Open Library match")
     else:
-        ol_author_candidates = [
-            (open_library_lookup_author(book.author, method="score"), "author"),
-            (open_library_lookup_author(book.author, method="similarity"), "author"),
-            (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
-        ]
-        ol_title = open_library_lookup_title(
-            book.title, author=book.author, narrator=book.narrator, method="similarity"
-        )
-        ol_status = ol_match_band(ol_title)
+        goodreads_match = lookup_metadata(
+            book.title,
+            author=book.author,
+            narrator=book.narrator,
+            lookup_goodreads=True,
+            lookup_open_library=False,
+        ).selected
+
+        if goodreads_match and goodreads_match.status == "match":
+            if early_ol and getattr(early_ol, "has_match", False) and (
+                _title_sim(goodreads_match.title, early_ol.title)[0] < 0.85
+                or _title_sim(goodreads_match.author, early_ol.author)[0] < 0.85
+                or (goodreads_match.year and early_ol.date and goodreads_match.year != early_ol.date)
+            ):
+                print_debug(
+                    "Goodreads/Open Library disagreement during verification; "
+                    f"preferring Goodreads {goodreads_match.title!r}"
+                )
+            book.title = _normalize_ol_title(goodreads_match.title)
+            book.album = book.title
+            if goodreads_match.author:
+                book.artist = book.albumartist = goodreads_match.author
+            if goodreads_match.year:
+                book.date = goodreads_match.year
+            # Goodreads is authoritative when it has a confident match.
+            ol_title = None
+            ol_author_candidates = []
+            ol_status = "none"
+        else:
+            ol_author_candidates = [
+                (open_library_lookup_author(book.author, method="score"), "author"),
+                (open_library_lookup_author(book.author, method="similarity"), "author"),
+                (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
+            ]
+            ol_title = open_library_lookup_title(
+                book.title, author=book.author, narrator=book.narrator, method="similarity"
+            )
+            ol_status = ol_match_band(ol_title)
 
     shared_ol_title = ""
-    if ol_status in ("match", "low_confidence") and not book.path.is_file():
+    if ol_status in ("match", "low_confidence") and not book.path.is_file() and not reused_early:
         from src.lib.config import cfg
 
-        ol_ref = None
-        if early_ol and getattr(early_ol, "has_match", False):
-            ol_ref = getattr(early_ol, "key", None) or None
-
-        if cfg.USE_PLAN_FIX_IN_VERIFY and cfg.OPEN_LIBRARY_USER_AGENT:
-            # Phase 6 experiment: full shared planner (edition enrich, stem priors,
-            # provider comparison) instead of a hand-rolled FixPlan shell.
+        if cfg.OPEN_LIBRARY_USER_AGENT:
             from src.lib.metadata import CliPaths, plan_fix
+
+            ol_ref = None
+            if early_ol and getattr(early_ol, "has_match", False):
+                ol_ref = getattr(early_ol, "key", None) or None
 
             book_dir = m4b_to_check.parent if m4b_to_check.parent.is_dir() else (
                 book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent
             )
+            shared_plan = None
             try:
+                ran_plan_fix = True
                 shared_plan = plan_fix(
                     book_dir,
                     cli=CliPaths(
@@ -474,7 +477,34 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
                 )
             except Exception as e:
                 print_debug(f"verify: plan_fix failed ({e}); falling back to attach-only")
-                shared_plan = None
+                from src.lib.metadata.models import FixPlan, TagSnapshot
+                from src.lib.metadata.ol_attach import _attach_open_library
+
+                shared_plan = FixPlan(
+                    book_dir=book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent,
+                    m4b=m4b_to_check,
+                    source=None,
+                    desired_title=book.title,
+                    desired_author=book.author,
+                    desired_album=book.album,
+                    desired_date=book.date,
+                    desired_narrator=book.narrator,
+                    desired_stem=book.output_filename_stem,
+                    current=TagSnapshot(
+                        title=book_to_check.id3_title,
+                        artist=book_to_check.id3_artist,
+                        album=book_to_check.id3_album,
+                        albumartist=book_to_check.id3_albumartist,
+                        composer=book_to_check.id3_composer,
+                        date=book_to_check.id3_date,
+                        path=m4b_to_check,
+                    ),
+                    fs_title=book.fs_title,
+                    fs_author=book.fs_author,
+                    fs_date=book.fs_year,
+                    fs_files=book.orig_file_name,
+                )
+                _attach_open_library(shared_plan, minimalist=True, ol_ref=ol_ref)
             if shared_plan and shared_plan.ol_status in ("match", "low_confidence", "forced"):
                 shared_ol_title = shared_plan.desired_title
                 # Convert adapter: auto-apply desired fields (shared auto OL is
@@ -483,47 +513,15 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
                     book.artist = book.albumartist = shared_plan.desired_author
                 if shared_plan.desired_date:
                     book.date = shared_plan.desired_date
-                if shared_plan.desired_narrator:
+                if getattr(shared_plan, "desired_narrator", None):
                     book.narrator = shared_plan.desired_narrator
                 print_debug(
                     f"verify: plan_fix ol={shared_plan.ol_status!r} "
-                    f"title={shared_plan.desired_title!r} reasons={shared_plan.reasons}"
+                    f"title={shared_plan.desired_title!r} reasons={getattr(shared_plan, 'reasons', ())}"
                 )
-        elif cfg.OPEN_LIBRARY_USER_AGENT:
-            from src.lib.metadata.models import FixPlan, TagSnapshot
-            from src.lib.metadata.ol_attach import _attach_open_library
+    elif ol_status in ("match", "low_confidence") and reused_early:
+        print_debug("verify: skipping plan_fix (early provider still matches)")
 
-            shared_plan = FixPlan(
-                book_dir=book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent,
-                m4b=m4b_to_check,
-                source=None,
-                desired_title=book.title,
-                desired_author=book.author,
-                desired_album=book.album,
-                desired_date=book.date,
-                desired_narrator=book.narrator,
-                desired_stem=book.output_filename_stem,
-                current=TagSnapshot(
-                    title=book_to_check.id3_title,
-                    artist=book_to_check.id3_artist,
-                    album=book_to_check.id3_album,
-                    albumartist=book_to_check.id3_albumartist,
-                    composer=book_to_check.id3_composer,
-                    date=book_to_check.id3_date,
-                    path=m4b_to_check,
-                ),
-                fs_title=book.fs_title,
-                fs_author=book.fs_author,
-                fs_date=book.fs_year,
-                fs_files=book.orig_file_name,
-            )
-            _attach_open_library(shared_plan, minimalist=True, ol_ref=ol_ref)
-            if shared_plan.ol_status in ("match", "low_confidence", "forced"):
-                shared_ol_title = shared_plan.desired_title
-                if shared_plan.desired_author:
-                    book.artist = book.albumartist = shared_plan.desired_author
-                if shared_plan.desired_date:
-                    book.date = shared_plan.desired_date
     from src.lib.metadata.ol_attach import resolve_date_consensus
 
     resolved_year = resolve_date_consensus(
@@ -677,69 +675,12 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
             updates.append(lambda: _print_needs_updating(prop, tag_value, book.date))
             new_tags[id3_tag] = book.date
 
-    # Title - because multi-file books usually have unique titles for each track,
-    # but a merged m4b only gets one title (usually the same as the album name)
-    # if bool(ol_title):
-    #     if ol_title.has_match and ol_title.score() < 0.9:
-    #         title_needs_updating = True
-    #         updates.append(lambda: _print_needs_updating("Title", book_to_check.id3_title, ol_title.name))
-    # elif book.title and (book_to_check.id3_title != book.title):
-    #     title_needs_updating = True
-    #     updates.append(lambda: _print_needs_updating("Title", book_to_check.id3_title, book.title))
     _check_title("Title", "title")
-
-    # Author
-    # if bool(ol_title):
-    #     if ol_title.has_match and (ol_title.author_score() < 0.9 or ol_title.author_is_narrator):
-    #         author_needs_updating = True
-    #         updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, ol_title.author))
-    # elif bool(ol_author):
-    #     if ol_author.has_match and (ol_author.score() < 0.9 or author_prop == "narrator"):
-    #         author_needs_updating = True
-    #         updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, ol_author.name))
-    # elif book.author and (book_to_check.id3_artist != book.author):
-    #     author_needs_updating = True
-    #     updates.append(lambda: _print_needs_updating("Artist (author)", book_to_check.id3_artist, book.author))
     _check_author("Artist (author)", "artist")
-
-    # Album
-    # if bool(ol_title):
-    #     if ol_title.has_match and ol_title.score() < 0.9:
-    #         title_needs_updating = True
-    #         updates.append(lambda: _print_needs_updating("Album (title)", book_to_check.id3_album, ol_title.name))
-    # elif book.title and book_to_check.id3_album != book.title:
-    #     title_needs_updating = True
-    #     updates.append(lambda: _print_needs_updating("Album (title)", book_to_check.id3_album, book.title))
     _check_title("Album (title)", "album")
-
-    # Sort album
-    # if bool(ol_title):
-    #     if ol_title.has_match and ol_title.score() < 0.9:
-    #         title_needs_updating = True
-    #         updates.append(
-    #             lambda: _print_needs_updating("Sort album (title)", book_to_check.id3_sortalbum, ol_title.name)
-    #         )
-    # elif book.title and book_to_check.id3_sortalbum != book.title:
-    #     title_needs_updating = True
-    #     updates.append(lambda: _print_needs_updating("Sort album (title)", book_to_check.id3_sortalbum, book.title))
     _check_title("Sort album (title)", "sortalbum")
-
-    # if book.author and book_to_check.id3_albumartist != book.author:
-    #     author_needs_updating = True
-    #     updates.append(
-    #         lambda: _print_needs_updating("Album artist (author)", book_to_check.id3_albumartist, book.author)
-    #     )
     _check_author("Album artist (author)", "albumartist")
-
-    # if book.narrator and book_to_check.id3_composer != book.narrator:
-    #     narrator_needs_updating = True
-    #     updates.append(lambda: _print_needs_updating("Composer (narrator)", book_to_check.id3_composer, book.narrator))
     _check_narrator("Composer (narrator)", "composer")
-
-    # if book.date and get_year_from_date(book_to_check.id3_date) != get_year_from_date(book.date):
-    #     date_needs_updating = True
-    #     updates.append(lambda: _print_needs_updating("Date", book_to_check.id3_date, book.date))
-    #     new_tags["date"] = book.date
     _check_date("Date", "date")
 
     if book.comment and compare_trim(book_to_check.id3_comment, book.comment):
@@ -806,6 +747,10 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         except Exception as e:
             print_debug(f"Could not stamp encoder tag on {m4b_to_check.name}: {e}")
 
+    print_debug(
+        f"verify({in_dir}): plan_fix={'ran' if ran_plan_fix else 'skipped'} "
+        f"reused_early={reused_early} wall={time.time() - t_verify_start:.3f}s"
+    )
     nl()
 
 
@@ -949,49 +894,6 @@ def extract_cover_art(file: "BooksTree | Path", save_to_file: bool = False, file
     return out_file.with_suffix(".jpg") if save_to_file else b""
 
 
-id3_tag_map = bidict.bidict(
-    {
-        "title": "title",
-        "artist": "artist",
-        "album_artist": "albumartist",
-        "album": "album",
-        "composer": "composer",
-        "comment": "comment",
-        "genre": "genre",
-        "date": "date",
-        "track": "track",
-        "sort_name": "sortname",
-        "sort_artist": "sortartist",
-        "sort_album": "sortalbum",
-        "description": "description",
-        "encoder": "encoder",
-    }
-)
-
-
-def id3_tags_raw_to_source(
-    in_dict: dict[str, str],
-) -> dict[TagSource | AdditionalTags, str]:
-    """Takes raw id3 tag keys and converts them to the source tag names"""
-    return {cast(TagSource, id3_tag_map.get(k, k)): v for k, v in in_dict.items()}
-
-
-def id3_tags_source_to_raw(
-    in_dict: dict[TagSource | AdditionalTags, str],
-) -> dict[str, str]:
-    """Takes raw id3 tag keys and converts them to the source tag names"""
-    return {cast(TagSource, id3_tag_map.inv.get(k, k)): v for k, v in in_dict.items()}
-
-
-def is_id3_tag_dict(id3: Any) -> bool:
-    """Checks if the id3 tag dict is valid by looking for the most common tags"""
-    if not isinstance(id3, dict):
-        return False
-    if not all(isinstance(v, str) for v in id3.values()):
-        return False
-    return "title" in id3 or "album" in id3 or "artist" in id3 or "albumartist" in id3
-
-
 KEY_MAP = {
     "_aar": "albumartist",
     "_ar": "artist",
@@ -1061,9 +963,8 @@ def _normalize_ol_title(title: str) -> str:
 def _finalize_convert_title(title: str, author: str | None = None) -> str:
     """Shared colon + always-minimalist transforms for convert titles.
 
-    Phase 3 wires convert outputs through ``id3_prefer_colon_separator`` and
-    ``minimalist_title`` without replacing OCR / MetadataScore / OL-early
-    selection. Phase 6: post-build verify may use ``plan_fix`` when USE_PLAN_FIX_IN_VERIFY is on.
+    Post-selection transforms only — convert selection stays OCR / MetadataScore /
+    OL-early. Post-build verify uses ``plan_fix`` when early providers no longer match.
     """
     if not (title or "").strip():
         return title or ""
@@ -1730,36 +1631,26 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
         book._early_resolved_by = None
     book._early_ol = ol_match
     book._early_gr = goodreads_match
-    book._early_bookpeek = bookpeek_match
-
-    if provider_resolved:
-        if re.search(r"\s{2,}", book.basename):
-            folder_title = re.split(r"\s{2,}", book.basename, maxsplit=1)[-1].strip()
-            if len(folder_title) > len(book.title):
-                book.title = folder_title
-                book.album = folder_title
-                book.sortalbum = strip_leading_articles(folder_title)
-
-    id3_score = MetadataScore(book, sample_audio2_tags)  # type: ignore
 
     t3 = time.time()
 
+    id3_score = None
     if not provider_resolved:
+        id3_score = MetadataScore(book, sample_audio2_tags)  # type: ignore
         book.title = id3_score.determine_title(fallback=book.fs_title)
         book.album = book.title
         book.sortalbum = strip_leading_articles(book.title)
         book.artist = id3_score.determine_author(fallback=book.fs_author)
         book.albumartist = id3_score.determine_albumartist(fallback=book.fs_author)
 
-    # Narrator: OL rarely stores narrator info, so always use the heuristic.
-    # When OL resolved the author, try the targeted post-OL helper first —
-    # it handles explicit "read by …" prefixes that the scorer's _ar_but_no_aar
-    # branch misses (it only awards points when there's a slash in the artist).
+    t4 = time.time()
+
+    # Narrator: OL rarely stores narrator info. Prefer remaining-tag helper when
+    # providers already resolved; only pay for MetadataScore heuristics otherwise.
     if provider_resolved:
-        book.narrator = _narrator_from_remaining_tags(book) or id3_score.determine_narrator(
-            fallback=book.fs_narrator
-        )
+        book.narrator = _narrator_from_remaining_tags(book) or (book.fs_narrator or "")
     else:
+        assert id3_score is not None
         book.narrator = id3_score.determine_narrator(fallback=book.fs_narrator)
 
     # Prefer Audnexus/ASR narrator from bookpeek when local narrator is empty
@@ -1795,12 +1686,14 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             book.title = folder_title
             book.album = folder_title
             book.sortalbum = strip_leading_articles(folder_title)
-    if sample_audio2_tags.albumartist:
+    # Prefer track-2 albumartist only when heuristics selected metadata (providers
+    # already set albumartist above when they won).
+    if not provider_resolved and sample_audio2_tags.albumartist:
         book.albumartist = sample_audio2_tags.albumartist
 
-    # Phase 3: shared colon + always-minimalist transforms on the resolved
-    # title/album. Selection stays OCR / MetadataScore / OL-early for now;
-    # Phase 6: verify may use plan_fix when USE_PLAN_FIX_IN_VERIFY is on.
+    # Shared colon + always-minimalist transforms on the resolved title/album.
+    # Selection stays OCR / MetadataScore / OL-early; verify may use plan_fix
+    # when early providers no longer match.
     _author_for_title = book.artist or book.author or ""
     _pre_title = (book.title or "").strip()
     if book.title:
@@ -1815,7 +1708,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     if book.title:
         book.sortalbum = strip_leading_articles(book.title)
 
-    t4 = time.time()
+    t5 = time.time()
 
     li(f"Title: {book.title}")
     li(f"Author: {book.artist}")
@@ -1835,7 +1728,12 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # Use OL first-publish year when available; fall back to ID3 / filesystem.
     ol_year = ol_match.date if ol_match else ""
     provider_year = goodreads_match.year if goodreads_match else ol_year
-    book.date = provider_year or id3_score.determine_date(book.fs_year)
+    if provider_year:
+        book.date = provider_year
+    elif id3_score is not None:
+        book.date = id3_score.determine_date(book.fs_year)
+    else:
+        book.date = get_year_from_date(book.id3_date) or book.fs_year or ""
     if book.date:
         li(f"Date: {book.date}")
     # extract 4 digits from date
@@ -1874,15 +1772,18 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
             else:
                 smart_print("Could not find a good match on goodreads.com")
 
-    t5 = time.time()
+    t6 = time.time()
 
     _all_times = {
         "get_files_and_extract_id3_tags": t2 - t1,
-        "metadata_score": t3 - t2,
-        "author_narrator": t4 - t3,
-        "end": t5 - t4,
-        "total": t5 - t1,
+        "early_providers": t3 - t2,
+        "metadata_score": t4 - t3,
+        "narrator_title_finalize": t5 - t4,
+        "end": t6 - t5,
+        "total": t6 - t1,
+        "provider_resolved": provider_resolved,
     }
+    print_debug(f"extract_metadata timings: {_all_times}")
 
     return book
 

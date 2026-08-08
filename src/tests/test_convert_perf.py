@@ -250,6 +250,116 @@ def test_verify_reuses_early_providers_without_network(
     ol_author_mock.assert_not_called()
 
 
+def test_verify_skips_plan_fix_when_early_ol_still_matches(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+    tmp_path: Path,
+):
+    """Early OL reuse must not call plan_fix or re-hit GR/OL network."""
+    from src.lib.config import cfg as real_cfg
+    from src.lib.id3_utils import verify_and_update_id3_tags
+
+    book = book_in_author_named_folder
+    mock_id3_tags(
+        (
+            book.sample_audio1,
+            {"title": "Map of Bones", "artist": "James Rollins", "album": "Map of Bones", "albumartist": "James Rollins"},
+        ),
+    )
+    book.extract_path_info()
+    book.title = "Map of Bones"
+    book.artist = "James Rollins"
+    book.album = "Map of Bones"
+    book.albumartist = "James Rollins"
+    book.narrator = "Scott Brick"
+    book.date = "2005"
+
+    ol = _make_ol_result()
+    book._early_ol = ol
+    book._early_gr = None
+    book._early_resolved_by = "openlibrary"
+
+    build = tmp_path / "build.m4b"
+    build.write_bytes(Path(book.sample_audio1).read_bytes())
+
+    with (
+        patch.object(type(book), "build_file", new_callable=PropertyMock, return_value=build),
+        patch.object(type(book), "converted_file", new_callable=PropertyMock, return_value=build),
+        patch("src.lib.id3_utils.lookup_metadata") as lookup_mock,
+        patch("src.lib.id3_utils.open_library_lookup_title") as ol_title_mock,
+        patch("src.lib.id3_utils.open_library_lookup_author") as ol_author_mock,
+        patch("src.lib.metadata.plan_fix") as plan_fix_mock,
+        patch("src.lib.id3_utils.write_id3_tags_mutagen"),
+        patch("src.lib.id3_utils._read_m4b_tags_for_verify") as read_tags,
+        patch.object(
+            type(real_cfg),
+            "OPEN_LIBRARY_USER_AGENT",
+            new_callable=PropertyMock,
+            return_value="test-agent/1.0",
+        ),
+    ):
+        read_tags.return_value = SimpleNamespace(
+            id3_title="Map of Bones",
+            id3_artist="James Rollins",
+            id3_album="Map of Bones",
+            id3_albumartist="James Rollins",
+            id3_composer="Scott Brick",
+            id3_date="2005",
+            id3_comment="",
+            id3_sortalbum="Map of Bones",
+            has_id3_cover=True,
+        )
+        verify_and_update_id3_tags(book, in_dir="build")
+
+    lookup_mock.assert_not_called()
+    ol_title_mock.assert_not_called()
+    ol_author_mock.assert_not_called()
+    plan_fix_mock.assert_not_called()
+
+
+def test_extract_skips_metadata_score_when_provider_resolved(
+    book_in_author_named_folder: Audiobook,
+    mock_id3_tags: Callable[..., list[dict[str, str]]],
+):
+    book = book_in_author_named_folder
+    mock_id3_tags(
+        (
+            book.sample_audio1,
+            {
+                "title": "Map of Bones",
+                "artist": "James Rollins",
+                "album": "Map of Bones",
+                "albumartist": "James Rollins",
+                "composer": "Scott Brick",
+            },
+        ),
+        (
+            book.sample_audio2,
+            {
+                "title": "Map of Bones",
+                "artist": "James Rollins",
+                "album": "Map of Bones",
+                "albumartist": "James Rollins",
+                "composer": "Scott Brick",
+            },
+        ),
+    )
+    book.extract_path_info()
+    book.fs_narrator = "Scott Brick"
+
+    ol = _make_ol_result()
+    with (
+        patch("src.lib.id3_utils._ol_early_extraction", return_value=ol),
+        patch("src.lib.id3_utils._goodreads_early_extraction", return_value=None),
+        patch("src.lib.metadata.bookpeek_provider.bookpeek_enabled", return_value=False),
+        patch("src.lib.id3_utils.MetadataScore") as score_mock,
+    ):
+        book.extract_metadata()
+
+    score_mock.assert_not_called()
+    assert book.narrator == "Scott Brick"
+
+
 def test_gr_wins_over_ol_in_parallel_selection(
     book_in_author_named_folder: Audiobook,
     mock_id3_tags: Callable[..., list[dict[str, str]]],
