@@ -286,8 +286,8 @@ def test_title_case_ol_title(raw: str, expected: str):
     assert title_case_ol_title(raw) == expected
 
 
-def test_normalize_ol_title_strips_edition_and_title_cases():
-    from src.lib.id3_utils import _normalize_ol_title
+def test_normalize_provider_title_strips_edition_and_title_cases():
+    from src.lib.id3_utils import _normalize_provider_title
 
-    assert _normalize_ol_title("the sunne in splendour, Version 3") == "The Sunne in Splendour"
-    assert _normalize_ol_title("the assassin king") == "The Assassin King"
+    assert _normalize_provider_title("the sunne in splendour, Version 3") == "The Sunne in Splendour"
+    assert _normalize_provider_title("the assassin king") == "The Assassin King"

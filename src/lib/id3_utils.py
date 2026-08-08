@@ -327,13 +327,220 @@ def _early_still_matches_ol(book: "Audiobook", early_ol: Any) -> bool:
     return True
 
 
+class _VerifyProviderResolution(NamedTuple):
+    goodreads_match: Any
+    ol_title: Any
+    ol_author_candidates: list
+    ol_status: str
+    reused_early: bool
+    early_ol: Any
+
+
+def _apply_goodreads_to_book(
+    book: "Audiobook",
+    match: "MetadataCandidate",
+    *,
+    set_sortalbum: bool = False,
+    set_date: bool = True,
+) -> None:
+    """Apply a confident Goodreads candidate onto ``book`` fields."""
+    book.title = _normalize_provider_title(match.title)
+    book.album = book.title
+    if set_sortalbum:
+        book.sortalbum = strip_leading_articles(book.title)
+    if match.author:
+        book.artist = book.albumartist = match.author
+    if set_date and match.year:
+        book.date = match.year
+
+
+def _apply_ol_early_to_book(book: "Audiobook", ol_match: Any) -> None:
+    """Apply a accepted Open Library early match onto ``book`` fields."""
+    if not ol_match or not getattr(ol_match, "title", None):
+        return
+    preferred_author = getattr(ol_match, "_convert_preferred_author", None)
+    preferred_canonical = getattr(ol_match, "_convert_preferred_canonical", None)
+    if preferred_author is None:
+        preferred_author = (book.fs_author or "").strip() or None
+
+    book.title = _normalize_provider_title(ol_match.title)
+    book.album = book.title
+    book.sortalbum = strip_leading_articles(book.title)
+
+    if preferred_author and _ol_author_agrees(
+        preferred_canonical or preferred_author,
+        ol_match.author,
+        ol_match.author_score(fallback=None) if hasattr(ol_match, "author_score") else None,
+    ):
+        book.artist = fix_smart_quotes(ol_match.author)
+        book.albumartist = fix_smart_quotes(ol_match.author)
+        if getattr(ol_match, "author_and_narrator_swapped", False) and getattr(ol_match, "narrator", None):
+            if ol_match.narrator.lower() != (preferred_author or "").lower():
+                book.narrator = fix_smart_quotes(ol_match.narrator)
+    elif preferred_author:
+        book.artist = preferred_canonical or preferred_author
+        book.albumartist = book.artist
+    else:
+        book.artist = fix_smart_quotes(ol_match.author)
+        book.albumartist = fix_smart_quotes(ol_match.author)
+
+
+def _resolve_verify_providers(book: "Audiobook") -> _VerifyProviderResolution:
+    """Reuse early GR/OL stash or re-lookup; never dual-compares GR vs early OL."""
+    early_gr = getattr(book, "_early_gr", None)
+    early_ol = getattr(book, "_early_ol", None)
+    goodreads_match = None
+    ol_title = None
+    ol_author_candidates: list = []
+    ol_status = "none"
+    reused_early = False
+
+    if _early_still_matches_gr(book, early_gr):
+        goodreads_match = early_gr
+        reused_early = True
+        print_debug("verify: reusing early Goodreads match")
+        _apply_goodreads_to_book(book, goodreads_match, set_date=True)
+    elif _early_still_matches_ol(book, early_ol):
+        ol_title = early_ol
+        ol_status = ol_match_band(ol_title)
+        reused_early = True
+        print_debug("verify: reusing early Open Library match")
+    else:
+        goodreads_match = lookup_metadata(
+            book.title,
+            author=book.author,
+            narrator=book.narrator,
+            lookup_goodreads=True,
+            lookup_open_library=False,
+        ).selected
+
+        if goodreads_match and goodreads_match.status == "match":
+            _apply_goodreads_to_book(book, goodreads_match, set_date=True)
+            ol_title = None
+            ol_author_candidates = []
+            ol_status = "none"
+        else:
+            ol_author_candidates = [
+                (open_library_lookup_author(book.author, method="score"), "author"),
+                (open_library_lookup_author(book.author, method="similarity"), "author"),
+                (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
+            ]
+            ol_title = open_library_lookup_title(
+                book.title, author=book.author, narrator=book.narrator, method="similarity"
+            )
+            ol_status = ol_match_band(ol_title)
+
+    return _VerifyProviderResolution(
+        goodreads_match=goodreads_match,
+        ol_title=ol_title,
+        ol_author_candidates=ol_author_candidates,
+        ol_status=ol_status,
+        reused_early=reused_early,
+        early_ol=early_ol,
+    )
+
+
+def _maybe_run_verify_plan_fix(
+    book: "Audiobook",
+    *,
+    m4b_to_check: Path,
+    book_to_check: Any,
+    early_ol: Any,
+    ol_status: str,
+    reused_early: bool,
+) -> tuple[str, bool]:
+    """Run plan_fix (or attach-only fallback) when early providers did not short-circuit.
+
+    Returns ``(shared_ol_title, ran_plan_fix)``.
+    """
+    if ol_status not in ("match", "low_confidence") or book.path.is_file():
+        return "", False
+    if reused_early:
+        print_debug("verify: skipping plan_fix (early provider still matches)")
+        return "", False
+
+    from src.lib.config import cfg
+
+    if not cfg.OPEN_LIBRARY_USER_AGENT:
+        return "", False
+
+    from src.lib.metadata import CliPaths, plan_fix
+
+    ol_ref = None
+    if early_ol and getattr(early_ol, "has_match", False):
+        ol_ref = getattr(early_ol, "key", None) or None
+
+    book_dir = m4b_to_check.parent if m4b_to_check.parent.is_dir() else (
+        book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent
+    )
+    shared_plan = None
+    ran_plan_fix = True
+    try:
+        shared_plan = plan_fix(
+            book_dir,
+            cli=CliPaths(
+                converted=cfg.converted_dir,
+                archive=cfg.archive_dir,
+                inbox=cfg.inbox_dir,
+            ),
+            require_source=False,
+            lookup_ol=True,
+            minimalist=True,
+            force_dirty=True,
+            ol_ref=ol_ref,
+        )
+    except Exception as e:
+        print_debug(f"verify: plan_fix failed ({e}); falling back to attach-only")
+        from src.lib.metadata.models import FixPlan, TagSnapshot
+        from src.lib.metadata.ol_attach import _attach_open_library
+
+        shared_plan = FixPlan(
+            book_dir=book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent,
+            m4b=m4b_to_check,
+            source=None,
+            desired_title=book.title,
+            desired_author=book.author,
+            desired_album=book.album,
+            desired_date=book.date,
+            desired_narrator=book.narrator,
+            desired_stem=book.output_filename_stem,
+            current=TagSnapshot(
+                title=book_to_check.id3_title,
+                artist=book_to_check.id3_artist,
+                album=book_to_check.id3_album,
+                albumartist=book_to_check.id3_albumartist,
+                composer=book_to_check.id3_composer,
+                date=book_to_check.id3_date,
+                path=m4b_to_check,
+            ),
+            fs_title=book.fs_title,
+            fs_author=book.fs_author,
+            fs_date=book.fs_year,
+            fs_files=book.orig_file_name,
+        )
+        _attach_open_library(shared_plan, minimalist=True, ol_ref=ol_ref)
+
+    shared_ol_title = ""
+    if shared_plan and shared_plan.ol_status in ("match", "low_confidence", "forced"):
+        shared_ol_title = shared_plan.desired_title
+        if shared_plan.desired_author:
+            book.artist = book.albumartist = shared_plan.desired_author
+        if shared_plan.desired_date:
+            book.date = shared_plan.desired_date
+        if getattr(shared_plan, "desired_narrator", None):
+            book.narrator = shared_plan.desired_narrator
+        print_debug(
+            f"verify: plan_fix ol={shared_plan.ol_status!r} "
+            f"title={shared_plan.desired_title!r} reasons={getattr(shared_plan, 'reasons', ())}"
+        )
+    return shared_ol_title, ran_plan_fix
+
+
 def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "converted"]) -> None:
     # takes the inbound book, then checks the converted file and verifies that the id3 tags match the extracted metadata
     # if they do not match, it will print a notice and update the id3 tags
 
     t_verify_start = time.time()
-    ran_plan_fix = False
-    reused_early = False
 
     m4b_to_check = book.converted_file if in_dir == "converted" else book.build_file
 
@@ -369,158 +576,21 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
     new_tags.pop("track_num", None)
     new_tags.pop("disc_num", None)
 
-    from src.lib.ol_lookup import _title_sim
+    resolved = _resolve_verify_providers(book)
+    goodreads_match = resolved.goodreads_match
+    ol_title = resolved.ol_title
+    ol_author_candidates = resolved.ol_author_candidates
+    ol_status = resolved.ol_status
+    reused_early = resolved.reused_early
 
-    early_gr = getattr(book, "_early_gr", None)
-    early_ol = getattr(book, "_early_ol", None)
-    goodreads_match = None
-    ol_title = None
-    ol_author_candidates: list = []
-    ol_status = "none"
-
-    # Prefer stashed early providers (no network / no plan_fix) when they still
-    # agree with book.* after extract. Only re-lookup + plan_fix when early
-    # results are missing or diverged.
-    if _early_still_matches_gr(book, early_gr):
-        goodreads_match = early_gr
-        reused_early = True
-        print_debug("verify: reusing early Goodreads match")
-        if early_ol and getattr(early_ol, "has_match", False) and (
-            _title_sim(goodreads_match.title, early_ol.title)[0] < 0.85
-            or _title_sim(goodreads_match.author, early_ol.author)[0] < 0.85
-            or (goodreads_match.year and early_ol.date and goodreads_match.year != early_ol.date)
-        ):
-            print_debug(
-                "Goodreads/Open Library disagreement during verification; "
-                f"preferring Goodreads {goodreads_match.title!r}"
-            )
-        book.title = _normalize_ol_title(goodreads_match.title)
-        book.album = book.title
-        if goodreads_match.author:
-            book.artist = book.albumartist = goodreads_match.author
-        if goodreads_match.year:
-            book.date = goodreads_match.year
-    elif _early_still_matches_ol(book, early_ol):
-        ol_title = early_ol
-        ol_status = ol_match_band(ol_title)
-        reused_early = True
-        print_debug("verify: reusing early Open Library match")
-    else:
-        goodreads_match = lookup_metadata(
-            book.title,
-            author=book.author,
-            narrator=book.narrator,
-            lookup_goodreads=True,
-            lookup_open_library=False,
-        ).selected
-
-        if goodreads_match and goodreads_match.status == "match":
-            if early_ol and getattr(early_ol, "has_match", False) and (
-                _title_sim(goodreads_match.title, early_ol.title)[0] < 0.85
-                or _title_sim(goodreads_match.author, early_ol.author)[0] < 0.85
-                or (goodreads_match.year and early_ol.date and goodreads_match.year != early_ol.date)
-            ):
-                print_debug(
-                    "Goodreads/Open Library disagreement during verification; "
-                    f"preferring Goodreads {goodreads_match.title!r}"
-                )
-            book.title = _normalize_ol_title(goodreads_match.title)
-            book.album = book.title
-            if goodreads_match.author:
-                book.artist = book.albumartist = goodreads_match.author
-            if goodreads_match.year:
-                book.date = goodreads_match.year
-            # Goodreads is authoritative when it has a confident match.
-            ol_title = None
-            ol_author_candidates = []
-            ol_status = "none"
-        else:
-            ol_author_candidates = [
-                (open_library_lookup_author(book.author, method="score"), "author"),
-                (open_library_lookup_author(book.author, method="similarity"), "author"),
-                (open_library_lookup_author(book.narrator, method="similarity"), "narrator"),
-            ]
-            ol_title = open_library_lookup_title(
-                book.title, author=book.author, narrator=book.narrator, method="similarity"
-            )
-            ol_status = ol_match_band(ol_title)
-
-    shared_ol_title = ""
-    if ol_status in ("match", "low_confidence") and not book.path.is_file() and not reused_early:
-        from src.lib.config import cfg
-
-        if cfg.OPEN_LIBRARY_USER_AGENT:
-            from src.lib.metadata import CliPaths, plan_fix
-
-            ol_ref = None
-            if early_ol and getattr(early_ol, "has_match", False):
-                ol_ref = getattr(early_ol, "key", None) or None
-
-            book_dir = m4b_to_check.parent if m4b_to_check.parent.is_dir() else (
-                book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent
-            )
-            shared_plan = None
-            try:
-                ran_plan_fix = True
-                shared_plan = plan_fix(
-                    book_dir,
-                    cli=CliPaths(
-                        converted=cfg.converted_dir,
-                        archive=cfg.archive_dir,
-                        inbox=cfg.inbox_dir,
-                    ),
-                    require_source=False,
-                    lookup_ol=True,
-                    minimalist=True,
-                    force_dirty=True,
-                    ol_ref=ol_ref,
-                )
-            except Exception as e:
-                print_debug(f"verify: plan_fix failed ({e}); falling back to attach-only")
-                from src.lib.metadata.models import FixPlan, TagSnapshot
-                from src.lib.metadata.ol_attach import _attach_open_library
-
-                shared_plan = FixPlan(
-                    book_dir=book.inbox_dir if book.inbox_dir.is_dir() else book.path.parent,
-                    m4b=m4b_to_check,
-                    source=None,
-                    desired_title=book.title,
-                    desired_author=book.author,
-                    desired_album=book.album,
-                    desired_date=book.date,
-                    desired_narrator=book.narrator,
-                    desired_stem=book.output_filename_stem,
-                    current=TagSnapshot(
-                        title=book_to_check.id3_title,
-                        artist=book_to_check.id3_artist,
-                        album=book_to_check.id3_album,
-                        albumartist=book_to_check.id3_albumartist,
-                        composer=book_to_check.id3_composer,
-                        date=book_to_check.id3_date,
-                        path=m4b_to_check,
-                    ),
-                    fs_title=book.fs_title,
-                    fs_author=book.fs_author,
-                    fs_date=book.fs_year,
-                    fs_files=book.orig_file_name,
-                )
-                _attach_open_library(shared_plan, minimalist=True, ol_ref=ol_ref)
-            if shared_plan and shared_plan.ol_status in ("match", "low_confidence", "forced"):
-                shared_ol_title = shared_plan.desired_title
-                # Convert adapter: auto-apply desired fields (shared auto OL is
-                # display-only unless forced via ol_ref).
-                if shared_plan.desired_author:
-                    book.artist = book.albumartist = shared_plan.desired_author
-                if shared_plan.desired_date:
-                    book.date = shared_plan.desired_date
-                if getattr(shared_plan, "desired_narrator", None):
-                    book.narrator = shared_plan.desired_narrator
-                print_debug(
-                    f"verify: plan_fix ol={shared_plan.ol_status!r} "
-                    f"title={shared_plan.desired_title!r} reasons={getattr(shared_plan, 'reasons', ())}"
-                )
-    elif ol_status in ("match", "low_confidence") and reused_early:
-        print_debug("verify: skipping plan_fix (early provider still matches)")
+    shared_ol_title, ran_plan_fix = _maybe_run_verify_plan_fix(
+        book,
+        m4b_to_check=m4b_to_check,
+        book_to_check=book_to_check,
+        early_ol=resolved.early_ol,
+        ol_status=ol_status,
+        reused_early=reused_early,
+    )
 
     from src.lib.metadata.ol_attach import resolve_date_consensus
 
@@ -560,7 +630,7 @@ def verify_and_update_id3_tags(book: "Audiobook", *, in_dir: Literal["build", "c
         tag_value = getattr(book_to_check, f"id3_{id3_tag}")
         author_for_title = book.artist or book.author or ""
         if ol_title and ol_title.has_match and ol_title.score(fallback=0.0) >= 0.5:
-            new_title = shared_ol_title or _normalize_ol_title(NotNone(ol_title).title)
+            new_title = shared_ol_title or _normalize_provider_title(NotNone(ol_title).title)
             # Shared transforms (colon subtitle, always-minimalist, and
             # edition enrichment when Open Library is configured).
             new_title = _finalize_convert_title(new_title, author=author_for_title)
@@ -951,20 +1021,24 @@ def _strip_ol_edition_suffix(title: str) -> str:
     return _OL_EDITION_SUFFIX.sub("", title).strip()
 
 
-def _normalize_ol_title(title: str) -> str:
-    """Strip OL edition suffixes and Title-Case the result.
+def _normalize_provider_title(title: str) -> str:
+    """Strip edition suffixes and Title-Case a provider (GR/OL/bookpeek) title.
 
-    OL often returns sentence case; this is the single choke point used wherever
-    an OL title is assigned to ``book.title`` or written into ID3 tags.
+    Providers often return sentence case; this is the choke point used wherever a
+    provider title is assigned to ``book.title`` or written into ID3 tags.
     """
     return title_case_ol_title(fix_smart_quotes(_strip_ol_edition_suffix(title)))
+
+
+# Back-compat alias for older imports/tests.
+_normalize_ol_title = _normalize_provider_title
 
 
 def _finalize_convert_title(title: str, author: str | None = None) -> str:
     """Shared colon + always-minimalist transforms for convert titles.
 
-    Post-selection transforms only — convert selection stays OCR / MetadataScore /
-    OL-early. Post-build verify uses ``plan_fix`` when early providers no longer match.
+    Post-selection only — convert selection stays GR-then-OL-early / MetadataScore /
+    OCR. Post-build verify uses ``plan_fix`` when early providers no longer match.
     """
     if not (title or "").strip():
         return title or ""
@@ -1072,7 +1146,7 @@ def _ol_author_agrees(preferred: str, ol_author: str, author_score: float | None
 
 
 def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibraryTitle | None":
-    """Try Open Library *before* heuristic scoring.
+    """Try Open Library *before* heuristic scoring (return-only; caller applies).
 
     Author-first strategy:
     1. Collect person candidates (fs_author first; never album-as-author).
@@ -1081,6 +1155,7 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
        fall back to title-only when a preferred author is known.
     4. Accept only when title floors, source-title anchor, and author agreement
        (plus ID3 conflict demotion) all pass.
+    5. Stash preferred-author context on the result for ``_apply_ol_early_to_book``.
     """
     from rapidfuzz import fuzz
 
@@ -1302,30 +1377,9 @@ def _ol_early_extraction(book: "Audiobook", tag1: Any, tag2: Any) -> "OpenLibrar
     if not _ol_title_passes_floor(best_query or best_ol.title, best_ol.title):
         return None
 
-    # Never demote a validated preferred author to narrator on a conflicting hit —
-    # conflicting hits are already rejected above. Apply title + agreed author.
-    book.title = _normalize_ol_title(best_ol.title)
-    book.album = book.title
-    book.sortalbum = strip_leading_articles(book.title)
-
-    if preferred_author and _ol_author_agrees(
-        preferred_canonical or preferred_author, best_ol.author, best_ol.author_score(fallback=None)
-    ):
-        # Prefer OL canonical when it agrees; keeps "Ursula K. Le Guin" tidy.
-        book.artist = fix_smart_quotes(best_ol.author)
-        book.albumartist = fix_smart_quotes(best_ol.author)
-        if best_ol.author_and_narrator_swapped and best_ol.narrator:
-            # Genuine swap: preferred was the performer; OL author is correct.
-            # Only set narrator from swap if it isn't the preferred author.
-            if best_ol.narrator.lower() != (preferred_author or "").lower():
-                book.narrator = fix_smart_quotes(best_ol.narrator)
-    elif preferred_author:
-        book.artist = preferred_canonical or preferred_author
-        book.albumartist = book.artist
-    else:
-        book.artist = fix_smart_quotes(best_ol.author)
-        book.albumartist = fix_smart_quotes(best_ol.author)
-
+    # Stash preferred-author context for ``_apply_ol_early_to_book`` (return-only).
+    best_ol._convert_preferred_author = preferred_author
+    best_ol._convert_preferred_canonical = preferred_canonical
     return best_ol
 
 
@@ -1437,8 +1491,8 @@ def _early_narrator_hint(book: "Audiobook", tag1: Any, tag2: Any, *, author: str
 
 
 def _narrator_from_remaining_tags(book: "Audiobook") -> str:
-    """Post-OL narrator detection: once the author is known, scan ID3 fields for
-    the narrator.  Handles cases the heuristic scorer misses, e.g. the artist
+    """Post-provider narrator detection: once the author is known, scan ID3 fields
+    for the narrator.  Handles cases the heuristic scorer misses, e.g. the artist
     field carries 'read by Jenny Sterlin' with no albumartist present.
     """
     author_lower = (book.artist or "").lower()
@@ -1569,12 +1623,9 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     provider_resolved = goodreads_match is not None or ol_match is not None
     if goodreads_match:
-        book.title = _normalize_ol_title(goodreads_match.title)
-        book.album = book.title
-        book.sortalbum = strip_leading_articles(book.title)
-        if goodreads_match.author:
-            book.artist = goodreads_match.author
-            book.albumartist = goodreads_match.author
+        _apply_goodreads_to_book(book, goodreads_match, set_sortalbum=True, set_date=False)
+    elif ol_match:
+        _apply_ol_early_to_book(book, ol_match)
 
     bookpeek_match = None
     if bookpeek_enabled():
@@ -1597,7 +1648,7 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
 
     if not provider_resolved and bookpeek_match and bookpeek_match.status == "match" and bookpeek_match.title:
         # Fallback only when GR/OL did not resolve
-        book.title = _normalize_ol_title(bookpeek_match.title)
+        book.title = _normalize_provider_title(bookpeek_match.title)
         book.album = book.title
         book.sortalbum = strip_leading_articles(book.title)
         if bookpeek_match.author:
@@ -1677,8 +1728,8 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
         book.albumartist = sample_audio2_tags.albumartist
 
     # Shared colon + always-minimalist transforms on the resolved title/album.
-    # Selection stays OCR / MetadataScore / OL-early; verify may use plan_fix
-    # when early providers no longer match.
+    # Selection stays GR-then-OL-early / MetadataScore / OCR; verify may use
+    # plan_fix when early providers no longer match.
     _author_for_title = book.artist or book.author or ""
     _pre_title = (book.title or "").strip()
     if book.title:
@@ -1733,7 +1784,8 @@ def extract_metadata(book: "Audiobook", console: bool = False) -> "Audiobook":
     # ── Provider match summary ────────────────────────────────────────────────
     if console:
         from src.lib.config import cfg
-        if cfg.OPEN_LIBRARY_USER_AGENT:
+        # Only report OL when it was attempted (GR miss / GR disabled).
+        if cfg.OPEN_LIBRARY_USER_AGENT and goodreads_match is None:
             print()
             if ol_match:
                 ol_details = [f"Title: {ol_match.title}", f"Author: {ol_match.author}"]
