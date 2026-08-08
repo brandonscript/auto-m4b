@@ -52,13 +52,15 @@ Tagged in `test_metadata_plan.py` for Phase 4 triage:
 - `minimalist_title` drops unbalanced `(Series, Book N)` paren tails.
 - `test_parse_combo_id3_tags[…expected3]` can fail when `OPEN_LIBRARY_USER_AGENT` is set (OL early overwrites Album Artist narrator) — tracked under **OL auto-write**.
 
-## Phase 6 notes (experiment)
+## Phase 6 notes (verify planner)
 
-- Post-build `verify_and_update_id3_tags` can call shared `plan_fix` when
-  `USE_PLAN_FIX_IN_VERIFY=1` (default on `dev`). Pre-convert `extract_metadata`
-  selection is unchanged.
+- Post-build `verify_and_update_id3_tags` calls shared `plan_fix` only when early
+  GR/OL results are missing or no longer match `book.*`. When early providers still
+  match, verify reuses the stash and skips `plan_fix` / re-lookups (no edition enrich
+  in that short-circuit path).
+- Pre-convert `extract_metadata` selection is unchanged (OCR / MetadataScore / OL-early).
 - Convert still auto-applies desired fields after the plan (shared auto OL remains
   display-only unless `ol_ref` forces attach). Passthrough / basename stem adapters
   stay convert-side.
-- Disable with `USE_PLAN_FIX_IN_VERIFY=0` to restore the hand-rolled FixPlan attach path.
+- If `plan_fix` raises, verify falls back to attach-only (`FixPlan` + `_attach_open_library`).
 
