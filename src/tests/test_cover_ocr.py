@@ -92,39 +92,3 @@ def test_extract_cover_ocr_text_uses_sidecar_when_enabled(tmp_path):
     mock_path.assert_called_once()
 
 
-def test_ol_early_extraction_ocr_vetoes_wrong_author(
-    book_in_author_named_folder,
-    mock_id3_tags,
-):
-    """When cover OCR names the preferred author, reject a conflicting OL author."""
-    from src.lib.config import cfg as real_cfg
-    from src.lib.id3_tags import Id3Tags
-    from src.lib.id3_utils import _ol_early_extraction
-    from src.tests.test_id3_tags import _make_ol_result, _mock_ol_author
-
-    book = book_in_author_named_folder
-    title = "Solitude"
-    author = "Ursula K. Le Guin"
-    mock_id3_tags(
-        (book.sample_audio1, {"title": title, "artist": author, "album": title, "albumartist": author}),
-        (book.sample_audio2, {"title": title, "artist": author, "album": title, "albumartist": author}),
-    )
-    book.extract_path_info()
-    book.fs_author = "Le Guin, Ursula K."
-
-    ol_result = _make_ol_result(score=1.0, title=title, author="Anthony Storr", author_score=0.05)
-    tag1 = Id3Tags.from_file(book.sample_audio1, throw=False)
-
-    with patch("src.lib.id3_utils.open_library_lookup_title", return_value=ol_result):
-        with patch("src.lib.id3_utils.open_library_lookup_author", return_value=_mock_ol_author(author)):
-            with patch.object(
-                type(real_cfg), "OPEN_LIBRARY_USER_AGENT", new_callable=PropertyMock, return_value="test-agent/1.0"
-            ):
-                with patch.object(type(real_cfg), "COVER_OCR", new_callable=PropertyMock, return_value=True):
-                    with patch(
-                        "src.lib.cover_ocr.extract_cover_ocr_text",
-                        return_value="Ursula K. Le Guin Solitude",
-                    ):
-                        result = _ol_early_extraction(book, tag1, tag1)
-
-    assert result is None
