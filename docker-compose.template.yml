@@ -38,5 +38,5 @@ services:
       # - MAX_PROBE_THREADS=8
       # - MAX_CONVERT_JOBS=1  # >1 = parallel standalone books (series stay serial)
       # - MAX_BITRATE=64
-      # - POST_CONVERT_SCRIPT=/scripts/post-convert-deluge.py
+      # - POST_CONVERT_SCRIPT=/scripts/my-hook.py
       # - POST_CONVERT_SCRIPT_TIMEOUT=30

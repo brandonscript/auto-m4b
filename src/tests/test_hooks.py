@@ -15,18 +15,18 @@ def test_append_post_convert_log_writes_dedicated_file(tmp_path: Path):
 
     _append_post_convert_log(
         book,
-        script_name="post-convert-deluge.py",
+        script_name="my-test-hook.py",
         status="failed",
         exit_code=1,
-        stdout="[deluge] finalizing…\n",
-        stderr="Deluge login failed\n",
+        stdout="[hook] finalizing…\n",
+        stderr="Hook connection failed\n",
     )
 
     text = log.read_text(encoding="utf-8")
-    assert "Post-convert script: post-convert-deluge.py" in text
+    assert "Post-convert script: my-test-hook.py" in text
     assert "Status: failed" in text
     assert "Exit code: 1" in text
-    assert "Deluge login failed" in text
+    assert "Hook connection failed" in text
 
 
 def test_run_post_convert_script_writes_failure_log(tmp_path: Path):

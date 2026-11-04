@@ -319,12 +319,12 @@ environment:
   - POST_CONVERT_SCRIPT_TIMEOUT=30
 ```
 
-### Site-specific hooks (e.g. Deluge)
+### Custom integrations
 
-Deluge finalize (relabel + `move_storage` after converting a book copied from
-`WATCH_FOLDER`) is intentionally **not** shipped in this repo — mount your own
-script via `POST_CONVERT_SCRIPT`. A site-specific example for phantom-docker
-lives at `/etc/docker/scripts/auto-m4b/post-convert-deluge.py`.
+Use `POST_CONVERT_SCRIPT` to connect auto-m4b to another app, service, or script.
+For example, a hook can update labels, move source files, or notify another
+service after a successful conversion. Integration scripts are specific to your
+setup and are not included in this repo; mount your own script as shown above.
 
 ## Development
 
@@ -341,4 +341,4 @@ poetry run mypy src/
 
 ## License
 
-[MIT](LICENSE) © 2026 Brandon Shelley
+[MIT](LICENSE) © 2026 [github.com/brandonscript](https://github.com/brandonscript)

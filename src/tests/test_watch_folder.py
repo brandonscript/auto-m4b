@@ -131,7 +131,7 @@ class TestIsStable:
         book = watch_dir / "InProgress"
         _make_audio_files(book, "ch1.mp3", "ch2.mp3")
         _backdate(book, seconds=cfg.WAIT_TIME * 3 + 1)
-        # Deluge writes .part files for incomplete downloads
+        # .part files indicate incomplete source files
         (book / "ch3.mp3.part").touch()
         assert WatchFolder.is_stable(book) is False
 
@@ -284,14 +284,14 @@ class TestScanAndCopy:
         assert book.exists()
 
     def test_does_not_copy_unstable_book(self, watch_dir: Path):
-        book = watch_dir / "Downloading"
+        book = watch_dir / "InProgress"
         _make_audio_files(book, "ch1.mp3", "ch2.mp3")
         # Files are fresh — not stable yet
 
         copied = WatchFolder.scan_and_copy()
 
         assert copied == []
-        assert not (cfg.inbox_dir / "Downloading").exists()
+        assert not (cfg.inbox_dir / "InProgress").exists()
 
     def test_does_not_copy_single_audio_file(self, watch_dir: Path):
         book = watch_dir / "SingleTrack"
@@ -361,7 +361,7 @@ class TestScanAndCopy:
         assert not (cfg.inbox_dir / "GoneFromInbox").exists()
 
     def test_copies_new_nested_book_after_parent_was_marked(self, watch_dir: Path):
-        """A later download under a marked container is copied independently."""
+        """A later addition under a marked container is copied independently."""
         container = watch_dir / "Brandon Sanderson"
         first_book = container / "3-The Hero of Ages"
         _make_audio_files(first_book, "ch1.mp3", "ch2.mp3")
@@ -421,7 +421,7 @@ class TestScanAndCopy:
         book = watch_dir / "InProgress"
         _make_audio_files(book, "ch1.mp3", "ch2.mp3")
         _backdate(book)
-        (book / "ch3.mp3.part").touch()  # still downloading
+        (book / "ch3.mp3.part").touch()  # still being written
 
         copied = WatchFolder.scan_and_copy()
 
