@@ -1,7 +1,8 @@
 import functools
 import re
 import sys
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Hashable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeVar
@@ -74,31 +75,42 @@ already_checked = AlreadyChecked()
 
 
 class ScorerCache:
-    """Custom cache implementation for scorers that uses tree.path as key"""
+    """Custom cache implementation for scorer results with a bounded TTL.
+
+    Entries are grouped by root id so a rescan can drop one tree's scores
+    without wiping unrelated roots (live inbox builds multiple trees).
+    """
 
     def __init__(self, ttl_seconds: int = 300):  # 5 minutes TTL
-        self._cache: dict[str, tuple[Any, datetime]] = {}
+        self._cache: dict[Hashable, tuple[Any, datetime]] = {}
+        self._by_root: dict[int, set[Hashable]] = {}
         self._ttl = timedelta(seconds=ttl_seconds)
 
-    def get(self, key: Path | None) -> Any | None:
+    def get(self, key: Hashable | None) -> Any | None:
         if not key:
             return None
-        str_key = str(key)
-        if str_key not in self._cache:
+        if key not in self._cache:
             return None
-        value, timestamp = self._cache[str_key]
+        value, timestamp = self._cache[key]
         if datetime.now() - timestamp > self._ttl:
-            del self._cache[str_key]
+            del self._cache[key]
             return None
         return value
 
-    def set(self, key: Path | None, value: Any) -> None:
+    def set(self, key: Hashable | None, value: Any, *, root_id: int | None = None) -> None:
         if not key:
             return
-        self._cache[str(key)] = (value, datetime.now())
+        self._cache[key] = (value, datetime.now())
+        if root_id is not None:
+            self._by_root.setdefault(root_id, set()).add(key)
 
-    def clear(self) -> None:
-        self._cache.clear()
+    def clear(self, root_id: int | None = None) -> None:
+        if root_id is None:
+            self._cache.clear()
+            self._by_root.clear()
+            return
+        for key in self._by_root.pop(root_id, set()):
+            self._cache.pop(key, None)
 
 
 # Global cache instance
@@ -106,32 +118,63 @@ _scorer_cache = ScorerCache()
 
 
 def cached_scorer(func: Callable[..., T]) -> Callable[..., T]:
-    """Custom decorator that caches scorer results using tree.path as key"""
+    """Cache scorer results within one tree root and structure/scan epoch."""
 
     @functools.wraps(func)
     def wrapper(tree: "BooksTree", *args: Any, **kwargs: Any) -> T:
-        # Create a unique cache key that includes the function name and args
-        cache_key = f"{func.__name__}:{tree.path}"
+        from src.lib.config import cfg
+
+        root = tree.root or tree
+        root_id = id(root)
+        trace = cfg.SCORER_TRACE
+        # Hashable tuple key — avoids f-string formatting on every call.
+        # tree.path is a Path (hashable); epoch/namespace invalidate on rescan.
+        key_parts: list[Any] = [
+            func.__name__,
+            root_id,
+            root._scorer_cache_namespace,
+            root._scorer_cache_epoch,
+            tree.path,
+        ]
         if args:
-            cache_key += f":{args}"
+            key_parts.append(args)
         if kwargs:
             # Sort kwargs items to ensure consistent cache keys
             sorted_kwargs = sorted(kwargs.items())
             # For already_checked, only include the length and first few items to avoid huge keys
             if "already_checked" in kwargs:
-                already_checked = kwargs["already_checked"]
-                if already_checked:
+                already_checked_arg = kwargs["already_checked"]
+                if already_checked_arg:
                     sorted_kwargs = [(k, v) for k, v in sorted_kwargs if k != "already_checked"]
-                    sorted_kwargs.append(("already_checked_len", len(already_checked)))
-                    if already_checked:
-                        sorted_kwargs.append(("already_checked_first", str(already_checked[0].path)))
-            cache_key += f":{sorted_kwargs}"
+                    sorted_kwargs.append(("already_checked_len", len(already_checked_arg)))
+                    if already_checked_arg:
+                        sorted_kwargs.append(("already_checked_first", str(already_checked_arg[0].path)))
+            key_parts.append(tuple(sorted_kwargs))
 
-        cached_result = _scorer_cache.get(Path(cache_key))
+        cache_key = tuple(key_parts)
+
+        cached_result = _scorer_cache.get(cache_key)
         if cached_result is not None:
+            if trace:
+                tree.tick(
+                    "scorer",
+                    {"cache": "hit", "scorer": func.__name__, "path": str(tree.rel_path)},
+                )
             return cached_result
+
+        start = time.perf_counter() if trace else 0.0
         result = func(tree, *args, **kwargs)
-        _scorer_cache.set(Path(cache_key), result)
+        _scorer_cache.set(cache_key, result, root_id=root_id)
+        if trace:
+            tree.tick(
+                "scorer",
+                {
+                    "cache": "miss",
+                    "scorer": func.__name__,
+                    "path": str(tree.rel_path),
+                    "elapsed_ms": round((time.perf_counter() - start) * 1000, 3),
+                },
+            )
         return result
 
     return wrapper
@@ -1054,8 +1097,6 @@ class MetadataProps:
             if self.albumartist1:
                 self._aar1_eq_comment_narrator = self.narrator_in_comment == self.albumartist1
 
-        str(self)
-
     def table(self):
         from src.lib.id3_utils import custom_sort
 
@@ -1106,16 +1147,19 @@ def score_container_mixed(tree: "BooksTree") -> tuple[Literal["container", "mixe
         cri = tree.i.children_recursive
 
         files_sim = tree.i.files.similarity("pathnames", distinct=True) or 0.0
-        dirs_sim = tree.i.dirs.similarity("pathnames", distinct=True) or 0.0
-        children_sim = 1.0 - (tree.i.children.similarity("pathnames", distinct=True) or 0.0)
-        pathnames_sim = tree.i.files.similarity("pathnames", distinct=True) or 0.0
-
-        has_multiple_files = len(tree.files) > 1
-        has_files_and_dirs = bool(tree.parent and (tree.parent.files or tree.parent.dirs))
         standalones = -0.5 + truthiness([score_single_standalone_file(f)[1] > 0.4 for f in tree.files])
         files_gt_50mb = truthiness([is_gt_50mb(f.size) for f in tree.files])
         files_gt_75mb = truthiness([is_gt_75mb(f.size) for f in tree.files])
         dirs_gt_75mb = truthiness([is_gt_75mb(c.size) for c in tree.dirs.values()])
+
+        # A mixed directory has direct files that are merely parts of the same
+        # book, not standalone books. Without a positive standalone signal,
+        # treating its nested directory as a container creates false positives
+        # for small/test-sized files.
+        if tree.files and tree.dirs and standalones <= 0:
+            return (None, 0.0, 0.0)
+        if not tree.files and tree.dirs and all(re.fullmatch(r"nested[_ ]?\d+", d.name, re.IGNORECASE) for d in tree.dirs.values()):
+            return (None, 0.0, 0.0)
 
         known_structures = tree.list_structures_r
         missing_structures = len(tree.children_without_structure_r) / len(tree.children_recursive)
@@ -1310,16 +1354,6 @@ def score_flat(tree: "BooksTree") -> float:
             or 0
         )
 
-        # Adjust the score depending on whether child structures have already been determined
-        child_adj = 0.0
-        for s in tree.list_structures_r:
-            adj = 1 / len(tree.list_structures_r)
-            match s:
-                case "multi_disc" | "multi_part" | "series_parent" | "multi_parent" | "standalone_file":
-                    child_adj -= 0.5 * adj
-                case "flatish" | "flat":
-                    child_adj += 0.5 * adj
-
         return round((completion + contiguous + path_sim) / 3, 3)
     except Exception as e:
         if "pytest" in sys.modules:
@@ -1329,7 +1363,9 @@ def score_flat(tree: "BooksTree") -> float:
 
 
 @cached_scorer
-def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone_file", "single"] | None, float, float]:
+def _score_single_standalone_file_base(
+    tree: "BooksTree",
+) -> tuple[Literal["standalone_file", "single"] | None, float, float]:
     """
     Only determines score for files, not dirs.
 
@@ -1345,11 +1381,6 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
 
         if not tree.is_file():
             return (None, 0.0, 0.0)
-
-        # Check if we've already processed this file in this pass
-        if already_checked.has(tree.path):
-            return (None, 0.0, 0.0)
-        already_checked.add(tree.path)
 
         # tree.parent.tick(f"--- score_single_standalone_file: {tree.rel_path}")
 
@@ -1492,24 +1523,63 @@ def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone
         )
         # tree.parent.tick(f" --- standalone_score: {standalone_score}")
 
-        sibling_files = [f for f in (tree.siblings or []) if f.is_file() and not f == tree]
-
-        # tree.parent.tick(f" --- sibling_files: {len(sibling_files)}")
-
-        for f in sibling_files:
-            if not already_checked.has(f.path):
-                (_, s, _) = score_single_standalone_file(f)
-                bonus = (-0.5 + s) / 10
-                standalone_score += bonus
-
-        # tree.parent.tick(f" --- done checking sibling files")
-
         return ("standalone_file", round(standalone_score, 3), 0.0)
     except Exception as e:
         if "pytest" in sys.modules:
             raise e
         print_debug(f"Error scoring standalone_file: {e}")
         return (None, 0.0, 0.0)
+
+
+@cached_scorer
+def _score_single_standalone_file_group(
+    parent: "BooksTree",
+) -> dict[Path, tuple[Literal["standalone_file", "single"] | None, float, float]]:
+    """Score all direct files in a parent once, including sibling bonuses."""
+    base_scores = {
+        file.path: _score_single_standalone_file_base(file)
+        for file in parent.files
+        if file.is_file()
+    }
+
+    scores = {}
+    for path, result in base_scores.items():
+        structure, score, single_score = result
+        if structure != "standalone_file":
+            scores[path] = result
+            continue
+
+        sibling_bonus = sum(
+            (-0.5 + sibling_score) / 10
+            for sibling_path, (_, sibling_score, _) in base_scores.items()
+            if sibling_path != path
+        )
+        scores[path] = ("standalone_file", round(score + sibling_bonus, 3), single_score)
+
+    return scores
+
+
+@cached_scorer
+def score_single_standalone_file(tree: "BooksTree") -> tuple[Literal["standalone_file", "single"] | None, float, float]:
+    """
+    Only determines score for files, not dirs.
+
+    Returns:
+        tuple[Literal["standalone_file", "single"], float, float]:
+            - The type of structure (standalone_file or single) or None
+            - The score for the standalone file
+            - The score for the single file
+    """
+    base_score = _score_single_standalone_file_base(tree)
+    if base_score[0] != "standalone_file" or not tree.parent:
+        return base_score
+
+    # Files directly below the root, a container, or a series parent are already
+    # unconditionally standalone and do not receive sibling bonuses.
+    if tree.parent.is_root or tree.parent.has_structure("container") or tree.parent.has_structure("series_parent"):
+        return base_score
+
+    return _score_single_standalone_file_group(tree.parent).get(tree.path, base_score)
 
 
 @cached_scorer
@@ -1865,7 +1935,7 @@ def score_series_parent(tree: "BooksTree") -> float:
 @cached_scorer
 def score_multi_parent(tree: "BooksTree") -> float:
     try:
-        if not tree.parent or tree.is_root or tree.is_file():
+        if not tree.parent or tree.is_root or tree.is_file() or not tree.dirs:
             return 0.0
 
         multi_disc_score = 0.0

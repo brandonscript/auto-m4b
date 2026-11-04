@@ -26,7 +26,7 @@ from src.lib.converter.chapters import (
 )
 from src.lib.converter.encoder import CODEC_AAC, CODEC_LIBFDK_AAC, detect_aac_codec
 from src.lib.converter.ffmetadata import build_ffmetadata, _escape
-from src.lib.converter.merge import _convert_file_to_mp4
+from src.lib.converter.merge import _conversion_worker_count, _convert_file_to_mp4
 from src.lib.converter.naturalsort import natural_sort_files
 
 
@@ -102,6 +102,12 @@ class TestNaturalSort:
         """Fixture files should already be in natural sort order."""
         sorted_files = natural_sort_files(list(TINY_MP3_FILES))
         assert sorted_files == sorted(TINY_MP3_FILES, key=lambda f: f.name)
+
+
+def test_conversion_worker_count_is_bounded_by_sources():
+    assert _conversion_worker_count(1, 64) == 1
+    assert _conversion_worker_count(5, 4) == 4
+    assert _conversion_worker_count(20, 0) == 1
 
 
 # ─── Chapters ─────────────────────────────────────────────────────────────────

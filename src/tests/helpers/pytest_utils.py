@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -336,6 +337,8 @@ class testutils:
         cfg.ON_COMPLETE = "test_do_nothing"
 
     _mock_mp3_source: "Path | None" = None
+    _mock_mp3_template_dir: "Path | None" = None
+    _mock_mp3_templates: dict[int, Path] = {}
 
     @classmethod
     def _get_mock_mp3_source(cls) -> "Path":
@@ -354,27 +357,38 @@ class testutils:
         if not path.is_absolute():
             path = TEST_DIRS.inbox / path
         path.parent.mkdir(parents=True, exist_ok=True)
-        src = cls._get_mock_mp3_source()
-        shutil.copy2(src, path)
-        path.touch()  # update mtime so dir_was_recently_modified detects the new file
-        # Strip all ID3 tags so mock files don't share metadata from the source fixture,
-        # which would cause the structure scorers to misclassify directories.
-        try:
-            from mutagen.id3 import ID3, ID3NoHeaderError
+        if cls._mock_mp3_template_dir is None:
+            cls._mock_mp3_template_dir = Path(tempfile.gettempdir()) / f"auto-m4b-pytest-mocks-{os.getpid()}"
+            cls._mock_mp3_template_dir.mkdir(parents=True, exist_ok=True)
 
-            ID3(path).delete(path)
-        except (ID3NoHeaderError, Exception):
-            pass
-        # Pad to reach the desired size by repeating MP3 frames — concatenated MP3
-        # frames are valid audio and allow ffprobe to succeed while preserving size
-        # relationships the structure scorers depend on.
-        current_size = path.stat().st_size
-        if size > current_size:
-            with open(path, "rb") as f:
-                frame_data = f.read()
-            with open(path, "ab") as f:
-                while path.stat().st_size < size:
-                    f.write(frame_data)
+        template = cls._mock_mp3_templates.get(size)
+        if template is None:
+            template = cls._mock_mp3_template_dir / f"{size}.mp3"
+            if not template.exists():
+                src = cls._get_mock_mp3_source()
+                shutil.copyfile(src, template)
+                # Strip all ID3 tags once so mock files don't share metadata from the
+                # source fixture, which would cause structure scorers to misclassify.
+                try:
+                    from mutagen.id3 import ID3, ID3NoHeaderError
+
+                    ID3(template).delete(template)
+                except (ID3NoHeaderError, Exception):
+                    pass
+                # Pad to reach the desired size by repeating MP3 frames. Concatenated
+                # MP3 frames remain valid audio and preserve size relationships used
+                # by the structure scorers.
+                current_size = template.stat().st_size
+                if size > current_size:
+                    with template.open("rb") as f:
+                        frame_data = f.read()
+                    with template.open("ab") as f:
+                        while template.stat().st_size < size:
+                            f.write(frame_data)
+            cls._mock_mp3_templates[size] = template
+
+        shutil.copyfile(template, path)
+        path.touch()  # update mtime so dir_was_recently_modified detects the new file
 
     @classmethod
     def rm(cls, p: Path):
@@ -398,20 +412,12 @@ class testutils:
         # capfd and PRINT_LOG reads in sync.
         from src.lib import term
 
-        out = capfd.readouterr().out
+        out = cls.strip_ansi_codes(capfd.readouterr().out)
         next_cursor = len(term.PRINT_LOG)
         cursor = max(0, min(cls._print_log_cursor, next_cursor))
         cls._print_log_cursor = next_cursor
-        raw = "".join(text + end for text, end in term.PRINT_LOG[cursor:])
-        if not raw.strip():
-            combined = out
-        elif not out.strip() or out in raw:
-            combined = raw
-        elif raw in out:
-            combined = out
-        else:
-            combined = out + raw
-        return cls.strip_ansi_codes(combined)
+        raw = cls.strip_ansi_codes("".join(text + end for text, end in term.PRINT_LOG[cursor:]))
+        return out if out.strip() else raw
 
     @classmethod
     def is_divider(cls, line: str | None) -> bool:

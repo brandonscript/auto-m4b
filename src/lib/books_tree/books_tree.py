@@ -1,12 +1,18 @@
+import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
+from collections import defaultdict
 from collections.abc import Callable, Sequence
-from functools import cached_property
+from contextvars import ContextVar
+from contextlib import contextmanager
+from functools import cached_property, wraps
 from pathlib import Path
 from typing import Any, cast, Literal, overload, Self, TYPE_CHECKING, TypeVar
+from uuid import uuid4
 
 from lazy.lazy import lazy
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.lib.books_tree.books_tree_summary import TreeNodeSummary
 from src.lib.books_tree.books_tree_utils import filter_matches, match_filter_path, match_filter_paths
@@ -14,7 +20,6 @@ from src.lib.id3_tags import Id3Tags
 from src.lib.misc import (
     any_in,
     any_matching,
-    flatlist,
     isorted,
 )
 from src.lib.term import print_debug
@@ -25,6 +30,31 @@ if TYPE_CHECKING:
 
 
 F = TypeVar("F", bound="Callable[..., Any]")
+_structure_mutation_active: ContextVar[bool] = ContextVar(
+    "books_tree_structure_mutation_active",
+    default=False,
+)
+_config = None
+
+
+def _track_structure_mutation(func: F) -> F:
+    @wraps(func)
+    def wrapper(self: "BooksTree", *args, **kwargs):
+        if _structure_mutation_active.get():
+            return func(self, *args, **kwargs)
+        with self._structure_mutation():
+            return func(self, *args, **kwargs)
+
+    return cast(F, wrapper)
+
+
+def _should_collect_ticks() -> bool:
+    global _config
+    if _config is None:
+        from src.lib.config import cfg
+
+        _config = cfg
+    return _config.DEBUG or _config.SCORER_TRACE
 
 
 def requires_scan(func: F) -> F:
@@ -61,6 +91,10 @@ class BooksTree(BaseModel):
     id3_tags: Id3Tags | None = None
     start_time: float | None = None
     ticks: list[tuple[float, str, Any]] = Field(default_factory=list)
+    # Only roots own a scorer-cache namespace.  Child nodes use their root's
+    # namespace through the cache key, avoiding one UUID allocation per node.
+    _scorer_cache_namespace: str | None = PrivateAttr(default=None)
+    _scorer_cache_epoch: int = PrivateAttr(default=0)
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -102,6 +136,7 @@ class BooksTree(BaseModel):
         self._dirs: dict[str, "BooksTree"] = {}
 
         if self.root is None:
+            self._scorer_cache_namespace = uuid4().hex
             # Root nodes own the path index that maps absolute path strings to their
             # BooksTree nodes.  O(1) lookup replaces the previous O(n) linear scan
             # through children_recursive every time a child is constructed.
@@ -143,10 +178,22 @@ class BooksTree(BaseModel):
         self.root = None if self.root is None else BooksTree(self.root, scan=False)
 
     def tick(self, name: str, *args):
+        if not _should_collect_ticks():
+            return None
         if self.start_time is None:
             self.start_time = time.time()
         self.ticks.append((max(0, round(time.time() - self.start_time, 4)), name, *args))
         return self.ticks[-1]
+
+    @contextmanager
+    def _structure_mutation(self):
+        root = self.root or self
+        token = _structure_mutation_active.set(True)
+        try:
+            yield
+        finally:
+            root._scorer_cache_epoch += 1
+            _structure_mutation_active.reset(token)
 
     @classmethod
     def cast(
@@ -156,9 +203,22 @@ class BooksTree(BaseModel):
         root: "Path | BooksTree | None",
         match_filter: list[Path] | str | None = None,
         scan_id3: bool = False,
+        is_file: bool | None = None,
+        is_dir: bool | None = None,
+        size: int | None = None,
     ):
-        """Casts a path to a TreePath without scanning it"""
+        """Casts a path to a TreePath without scanning it.
+
+        When ``is_file`` / ``is_dir`` / ``size`` are known from a scandir walk,
+        seed them so scorers and InboxItem avoid remote ``stat`` / ``is_dir`` calls.
+        """
         tree = BooksTree(path, root=root, scan=False, match_filter=match_filter)
+        if is_file is not None:
+            tree._is_file = is_file
+        if is_dir is not None:
+            tree._is_dir = is_dir
+        if size is not None:
+            tree.__dict__["size"] = size
         if scan_id3:
             tree.scan(scan_id3=True)
         return tree
@@ -177,9 +237,9 @@ class BooksTree(BaseModel):
         from src.lib.fs_utils import filter_depth, filter_ignored, only_audio_files
         from src.lib.scorers import _scorer_cache, already_checked
 
-        self.start_time = time.time()
-
         root: Self | BooksTree = self if self.is_root or not self.root else self.root
+        root._scorer_cache_epoch += 1
+        self.start_time = time.time()
 
         if not self.is_root and not allow_non_root:
             raise RuntimeError("scan() should only be called on the root of the tree")
@@ -193,11 +253,12 @@ class BooksTree(BaseModel):
             # summaries with the freshly built tree structure.
             _node._i = None
 
-        # Clear the scorer cache and already_checked set so re-scans after
-        # filesystem changes don't use stale structure scores, and so files
-        # processed in a previous scan pass can be re-scored in the new pass.
-        _scorer_cache.clear()
+        # Clear this root's scorer cache entries (and already_checked) so re-scans
+        # after filesystem changes don't use stale structure scores, without wiping
+        # scores from unrelated inbox roots.
+        _scorer_cache.clear(root_id=id(root))
         already_checked.clear()
+        root.__dict__.pop("_similarity_list_cache", None)
 
         if not root.exists():
             # tick("root.exists() is False, returning self")
@@ -207,10 +268,19 @@ class BooksTree(BaseModel):
             # tick("root.is_file() and allow_file_root, returning self")
             return self
 
-        # Do a recursive glob of all files in the directory, and prepend the root so we can get standalone files
+        # Do a recursive walk of all paths, classifying dirs/files from scandir
+        # metadata so we avoid a second is_dir()/stat pass over SMB.
         # tick("getting rglob")
-        rglob = isorted([root.path, *root.path.rglob("*")])
-        # tick("done getting rglob", len(rglob))
+        from src.lib.fs_utils import walk_dirs_and_files
+
+        _rglob_dirs, _rglob_files, _rglob_sizes = walk_dirs_and_files(root.path)
+        _rglob_dirs = isorted(_rglob_dirs)
+        _rglob_files = isorted(_rglob_files)
+        # Full-inbox inventory (pre match_filter) for Hasher — avoids a second walk.
+        root._last_walk_file_sizes = _rglob_sizes
+        root._is_dir = True
+        root._is_file = False
+        # tick("done getting rglob", len(_rglob_dirs) + len(_rglob_files))
 
         self._files = []
         self._dirs = {}
@@ -230,47 +300,55 @@ class BooksTree(BaseModel):
                         # tick("parent_p not in match_filter, skipping")
                         continue
                     # tick("parent_p in match_filter, adding to subtree")
-                    subtree._dirs[part] = BooksTree.cast(parent_p, root=root, match_filter=self.match_filter)
+                    subtree._dirs[part] = BooksTree.cast(
+                        parent_p, root=root, match_filter=self.match_filter, is_dir=True, is_file=False
+                    )
                 # tick(f"subtree._dirs[{part}] =", subtree._dirs[part])
                 subtree = subtree._dirs[part]
             if files := [*subtree._files, *audio_files]:
                 # tick(f"subtree has files, adding {len(files)} to subtree")
-                subtree._files = isorted([BooksTree.cast(p, root=root, match_filter=self.match_filter) for p in files])
+                subtree._files = isorted(
+                    [
+                        BooksTree.cast(
+                            p,
+                            root=root,
+                            match_filter=self.match_filter,
+                            is_file=True,
+                            is_dir=False,
+                            size=_rglob_sizes.get(p),
+                        )
+                        for p in files
+                    ]
+                )
                 # tick("done adding files to subtree", [f.rel_path for f in subtree._files])
             # else:
             # tick("subtree has no files, skipping")
 
-        # Separate dirs and files in a single pass to avoid calling is_dir() on every entry,
-        # which is expensive over network mounts (each call requires a separate stat syscall).
-        # Also precompute the filtered audio file list once so the directory loop below is
+        # Precompute the filtered audio file list once so the directory loop below is
         # O(n + d) instead of the previous O(n×d) where n=files and d=directories.
-        _rglob_dirs: list[Path] = []
-        _rglob_files: list[Path] = []
-        for _p in rglob:
-            try:
-                if _p.is_dir():
-                    _rglob_dirs.append(_p)
-                else:
-                    _rglob_files.append(_p)
-            except OSError:
-                pass
         _all_audio_files = only_audio_files(filter_ignored(_rglob_files))
+        _audio_files_by_parent: dict[Path, list[Path]] = defaultdict(list)
+        for _audio_file in _all_audio_files:
+            _audio_files_by_parent[_audio_file.parent].append(_audio_file)
+        depth_limited = mindepth is not None or maxdepth is not None
 
         # tick("building tree of audio files and dirs")
         # Build a tree of the audio files and dirs
         for d in _rglob_dirs:
             # If d is not within the mindepth and maxdepth, skip it
-            if not filter_depth(d, root.path, mindepth=mindepth, maxdepth=maxdepth):
+            if depth_limited and not filter_depth(d, root.path, mindepth=mindepth, maxdepth=maxdepth):
                 # tick("d not in mindepth and maxdepth, skipping")
                 continue
 
             # If x is a dir, make sure the path and its parents exists in the tree
             # tick("d is a dir, getting audio files in dir")
-            audio_files_in_dir = [
-                f
-                for f in _all_audio_files
-                if f.parent == d and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
-            ]
+            audio_files_in_dir = _audio_files_by_parent.get(d, [])
+            if depth_limited:
+                audio_files_in_dir = [
+                    f
+                    for f in audio_files_in_dir
+                    if filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
+                ]
             # tick(f"done getting audio {len(audio_files_in_dir)} files in dir {d.relative_to(root.path)}")
             if audio_files_in_dir:
                 # tick("about to call _add_to_tree(d)", d)
@@ -282,9 +360,20 @@ class BooksTree(BaseModel):
         # tick(f"adding files from current level to self.files, total is currently {len(self._files)}")
         self._files = isorted(
             [
-                BooksTree.cast(f, root=root, match_filter=self.match_filter)
+                BooksTree.cast(
+                    f,
+                    root=root,
+                    match_filter=self.match_filter,
+                    is_file=True,
+                    is_dir=False,
+                    size=_rglob_sizes.get(f),
+                )
                 for f in match_filter_paths(_all_audio_files, self.match_filter, root=root)
-                if f.parent == self.path and filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
+                if f.parent == self.path
+                and (
+                    not depth_limited
+                    or filter_depth(f, root.path, mindepth=mindepth, maxdepth=maxdepth, offset=-1)
+                )
             ]
         )
         # tick(f"done adding files from current level to self.files, total is now {len(self._files)}")
@@ -296,10 +385,16 @@ class BooksTree(BaseModel):
             # tick(f"scanning id3 tags because scan_id3 is {scan_id3}")
             if self.is_root:
                 # tick(f"self is root, scanning id3 tags recurseively ({len(self.files_recursive)} files)")
-                for f in [f for f in self.files_recursive if not f.id3_tags]:
-                    # tick(f"(root-leaf) scanning id3 tags for file {f.rel_path}")
-                    f.id3_tags = t if (t := Id3Tags.from_file(f.path)) and not t.BAD else None
-                    # tick(f"(root-leaf) done scanning id3 tags for file {f.rel_path}")
+                files_to_scan = [f for f in self.files_recursive if not f.id3_tags]
+
+                def scan_id3(file_node: "BooksTree"):
+                    tags = Id3Tags.from_file(file_node.path)
+                    return file_node, tags if tags and not tags.BAD else None
+
+                max_workers = min(8, max(1, len(files_to_scan)))
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    for file_node, tags in pool.map(scan_id3, files_to_scan):
+                        file_node.id3_tags = tags
             elif self.is_file() and not self.id3_tags:
                 # tick(f"(self-is_file) scanning id3 tags for direct file {self.rel_path}")
                 self.id3_tags = t if (t := Id3Tags.from_file(self.path)) and not t.BAD else None
@@ -314,6 +409,17 @@ class BooksTree(BaseModel):
         # # tick(f"done scanning {self.rel_path}", total_time)
         # print_debug(f"total time taken: {total_time} seconds", self.ticks)
         return self
+
+    @staticmethod
+    def _walk_paths(path: Path) -> tuple[list[Path], list[Path], dict[Path, int]]:
+        """Recursively list paths, classifying dirs/files from scandir metadata.
+
+        Returns ``(dirs, files, file_sizes)`` so callers avoid a second ``Path.is_dir()``
+        / ``stat()`` pass (expensive over SMB).
+        """
+        from src.lib.fs_utils import walk_dirs_and_files
+
+        return walk_dirs_and_files(path)
 
     @copy_kwargs(_scan)
     def scan(self, *args, **kwargs) -> "BooksTree":
@@ -683,14 +789,11 @@ class BooksTree(BaseModel):
     def dirs_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all directories, excluding the root.
         # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
-        return isorted(
-            d
-            for d in (
-                *self._dirs.values(),
-                *sum([d.dirs_recursive for d in self._dirs.values()], []),
-            )
-            if not d.is_root
-        )
+        directories = list(self._dirs.values())
+        recursive = []
+        for directory in directories:
+            recursive.extend(directory.dirs_recursive)
+        return isorted(d for d in (*directories, *recursive) if not d.is_root)
 
     @property
     @filter_matches
@@ -710,7 +813,10 @@ class BooksTree(BaseModel):
     def files_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all files.
         # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
-        return isorted((*self._files, *sum([d.files_recursive for d in self._dirs.values()], [])))
+        recursive = []
+        for directory in self._dirs.values():
+            recursive.extend(directory.files_recursive)
+        return isorted((*self._files, *recursive))
 
     @filter_matches
     def files_of_type_f(self, fmt: AudiobookFmt) -> list["BooksTree"]:
@@ -740,11 +846,10 @@ class BooksTree(BaseModel):
     def children_recursive(self) -> list["BooksTree"]:
         # Recursively walks the tree to return a flat list of all paths.
         # Result is cached per-instance via @lazy; cleared at the start of each _scan() call.
-        return isorted(
-            flatlist(
-                [*self._files, *self._dirs.values(), *sum([d.children_recursive for d in self._dirs.values()], [])]
-            )
-        )
+        recursive = []
+        for directory in self._dirs.values():
+            recursive.extend(directory.children_recursive)
+        return isorted([*self._files, *self._dirs.values(), *recursive])
 
     @property
     def children_without_structure_r(self) -> list["BooksTree"]:
@@ -1019,6 +1124,7 @@ class BooksTree(BaseModel):
 
     #     return score_single_standalone_file(self)
 
+    @_track_structure_mutation
     def determine_structure(
         self,
         *,
@@ -1353,6 +1459,7 @@ class BooksTree(BaseModel):
     def has_only_structures_like(self, *structure: str):
         return all(re.search(s, str(self.structure), re.I) for s in structure)
 
+    @_track_structure_mutation
     def add_structures(
         self,
         *structure: BookStructure2,
@@ -1421,6 +1528,7 @@ class BooksTree(BaseModel):
 
         return self.structure
 
+    @_track_structure_mutation
     def remove_structures(
         self,
         *structure: BookStructure2,
@@ -1430,7 +1538,9 @@ class BooksTree(BaseModel):
         if not structure:
             raise ValueError("No structure provided when trying to remove structures")
 
-        self.structure = tuple([s for s in self.structure if s not in structure])
+        new_structure = tuple([s for s in self.structure if s not in structure])
+        if new_structure != self.structure:
+            self.structure = new_structure
         children = []
         match recursive:
             case "files":
@@ -1442,6 +1552,7 @@ class BooksTree(BaseModel):
         [c.remove_structures(*structure, recursive=recursive) for c in children]
         return self.structure
 
+    @_track_structure_mutation
     def set_structures(
         self,
         # *structure: "BookStructure2 | tuple[BookStructure2, ...]",
@@ -1458,8 +1569,10 @@ class BooksTree(BaseModel):
         self.add_structures(*structure, recursive=recursive)
         return self.structure
 
+    @_track_structure_mutation
     def clear_structure(self, recursive: bool | Literal["files", "dirs", "all", "none"] = False):
-        self.structure = ()
+        if self.structure:
+            self.structure = ()
         children = []
         match recursive:
             case "files":

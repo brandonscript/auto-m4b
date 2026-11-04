@@ -26,7 +26,7 @@ class WatchFolder:
     incorrectly treated as audiobooks.
 
     Stability check: no file in the tree may have been modified within
-    cfg.WAIT_TIME seconds and no Deluge in-progress (.part) file may be
+    cfg.WAIT_TIME seconds and no incomplete (.part) file may be
     present before a directory is eligible for copying.
     """
 
@@ -113,7 +113,7 @@ class WatchFolder:
 
         A directory is stable when:
         - No file inside it has been modified within cfg.WAIT_TIME seconds.
-        - No ``.part`` file is present (Deluge's in-progress download marker).
+        - No ``.part`` file is present (an incomplete-file marker).
         """
         from src.lib.config import cfg
 
@@ -255,7 +255,7 @@ class WatchFolder:
                 # Drop a marker so this source dir is recognised as already
                 # handled on the next scan, even if the user later removes
                 # the converted m4b or archive entry.
-                # Record nested children so later downloads in the same
+                # Record nested children so later additions in the same
                 # container can be copied independently.
                 WatchFolder._write_marker(book, nested_children)
             except OSError as exc:

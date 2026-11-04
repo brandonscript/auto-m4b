@@ -61,6 +61,138 @@ def test_get_name_from_str_preserves_a_initials(input_str, expected):
     assert result == expected, f"get_name_from_str({input_str!r}) returned {result!r}, expected {expected!r}"
 
 
+def test_parse_author_does_not_treat_possessive_title_as_author():
+    """A possessive title before a dash is not an author delimiter."""
+    value = "Wizard's Butler - [Wizard's Butler 01.0] The Wizard's Butler"
+
+    assert parse_author(value, "fs", fallback="") == ""
+
+
+@pytest.mark.parametrize(
+    "book_dir, expected_title",
+    [
+        ("01 South Coast Shaman's Tales from the Golden Age of the Solar Clipper, Book 1", "South Coast"),
+        ("02 Cape Grace Shaman's Tales from the Golden Age of the Solar Clipper, Book 2", "Cape Grace"),
+        ("03 Finwell Bay Shaman's Tales from the Golden Age of the Solar Clipper, Book 3", "Finwell Bay"),
+    ],
+)
+def test_extract_path_info_uses_series_book_prefix_as_title(book_dir, expected_title):
+    """Do not promote an incidental NLP phrase from a numbered series path."""
+    from src.lib.books_tree.books_tree import BooksTree
+
+    child = (
+        Path(__file__).parent
+        / "fixtures"
+        / "nathan_lowell__nested_series_m4a"
+        / "Shaman's Tales from the Golden Age of the Solar Clipper"
+        / book_dir
+    )
+    book = Audiobook(BooksTree(child))
+
+    extract_path_info(book)
+
+    assert book.fs_title == expected_title
+
+
+@pytest.mark.parametrize(
+    "fixture, relative_path, expected_title",
+    [
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Seeker's Tale from the Golden Age of the Solar Clipper/01 In Ashes Born",
+            "In Ashes Born",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Seeker's Tale from the Golden Age of the Solar Clipper/02 To Fire Called A Seekers Tale from the Golden Age of the Solar Clipper, Book 2 (Unabridged)",
+            "To Fire Called",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Seeker's Tale from the Golden Age of the Solar Clipper/03 By Darkness Forged A Seeker's Tale from the Golden Age of the Solar Clipper, Book 3",
+            "By Darkness Forged",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Trader's Tale from the Golden Age of the Solar Clipper/01 Quarter Share",
+            "Quarter Share",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Trader's Tale from the Golden Age of the Solar Clipper/02 Half Share",
+            "Half Share",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Trader's Tale from the Golden Age of the Solar Clipper/03 Full Share A Trader's Tale from the Golden Age of the Solar Clipper, Book 3",
+            "Full Share",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Trader's Tale from the Golden Age of the Solar Clipper/04 Double Share",
+            "Double Share",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Trader's Tale from the Golden Age of the Solar Clipper/05 Captain's Share",
+            "Captain's Share",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "A Trader's Tale from the Golden Age of the Solar Clipper/06 Owner's Share",
+            "Owner's Share",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "Smuggler's Tales from the Golden Age of the Solar Clipper/01 Milk Run Smuggler's Tales, Book 1",
+            "Milk Run",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "Smuggler's Tales from the Golden Age of the Solar Clipper/02 Suicide Run Smuggler's Tales, Book 2",
+            "Suicide Run",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "Smuggler's Tales from the Golden Age of the Solar Clipper/03 Home Run",
+            "Home Run",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "Tanyth Fairport Adventures/ 01 Ravenwood",
+            "Ravenwood",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "Tanyth Fairport Adventures/03 The Hermit of Lammas Wood",
+            "The Hermit of Lammas Wood",
+        ),
+        (
+            "nathan_lowell__nested_series_m4a",
+            "Tanyth Fairport Adventures/Wizard's Butler - [Wizard's Butler 01.0] The Wizard's Butler",
+            "The Wizard's Butler",
+        ),
+        ("chanur_series__series_mp3", "02 - Chanur's Venture", "Chanur's Venture"),
+        ("chanur_series__series_mp3", "01 - Pride Of Chanur", "Pride Of Chanur"),
+        ("chanur_series__series_mp3", "03 - Kif Strikes Back", "Kif Strikes Back"),
+        ("chanur_series__series_mp3", "04 - Chanur's Homecoming", "Chanur's Homecoming"),
+        ("chanur_series__series_mp3", "05 - Chanur's Legacy", "Chanur's Legacy"),
+        ("the_hobbit__multidisc_mp3", "J.R.R. Tolkien - The Hobbit - Disc 1", "The Hobbit"),
+        ("secret_project_series__nested_flat_mixed", "Brandon Sanderson - 2023 - Yumi and the Nightmare Painter", "Yumi and the Nightmare Painter"),
+    ],
+)
+def test_extract_path_info_fixture_title_corpus(fixture, relative_path, expected_title):
+    """Keep representative real-world fixture names from regressing to NLP fragments."""
+    from src.lib.books_tree.books_tree import BooksTree
+
+    path = Path(__file__).parent / "fixtures" / fixture / relative_path
+    book = Audiobook(BooksTree(path))
+
+    extract_path_info(book)
+
+    assert book.fs_title == expected_title
+
+
 @pytest.mark.parametrize(
     "expected, prop, indirect_fixture",
     [

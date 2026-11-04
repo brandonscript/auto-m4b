@@ -1,9 +1,13 @@
-# fix_metadata — retag converted audiobooks (no re-encode)
+# fixm4b — retag converted audiobooks (no re-encode)
+
+> **Standalone package:** [`brandonscript/fixm4b`](https://github.com/brandonscript/fixm4b)
+> Install with `pip install fixm4b` or `brew install brandonscript/tap/fixm4b`.
+> In this repo, `poetry run fixm4b` uses the path dependency on `../fixm4b` (**`dev`**). On **`main`**, pin the latest PyPI release instead (`fixm4b = "^x.y"`).
 
 Standalone CLI for correcting ID3 tags, `.m4b` filenames, and companion quality `.txt` files **after** conversion. It does not re-encode audio.
 
-- CLI / UX: [`src/fix_metadata.py`](../src/fix_metadata.py)
-- Shared planner (also used by convert): [`src/lib/metadata/`](../src/lib/metadata/)
+- Package / CLI: [`../fixm4b`](../../fixm4b) (`poetry run fixm4b`)
+- Convert imports the same planner via shims under [`src/lib/metadata/`](../src/lib/metadata/) (re-exports `fixm4b`)
 - Convert ↔ shared divergences (manual review): [`metadata-conflicts.md`](metadata-conflicts.md)
 
 Convert always runs **minimalist** title cleanup. The CLI still honors `--minimalist` / `--no-minimalist` / `CLI_MINIMALIST`.
@@ -20,11 +24,11 @@ Prefer this over re-dropping books into the inbox when only metadata/filenames a
 
 ```bash
 # From the repo (Poetry venv)
-poetry run python -m src.fix_metadata -h
-poetry run python -m src.fix_metadata -i "George, Margaret"
-poetry run python -m src.fix_metadata --apply "George, Margaret/Elizabeth I (2011)"
+poetry run fixm4b -h
+poetry run fixm4b -i "George, Margaret"
+poetry run fixm4b --apply "George, Margaret/Elizabeth I (2011)"
 # New conversion with no archive/source counterpart:
-poetry run python -m src.fix_metadata -i --goodreads 176803 "George, Margaret/Elizabeth I (2011)"
+poetry run fixm4b -i --goodreads 176803 "George, Margaret/Elizabeth I (2011)"
 ```
 
 Default is **dry-run**. Write with `--apply`, or confirm each book with `-i` / `--interactive`.
@@ -118,10 +122,10 @@ This supports two useful workflows for newly imported books:
 
 ```bash
 # Review the current tags and the forced Goodreads result before writing:
-poetry run python -m src.fix_metadata -i --goodreads 176803 /path/to/book
+poetry run fixm4b -i --goodreads 176803 /path/to/book
 
 # Apply an agent-confirmed Goodreads ID without prompting:
-poetry run python -m src.fix_metadata --apply --goodreads 176803 /path/to/book
+poetry run fixm4b --apply --goodreads 176803 /path/to/book
 ```
 
 An agent can first inspect an ambiguous result with `goodscraps book 176803`,
@@ -131,14 +135,14 @@ comparison when enabled.
 
 Interactive prompt:
 
-- `y` — yes  
-- `s` — skip (default)  
-- `m` — use this openlibrary match (only when low-confidence)  
-- `o` — provide an Open Library id or url  
+- `y` — yes
+- `s` — skip (default)
+- `m` — use this openlibrary match (only when low-confidence)
+- `o` — provide an Open Library id or url
 - `e` — edit the proposed Title, Author, Date, Narrator, and filename
 - `g` — provide a Goodreads id or url
 - `c` — cancel a pending manual lookup
-- `q` — quit  
+- `q` — quit
 
 Edit mode uses the proposed values as defaults. Press Enter to keep a value,
 enter `_` to clear a metadata field, or enter a replacement filename. A

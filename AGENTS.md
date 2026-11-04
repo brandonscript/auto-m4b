@@ -149,12 +149,34 @@ When `dev` is ready to release:
    git merge --squash dev
    ```
 2. Bump `version` in `pyproject.toml` (semver — patch for fixes, minor for features).
-3. Commit with a release message summarising the changes.
-4. Push both branches:
+3. **Pin `fixm4b` to PyPI** (dev uses the sibling path / HEAD; main must not):
+   ```toml
+   # on main:
+   fixm4b = "^0.1.2"   # or whatever the latest published version is
+   # NOT: fixm4b = { path = "../fixm4b", develop = true }
+   ```
+   Then refresh the lockfile:
+   ```bash
+   poetry lock
+   ```
+   Confirm `poetry show fixm4b` resolves from PyPI, not `../fixm4b`.
+4. Commit with a release message summarising the changes.
+5. Push both branches (restore the path dep on `dev` if the squash left main’s pin there — `dev` should keep `{ path = "../fixm4b", develop = true }`):
    ```bash
    git push origin main
+   git checkout dev
+   # ensure fixm4b path dep is restored on dev, then:
    git push origin dev
    ```
+
+### fixm4b dependency
+
+| Branch | `fixm4b` in `pyproject.toml` |
+| ------ | ---------------------------- |
+| `dev`  | `{ path = "../fixm4b", develop = true }` (live HEAD of sibling clone) |
+| `main` | `"^x.y.z"` from PyPI (latest published release) |
+
+Convert and the shared planner import through thin shims under `src/lib/metadata/`, `src/lib/ol_lookup.py`, and `src/lib/tag_write.py` that re-export the standalone [`fixm4b`](https://github.com/brandonscript/fixm4b) package. `cfg` is adapted into `Fixm4bSettings` at config load so Docker/env still win in-container.
 
 ## Open Library author/narrator swap detection
 

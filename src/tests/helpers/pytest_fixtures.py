@@ -1,8 +1,8 @@
 import multiprocessing as mp
 import os
-import random
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -11,7 +11,7 @@ import pytest
 
 from src.lib.ffmpeg_utils import shrink_mp3_to_size
 from src.lib.typing import Id3TagDictWithDnumTnum
-from src.lib.fs_utils import clean_dirs, find_adjacent_files_with_same_basename, is_audio_file
+from src.lib.fs_utils import find_adjacent_files_with_same_basename, is_audio_file
 from src.lib.id3_utils import write_id3_tags_mutagen
 from src.lib.inbox_state import InboxState
 from src.tests.helpers.pytest_dumps import FIXTURES_ROOT, GIT_ROOT, MOCKED, TEST_DIRS
@@ -21,6 +21,39 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from src.lib.audiobook import Audiobook
 from src.lib.misc import get_git_root, load_env
+
+
+# Host/Phantom shells often export these; tests must use .env.test defaults unless
+# a test explicitly monkeypatches them. Empty .env.test values pop the key.
+_TEST_ISOLATED_ENV_KEYS = (
+    "CLEANUP_FILENAMES",
+    "BOOKPEEK",
+    "COVER_OCR",
+    "OPEN_LIBRARY_USER_AGENT",
+    "GOODSCRAPS_USER_AGENT",
+)
+
+
+def _apply_test_env_isolation() -> None:
+    """Force metadata toggles to test defaults and drop stale cfg._env entries.
+
+    Host/Phantom shells often export CLEANUP_FILENAMES / provider user-agents.
+    ``load_env`` writes ``os.environ`` for keys in ``.env.test`` but does not
+    invalidate ``cfg._env``, so a value read from the host before the session
+    fixture (or left by a prior test) can stick. Explicitly reset the isolated
+    keys and clear the cache so the next property access re-reads test defaults.
+    """
+    from src.lib.config import cfg
+    from src.lib.misc import set_typed_env_var
+
+    # Booleans default off; empty user-agents disable live provider lookups.
+    set_typed_env_var("CLEANUP_FILENAMES", "N")
+    set_typed_env_var("BOOKPEEK", "N")
+    set_typed_env_var("COVER_OCR", "N")
+    set_typed_env_var("OPEN_LIBRARY_USER_AGENT", "")
+    set_typed_env_var("GOODSCRAPS_USER_AGENT", "")
+    for key in _TEST_ISOLATED_ENV_KEYS:
+        cfg._env.pop(key, None)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -38,19 +71,33 @@ def setup_teardown():
 
     with testutils.set_on_complete("test_do_nothing"):
         load_env(GIT_ROOT / ".env.test", clean_working_dirs=True)
+        _apply_test_env_isolation()
 
         yield
 
         cfg.FATAL_FILE.unlink(missing_ok=True)
 
 
+def _reset_test_owned_dirs(dirs: list[Path]) -> None:
+    """Fast empty+recreate for fixture-owned temp dirs.
+
+    Unlike production ``clean_dirs``, these directories are disposable test state and
+    do not need size/rglob/safety checks on every reset.
+    """
+    for d in dirs:
+        shutil.rmtree(d, ignore_errors=True)
+        d.mkdir(parents=True, exist_ok=True)
+
+
 def _clear_all_caches():
     from src.lib.config import cfg
+    from src.lib.metadata.providers import clear_provider_cache
     from src.lib.scorers import _scorer_cache, already_checked
     import src.lib.parsers as _parsers
 
     _scorer_cache.clear()
     already_checked.clear()
+    clear_provider_cache()
     cfg.FATAL_FILE.unlink(missing_ok=True)
 
     # Clear all cachetools TTL caches in parsers so stale narrator/author
@@ -90,6 +137,7 @@ def _clear_all_caches():
 @pytest.fixture(autouse=True, scope="function")
 def clear_scorer_caches():
     _clear_all_caches()
+    _apply_test_env_isolation()
     # Clean inbox before each test to prevent leftover fixtures from accumulating
     # and causing BooksTree scans to hang on a polluted inbox.
     for item in TEST_DIRS.inbox.iterdir() if TEST_DIRS.inbox.exists() else []:
@@ -210,11 +258,10 @@ def load_test_fixture(
         dst.mkdir(parents=True, exist_ok=True)
         tick("src is dir, made dst", dst)
 
-        src_globs = list(src.glob("**/*"))
-        tick(f"src.glob('**/*'), got {len(src_globs)} files")
-        for f in src_globs:
-            if not f.is_file():
-                continue
+        src_files = [f for f in src.rglob("*") if f.is_file()]
+        src_rels = {f.relative_to(src) for f in src_files}
+        tick(f"src.rglob('*'), got {len(src_files)} files")
+        for f in src_files:
             dst_f = dst / f.relative_to(src)
             src_size = f.stat().st_size
             tick(f"{f.name}, src_size: {src_size}")
@@ -232,12 +279,10 @@ def load_test_fixture(
                 files_to_shrink.append((dst_f, max_file_size))
                 tick("appending to files_to_shrink")
 
-        # if any files in dst are not in src, delete them
-        dst_globs = list(dst.glob("**/*"))
-        tick(f"dst.glob('**/*'), got {len(dst_globs)} files, deleting files that don't exist in src")
-        for f in dst_globs:
-            src_f = src / f.relative_to(dst)
-            if f.is_file() and not src_f.exists():
+        # Delete stale destination files using the source relative-path set
+        # instead of re-walking source existence checks for every dst file.
+        for f in (p for p in dst.rglob("*") if p.is_file()):
+            if f.relative_to(dst) not in src_rels:
                 f.unlink()
                 tick(f"deleted {f}")
     else:
@@ -279,18 +324,24 @@ def load_test_fixture(
         testutils.set_match_filter(match_filter or name)
         tick("done setting match filter")
 
-    # Shrink files in parallel using multiprocessing
+    # Shrink files in parallel using multiprocessing only when enough work
+    # exists to amortize process-startup cost.
     if files_to_shrink:
         tick(f"{len(files_to_shrink)} files to shrink")
-        with mp.Pool(processes=mp.cpu_count()) as pool:
-            pool.starmap(shrink_mp3_to_size, files_to_shrink)
+        if len(files_to_shrink) == 1:
+            shrink_mp3_to_size(*files_to_shrink[0])
+        else:
+            worker_count = min(4, mp.cpu_count(), len(files_to_shrink))
+            with mp.Pool(processes=worker_count) as pool:
+                pool.starmap(shrink_mp3_to_size, files_to_shrink)
         tick("done shrinking files")
 
     converted = TEST_DIRS.converted / (override_name or name)
     converted_dir = converted.with_suffix("")
     tick(f"Removing {converted} and {converted_dir}")
     rm_from_converted(override_name or name)
-    shutil.rmtree(converted_dir, ignore_errors=True)
+    if converted_dir != converted:
+        shutil.rmtree(converted_dir, ignore_errors=True)
     tick("done removing")
 
     duration = time.time() - start_time
@@ -852,6 +903,13 @@ def not_an_audio_file():
 @pytest.fixture(scope="function", autouse=False)
 def mock_inbox(setup_teardown, requires_empty_inbox):
     """Populate INBOX_FOLDER with mocked sample audiobooks."""
+    template_dir = Path(tempfile.gettempdir()) / f"auto-m4b-pytest-inbox-{os.getpid()}"
+    if template_dir.exists():
+        shutil.copytree(template_dir, TEST_DIRS.inbox, dirs_exist_ok=True)
+        yield TEST_DIRS.inbox
+        for f in TEST_DIRS.inbox.rglob("mock_book_*"):
+            testutils.rm(f)
+        return
 
     # make 4 sample audiobooks using nealy empty txt files (~5kb) as pretend mp3 files.
     for i, f in enumerate(MOCKED.flat_dirs[:4]):
@@ -964,6 +1022,7 @@ def mock_inbox(setup_teardown, requires_empty_inbox):
     # make an empty dir
     MOCKED.empty.mkdir(parents=True, exist_ok=True)
 
+    shutil.copytree(TEST_DIRS.inbox, template_dir)
     yield TEST_DIRS.inbox
 
     # remove everything in the inbox that starts with `mock_book_`
@@ -1024,7 +1083,7 @@ def reset_all(reset_match_filter, reset_failed):
     # this point, so an eager creation would set _last_scan to "now" and cause
     # the first app() scan inside the test to be throttled (missing new files).
     # The singleton will be lazily recreated on first access inside the test.
-    clean_dirs([TEST_DIRS.archive, TEST_DIRS.backup, TEST_DIRS.converted, TEST_DIRS.working])
+    _reset_test_owned_dirs([TEST_DIRS.archive, TEST_DIRS.backup, TEST_DIRS.converted, TEST_DIRS.working])
     cfg.SLEEP_TIME = 0.1
     cfg.WAIT_TIME = 0.2
     cfg.TEST = True
@@ -1041,16 +1100,9 @@ def reset_all(reset_match_filter, reset_failed):
     cfg.ON_COMPLETE = "test_do_nothing"
     cfg.BACKUP = True
 
-    clean_dirs([TEST_DIRS.archive, TEST_DIRS.backup, TEST_DIRS.converted, TEST_DIRS.working])
+    _reset_test_owned_dirs([TEST_DIRS.archive, TEST_DIRS.backup, TEST_DIRS.converted, TEST_DIRS.working])
     InboxState().destroy()  # type: ignore
     cfg.PID_FILE.unlink(missing_ok=True)
-    try:
-        InboxState()
-    except (ValueError, Exception):
-        # Swallow scan/structure errors during teardown — leftover fixture files
-        # from a previous test may confuse BooksTree. The next test will create
-        # a fresh InboxState on setup.
-        pass
 
 
 @pytest.fixture(scope="function", autouse=False)
@@ -1098,11 +1150,10 @@ def disable_archiving():
 @pytest.fixture(scope="function", autouse=False)
 def reset_inbox_state():
     InboxState().destroy()  # type: ignore
+    # InboxState.__init__ already scans under pytest; avoid a second pass.
     inbox = InboxState()
-    inbox.scan()
     yield inbox
     inbox.destroy()  # type: ignore
-    inbox = InboxState()
 
 
 @pytest.fixture(scope="function", autouse=False)

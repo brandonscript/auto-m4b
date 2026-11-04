@@ -1,15 +1,19 @@
+from __future__ import annotations
+
 import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, cast, Literal, overload
+from typing import TYPE_CHECKING, Any, cast, Literal, overload
 
 import cachetools.func
 import humanize
-import inflect
 
 from src.lib.books_tree import BooksTree
 from src.lib.typing import AudiobookFmt, DurationFmt, MEMO_TTL, STANDARD_BITRATES
+
+if TYPE_CHECKING:
+    import inflect
 
 
 def log_date() -> str:
@@ -168,6 +172,8 @@ def human_elapsed_time(delta_or_time: datetime | float, relative: bool = True) -
 
 
 def pluralize(count: int, singular: str | inflect.Word, plural: str | None = None) -> str:
+    import inflect
+
     p = inflect.engine()
     if count == 1:
         return str(singular)

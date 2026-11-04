@@ -70,8 +70,8 @@ class InboxItem:
     def __init__(self, tree: BooksTree):
         self.tree = tree
 
-        self.is_dir = self.tree.path.is_dir()
-        self.is_file = self.tree.path.is_file()
+        self.is_dir = self.tree.is_dir()
+        self.is_file = self.tree.is_file()
 
         self._prev_hash = None
         self._last_updated: float | None = None
@@ -84,7 +84,7 @@ class InboxItem:
         # Reuse the @lazy-cached size from the BooksTree node (already computed
         # during the tree scan) instead of performing an extra get_audio_size()
         # traversal per book over the SMB mount.
-        self.size = self.tree.size if self.tree.path.exists() else 0
+        self.size = self.tree.size if (self.is_dir or self.is_file) else 0
         self.status: InboxItemStatus = "new"
         self.failed_reason: str = ""
         self.failed_at: float | None = None

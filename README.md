@@ -48,15 +48,15 @@ cd auto-m4b
 ./install.sh
 ```
 
-`install.sh` uses its own location to find the Git checkout, so the repository
-can live anywhere. It installs the Poetry environment and links `fixm4b` into
-`~/.local/bin`; add that directory to `PATH` if needed:
+`install.sh` installs the Poetry environment, including the published `fixm4b`
+metadata tool. Download the language model once after installation:
 
 ```bash
-fixm4b -i "Author, Name"
+poetry run python -m spacy download en_core_web_sm
 ```
 
-For an existing checkout, `poetry run fixm4b ...` is also available directly.
+Run the converter with `poetry run python -m src`, or metadata repair with
+`poetry run fixm4b -i "Author, Name"`.
 
 ## Docker
 
@@ -189,7 +189,9 @@ All options are set via environment variables (`.env` file or shell environment)
 | `WORKING_FOLDER`              | system temp   | Scratch space for merge/build steps                                                                                                               |
 | `SLEEP_TIME`                  | `10`          | Seconds between inbox scans                                                                                                                       |
 | `WAIT_TIME`                   | `5`           | Seconds to wait after a folder is modified before processing                                                                                      |
-| `CPU_CORES`                   | all cores     | Number of parallel ffmpeg jobs                                                                                                                    |
+| `CPU_CORES`                   | all cores     | Max parallel ffmpeg encode jobs **per book**                                                                                                      |
+| `MAX_PROBE_THREADS`           | `max(min(CPU_CORES, 16), 4)` | Parallel workers for post-encode duration/title probes (`0` = auto, clamped 4–16)                                                     |
+| `MAX_CONVERT_JOBS`            | `1`           | Max books converting at once. `>1` parallelizes standalone (non-series) books; per-book encode workers are scaled down to fit `CPU_CORES`       |
 | `MAX_BITRATE`                 | `0`           | Max output bitrate in kbps; `0`/unset keeps the source rate. Sources above the cap are re-encoded (m4b passthrough/stream-copy is skipped)        |
 | `MAX_CHAPTER_LENGTH`          | `15,30`       | Min/max chapter length in minutes                                                                                                                 |
 | `AUDIO_EXTS`                  | mp3,m4a,m4b,… | Comma-separated list of audio extensions to process                                                                                               |
@@ -201,6 +203,7 @@ All options are set via environment variables (`.env` file or shell environment)
 | `USE_FILENAMES_AS_CHAPTERS`   | `N`           | Set to `Y` to derive chapter titles from filenames instead of ID3 tags                                                                            |
 | `CLEANUP_FILENAMES`           | `N`           | Set to `Y` to opt into metadata-driven filename cleanup; the safe default preserves trusted GCS-derived names                                  |
 | `NO_CATS`                     | `N`           | Set to `Y` to suppress the ASCII cat art between loops                                                                                            |
+| `SCORER_TRACE`                | `N`           | Set to `Y` to enable scorer cache and decision timing diagnostics                                                                                |
 | `OPEN_LIBRARY_USER_AGENT`     | _(none)_      | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup))           |
 | `OPEN_LIBRARY_TIMEOUT`        | `30`          | Open Library request timeout in seconds                                                                                                           |
 | `GOODSCRAPS_USER_AGENT`       | _(none)_      | Identifiable user-agent string for optional Goodreads metadata lookups; setting it enables Goodreads-first comparison with Open Library             |
@@ -316,12 +319,12 @@ environment:
   - POST_CONVERT_SCRIPT_TIMEOUT=30
 ```
 
-### Site-specific hooks (e.g. Deluge)
+### Custom integrations
 
-Deluge finalize (relabel + `move_storage` after converting a book copied from
-`WATCH_FOLDER`) is intentionally **not** shipped in this repo — mount your own
-script via `POST_CONVERT_SCRIPT`. A site-specific example for phantom-docker
-lives at `/etc/docker/scripts/auto-m4b/post-convert-deluge.py`.
+Use `POST_CONVERT_SCRIPT` to connect auto-m4b to another app, service, or script.
+For example, a hook can update labels, move source files, or notify another
+service after a successful conversion. Integration scripts are specific to your
+setup and are not included in this repo; mount your own script as shown above.
 
 ## Development
 
@@ -338,4 +341,4 @@ poetry run mypy src/
 
 ## License
 
-[MIT](LICENSE) © 2026 Brandon Shelley
+[MIT](LICENSE) © 2026 [github.com/brandonscript](https://github.com/brandonscript)

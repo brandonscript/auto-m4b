@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ── Stage 1: base (system deps + Python packages + NLP models) ───────────────
 FROM python:3.12-slim AS base
 

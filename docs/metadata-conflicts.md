@@ -26,12 +26,12 @@ Domain tests: [`src/tests/test_metadata_plan.py`](../src/tests/test_metadata_pla
 | **OL edition enrich** | Shared edition base+subtitle enrichment when `OPEN_LIBRARY_USER_AGENT` is set. | Edition base+subtitle when locally attested. | `adopt_shared` |
 | **Folder priors** | Pipeline roots are clamped using configured paths. | `#plex` / parent-author / loose author-dir / cli-root clamp. | `adopt_shared` |
 | **OL auto-write** | Auto-applies shared OL title/author/date when the user agent is configured. | Display-only unless forced. | `keep_convert_adapter` |
-| **Goodreads selection** | When enabled, queries both providers and prefers a confident Goodreads result; Open Library remains fallback. | Queries both providers and displays comparison; forced `--goodreads` applies the selected book. | `adopt_shared` |
-| **Provider disagreements** | Reports Goodreads/Open Library field conflicts and continues with Goodreads selected. | Reports field conflicts without blocking a dry-run or automatic plan. | `adopt_shared` |
+| **Goodreads selection** | When enabled, queries Goodreads first; on GR miss tries full `plan_fix` (source-as-current), then strict OL-early fallback. | Queries both providers and displays comparison; forced `--goodreads` applies the selected book. | `adopt_shared` (convert selection) |
+| **Provider disagreements** | Convert no longer dual-queries OL when GR wins; GR-miss uses `plan_fix` then OL-early. | Reports field conflicts without blocking a dry-run or automatic plan. | `keep_convert_adapter` |
 
 ## Non-minimalist tests (`@pytest.mark.non_minimalist`)
 
-Tagged in `test_metadata_plan.py` for Phase 4 triage:
+Tagged in `test_metadata_plan.py` for CLI `--no-minimalist` coverage:
 
 - `test_plan_fix_non_minimalist_keeps_full_source_stem`
 - `test_plan_fix_never_renames_to_author_even_if_gcs_is_author`
@@ -46,8 +46,24 @@ Tagged in `test_metadata_plan.py` for Phase 4 triage:
   `Track01`, and combines a sensible book directory with a useful file fragment when both are needed.
 - Single-file passthrough keeps its original filename while tags may still be updated.
 
-## Phase 3 notes
+## Convert selection notes
 
-- Colon + always-minimalist are **post-selection** transforms; convert selection is still OCR / MetadataScore / OL-early (not full `plan_fix`).
+- Colon + always-minimalist are **post-selection** transforms.
+- Pre-convert selection: Goodreads first; on miss, full `plan_fix` (inbox
+  source-as-current), then strict `extract_ol_early` fallback, then MetadataScore/OCR.
 - `minimalist_title` drops unbalanced `(Series, Book N)` paren tails.
 - `test_parse_combo_id3_tags[…expected3]` can fail when `OPEN_LIBRARY_USER_AGENT` is set (OL early overwrites Album Artist narrator) — tracked under **OL auto-write**.
+
+## Verify planner notes
+
+- Post-build `verify_and_update_id3_tags` calls shared `plan_fix` only when early
+  GR/OL results are missing or no longer match `book.*`. When early providers still
+  match, verify reuses the stash and skips `plan_fix` / re-lookups (no edition enrich
+  in that short-circuit path).
+- Pre-convert `extract_metadata`: Goodreads first; on GR miss, `plan_fix` with
+  `allow_source_as_current`, falling back to fixm4b `extract_ol_early` (strict floors /
+  OCR / author-first) when the plan does not resolve.
+- Convert still auto-applies desired fields after the plan (shared auto OL remains
+  display-only unless `ol_ref` forces attach). Passthrough / basename stem adapters
+  stay convert-side.
+- If `plan_fix` raises, verify falls back to attach-only (`FixPlan` + `_attach_open_library`).

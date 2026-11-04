@@ -182,7 +182,7 @@ def run_post_convert_script(book: "Audiobook") -> None:
         return
 
     print_debug(f"[post-convert] script completed: {script.name}")
-    # Always persist output (Deluge soft failures often exit 0 but print details).
+    # Always persist output (hooks may exit 0 but still print useful diagnostic details).
     if stdout.strip() or stderr.strip():
         _append_post_convert_log(
             book,

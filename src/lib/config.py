@@ -268,6 +268,11 @@ class Config:
                     print_grey(self.info_str)
                     if self.OPEN_LIBRARY_USER_AGENT:
                         print_grey(f"openlibrary.org UserAgent: {self.OPEN_LIBRARY_USER_AGENT}")
+                    if self.GOODSCRAPS_USER_AGENT:
+                        print_grey(f"Goodreads UserAgent: {self.GOODSCRAPS_USER_AGENT}")
+                    if self.BOOKPEEK:
+                        online = bool(self.GOODSCRAPS_USER_AGENT or self.OPEN_LIBRARY_USER_AGENT)
+                        print_grey(f"bookpeek: on ({'online' if online else 'ASR/Audnexus only'})")
                     if env_msg:
                         print_dark_grey(env_msg)
 
@@ -333,9 +338,52 @@ class Config:
     NO_CATS = _NO_CATS
 
     @env_property(typ=int, default=cpu_count())
-    def _CPU_CORES(self): ...
+    def _CPU_CORES(self):
+        """Max parallel ffmpeg encode processes per book (chapter converts)."""
+        ...
 
     CPU_CORES = _CPU_CORES
+
+    @env_property(typ=int, default=0)
+    def _MAX_PROBE_THREADS(self):
+        """Parallel workers for post-encode duration/title probes.
+
+        0 / unset = ``max(min(CPU_CORES, 16), 4)`` (clamp to 4–16).
+        Caps concurrent ffprobe/mutagen reads after per-chapter encode.
+        """
+        ...
+
+    MAX_PROBE_THREADS = _MAX_PROBE_THREADS
+
+    @property
+    def probe_threads(self) -> int:
+        """Resolved probe pool size for merge post-encode I/O."""
+        if self.MAX_PROBE_THREADS and self.MAX_PROBE_THREADS > 0:
+            return max(1, int(self.MAX_PROBE_THREADS))
+        # Floor at 4 so tiny hosts still parallelize probes; cap at 16.
+        return max(min(int(self.CPU_CORES or 1), 16), 4)
+
+    @env_property(typ=int, default=1)
+    def _MAX_CONVERT_JOBS(self):
+        """Max books converting at once. Default 1 (sequential inbox).
+
+        When >1, independent (non-series) books may convert in parallel.
+        Per-book ffmpeg workers are scaled so
+        ``active_jobs × CPU_CORES_budget ≤ CPU_CORES``.
+        """
+        ...
+
+    MAX_CONVERT_JOBS = _MAX_CONVERT_JOBS
+
+    @property
+    def encode_cores(self) -> int:
+        """Per-book ffmpeg worker budget (may be reduced under MAX_CONVERT_JOBS)."""
+        from src.lib.converter.merge import get_encode_cores_override
+
+        override = get_encode_cores_override()
+        if override is not None:
+            return max(1, int(override))
+        return max(1, int(self.CPU_CORES or 1))
 
     @env_property(typ=int, default=0)
     def _MAX_BITRATE(self):
@@ -442,6 +490,18 @@ class Config:
     GOODSCRAPS_TIMEOUT = _GOODSCRAPS_TIMEOUT
 
     @env_property(typ=bool, default=False)
+    def _BOOKPEEK(self):
+        """Enable optional bookpeek ASR + Audnexus metadata enrichment.
+
+        When enabled alongside GOODSCRAPS_USER_AGENT and/or OPEN_LIBRARY_USER_AGENT,
+        bookpeek runs online by default and reuses those user agents (no duplicate
+        BOOKPEEK_* agent env vars). Default off.
+        """
+        ...
+
+    BOOKPEEK = _BOOKPEEK
+
+    @env_property(typ=bool, default=False)
     def _COVER_OCR(self):
         """Enable Tesseract OCR on cover art as a boost/veto for OL matching.
 
@@ -487,6 +547,11 @@ class Config:
     def _DEBUG(self): ...
 
     DEBUG = _DEBUG
+
+    @env_property(typ=bool, default=False)
+    def _SCORER_TRACE(self): ...
+
+    SCORER_TRACE = _SCORER_TRACE
 
     @env_property(typ=bool, default=True)
     def _BACKUP(self): ...
@@ -755,5 +820,15 @@ class Config:
 
 
 cfg = Config()
+
+try:
+    # Live cfg adapter: package code calls get_settings() which consults this provider.
+    import fixm4b.settings as _fixm4b_settings
+    from src.lib.metadata.settings import get_settings as _am4b_get_settings
+
+    _fixm4b_settings.set_settings_provider(_am4b_get_settings)
+except Exception:
+    # Standalone / early import before fixm4b is available.
+    pass
 
 __all__ = ["cfg"]

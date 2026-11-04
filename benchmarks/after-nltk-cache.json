@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "book_construction_seconds": 0.019600441097281873,
+      "chapters": 5,
+      "conversion_wall_seconds": 0.2274237509118393,
+      "duration_seconds": 33.993878,
+      "fixture": "tiny__flat_mp3",
+      "import_seconds": 2.912722627981566,
+      "input_bytes": 111978,
+      "merge_staging_seconds": 0.0011642600875347853,
+      "metadata_extraction_seconds": 0.08962769992649555,
+      "output_bytes": 112450,
+      "path_info_seconds": 0.4003757460741326,
+      "preparation_seconds": 3.4449326540343463,
+      "runs": 3,
+      "source_files": 5,
+      "stages": {
+        "_concat_to_m4b": 0.01232180802617222,
+        "_convert_file_to_mp4": 0.14612683188170195,
+        "_embed_metadata_and_cover": 0.012691010953858495,
+        "_ffprobe_duration_ms": 0.015033062896691263,
+        "_ffprobe_title_tag": 0.01495783613063395,
+        "write_ffmetadata": 0.00019768299534916878
+      },
+      "verification_seconds": 0.0035167860332876444,
+      "wall_seconds": {
+        "max": 3.672452241065912,
+        "median": 3.6723639729898423,
+        "min": 3.6350739779882133
+      }
+    }
+  ],
+  "cpu_cores": 1,
+  "generated_at": "2026-08-05T19:34:59Z",
+  "iterations": 3,
+  "python": "3.12.1",
+  "warmups": 1
+}
