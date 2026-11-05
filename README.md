@@ -8,9 +8,7 @@ Drop an audiobook into a folder. Otto combines its audio files into one `.m4b`, 
 
 Otto handles individual books, author/series folders, and existing single-file audiobooks. It can back up the source files before conversion and archive them afterward. Metadata repair is included through [fixm4b](#fixing-metadata-with-fixm4b), which also works on its own.
 
-Special thanks to [seanap](https://github.com/seanap/auto-m4b), whose original auto-m4b project inspired otto-m4b and its automated audiobook conversion workflow.
-
-**Upgrading from auto-m4b?** Read the [migration guide](docs/rename-migration.md) first. Your existing media folder names can stay as they are.
+**Coming from an older version (before the rename?)** Otto takes care of most of the move for you. Stop the old converter, update your container or local version to otto-m4b 0.8.0 or newer, and it will bring over your saved state, logs, and watch markers. Your existing media folders don't need any changes. See the [migration guide](docs/rename-migration.md) for more details.
 
 ## Get started with Docker
 
@@ -89,7 +87,7 @@ poetry run python -m src --env .env
 
 Press Ctrl+C to stop. To process the current inbox once, add `--max_loops 1`. To select books by name, add `--match "Hardy Boys"`; the value can be a regular expression. Run `poetry run python -m src --help` for the available flags.
 
-## Fixing metadata with fixm4b
+## Fixing metadata with [fixm4b](https://github.com/brandonscript/fixm4b)
 
 [fixm4b](https://github.com/brandonscript/fixm4b) corrects audiobook tags, filenames, and companion description files **without re-encoding the audio**. It is bundled with Otto, and is also published as a standalone tool. Use it when a converted book has the wrong author, title, narrator, or filename.
 
@@ -109,10 +107,13 @@ To use it without Otto:
 
 ```bash
 pip install fixm4b
+# or
+brew install brandonscript/tap/fixm4b
+
 fixm4b -i "/path/to/converted/Author/Book"
 ```
 
-The command is `fixm4b`. A plain invocation previews proposed changes; `-i` lets you review and approve each book, and `--apply` writes changes directly:
+The command is [`fixm4b`](https://github.com/brandonscript/fixm4b). A plain invocation previews proposed changes; `-i` lets you review and approve each book, and `--apply` writes changes directly:
 
 ```bash
 fixm4b "/path/to/converted/Author/Book"
@@ -172,7 +173,7 @@ GOODSCRAPS_USER_AGENT=YourApp/1.0 (you@example.com)
 OPEN_LIBRARY_USER_AGENT=YourApp/1.0 (you@example.com)
 ```
 
-Replace the example identity before using it. Goodreads is preferred when it supplies a confident match; Open Library is a fallback. Open Library also helps detect MP3 tags with the author and narrator swapped. Review uncertain matches with `fixm4b` rather than reconverting the audio.
+Replace the example identity before using it. Goodreads is preferred when it supplies a confident match; Open Library is a fallback. Open Library also helps detect MP3 tags with the author and narrator swapped. Review uncertain matches with [fixm4b](https://github.com/brandonscript/fixm4b) rather than reconverting the audio.
 
 ## Run a script after conversion
 
@@ -210,8 +211,12 @@ poetry run python -m pytest src/tests/ -p no:randomly -q
 poetry run mypy src/
 ```
 
-See [AGENTS.md](AGENTS.md) for branch, dependency, and release conventions.
+Are you a human-proxy, bot, or other inorganic helper? See [AGENTS.md](https://github.com/brandonscript/otto-m4b/blob/main/AGENTS.md) for branch, dependency, and release conventions.
+
+## Thanks
+
+Special thanks to [seanap](https://github.com/seanap/auto-m4b), whose original auto-m4b project inspired otto-m4b and its automated audiobook conversion workflow.
 
 ## License
 
-[MIT](LICENSE) © 2026 [Brandon Shelley](https://github.com/brandonscript).
+[MIT](LICENSE) © 2026 [brandonscript/otto-m4b](https://github.com/brandonscript/otto-m4b).

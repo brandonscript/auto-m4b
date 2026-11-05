@@ -143,6 +143,8 @@ spacy = [
     { version = ">=3.8.10,<3.8.14", extras = ["apple"], markers = "sys_platform == 'darwin'" },
     { version = ">=3.8.10,<3.8.14", markers = "sys_platform != 'darwin'" },
 ]
+# Keep the existing macOS NLP backend; newer Torch resolution pulls unrelated CUDA packages.
+torch = { version = "2.7.1", markers = "sys_platform == 'darwin'" }
 spacy-curated-transformers = { version = "^0.3.0", markers = "sys_platform == 'darwin'" }
 nltk = "^3.9.1"
 lazy = "^1.6"
