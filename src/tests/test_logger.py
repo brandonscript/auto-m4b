@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.auto_m4b import app
+from src.otto_m4b import app
 from src.lib.audiobook import Audiobook
 from src.lib.logger import log_global_results
 from src.tests.conftest import TEST_DIRS

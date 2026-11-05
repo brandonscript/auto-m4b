@@ -408,7 +408,7 @@ def test_verify_tags_after_convert(
     expected_dict: dict[str, str],
 ):
 
-    from src.auto_m4b import app
+    from src.otto_m4b import app
 
     book = indirect_fixture
     _orig_match_filter = InboxState().match_filter
@@ -465,25 +465,25 @@ def test_title_from_folder_beats_partno_track_title(
 
 
 @pytest.mark.slow
-def test_encoder_tag_is_auto_m4b_after_conversion(
+def test_encoder_tag_is_otto_m4b_after_conversion(
     blank_audiobook: Audiobook,
 ):
-    """Output m4b must report encoder=brandonscript/auto-m4b, overwriting any source value.
+    """Output m4b must report encoder=brandonscript/otto-m4b, overwriting any source value.
 
     Both the ffmetadata embed (during merge) and the mutagen correction pass
     (verify_and_update_id3_tags) must stamp the encoder atom with the canonical
     tool identifier; no legacy 'm4b-tool', 'BOOKSY', or source 'PHNTM' values
     should survive in the converted file.
     """
-    from src.auto_m4b import app
+    from src.otto_m4b import app
 
     app(max_loops=1)
 
     tags = extract_id3_tags(blank_audiobook.converted_file)
     encoder_val = tags.get("encoder", "")
 
-    assert encoder_val == "brandonscript/auto-m4b", (
-        f"Expected encoder 'brandonscript/auto-m4b', got '{encoder_val}'"
+    assert encoder_val == "brandonscript/otto-m4b", (
+        f"Expected encoder 'brandonscript/otto-m4b', got '{encoder_val}'"
     )
 
 

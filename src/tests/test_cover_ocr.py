@@ -90,5 +90,3 @@ def test_extract_cover_ocr_text_uses_sidecar_when_enabled(tmp_path):
 
     assert "Tana French" in text
     mock_path.assert_called_once()
-
-

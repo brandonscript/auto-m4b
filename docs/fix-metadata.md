@@ -1,16 +1,10 @@
 # fixm4b — retag converted audiobooks (no re-encode)
 
-> **Standalone package:** [`brandonscript/fixm4b`](https://github.com/brandonscript/fixm4b)  
-> Install with `pip install fixm4b` or `brew install brandonscript/tap/fixm4b`.  
-> In this repo, `poetry run fixm4b` uses the path dependency on `../fixm4b` (**`dev`**). On **`main`**, pin the latest PyPI release instead (`fixm4b = "^x.y"`).
+[fixm4b](https://github.com/brandonscript/fixm4b) is bundled with Otto and also available separately with `pip install fixm4b` or `brew install brandonscript/tap/fixm4b`.
 
-Standalone CLI for correcting ID3 tags, `.m4b` filenames, and companion quality `.txt` files **after** conversion. It does not re-encode audio.
+Run `poetry run fixm4b` from an Otto source checkout, `docker exec -it otto-m4b fixm4b` in Docker, or `fixm4b` after a standalone installation. It corrects tags, filenames, and companion description files without re-encoding audio.
 
-- Package / CLI: [`../fixm4b`](../../fixm4b) (`poetry run fixm4b`)
-- Convert imports the same planner via shims under [`src/lib/metadata/`](../src/lib/metadata/) (re-exports `fixm4b`)
-- Convert ↔ shared divergences (manual review): [`metadata-conflicts.md`](metadata-conflicts.md)
-
-Convert always runs **minimalist** title cleanup. The CLI still honors `--minimalist` / `--no-minimalist` / `CLI_MINIMALIST`.
+The converter and CLI share the metadata planner. Developer notes about their remaining differences are in [metadata-conflicts.md](metadata-conflicts.md).
 
 ## When to use it
 
@@ -47,14 +41,14 @@ Default is **dry-run**. Write with `--apply`, or confirm each book with `-i` / `
 Compose uses `INBOX_FOLDER` / `CONVERTED_FOLDER` / `ARCHIVE_FOLDER` (container `/media/...`). On the host CLI, set the mirrors:
 
 ```bash
-export CLI_CONVERTED_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/converted
-export CLI_ARCHIVE_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/archive
-export CLI_INBOX_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox
+export CLI_CONVERTED_FOLDER=/path/to/audiobooks/converted
+export CLI_ARCHIVE_FOLDER=/path/to/audiobooks/archive
+export CLI_INBOX_FOLDER=/path/to/audiobooks/inbox
 export CLI_MINIMALIST=1   # optional; prefer core titles (see Minimalist titles)
-export OPEN_LIBRARY_USER_AGENT='auto-m4b/1.0 (you@example.com)'
+export OPEN_LIBRARY_USER_AGENT='otto-m4b/1.0 (you@example.com)'
 ```
 
-Log file is always `{converted}/auto-m4b.log` (no separate env var).
+Log file is always `{converted}/otto-m4b.log` (no separate env var).
 
 `OPEN_LIBRARY_USER_AGENT` uses the same format as the converter (see README Open Library setup).
 
@@ -135,14 +129,14 @@ comparison when enabled.
 
 Interactive prompt:
 
-- `y` — yes  
-- `s` — skip (default)  
-- `m` — use this openlibrary match (only when low-confidence)  
-- `o` — provide an Open Library id or url  
+- `y` — yes
+- `s` — skip (default)
+- `m` — use this openlibrary match (only when low-confidence)
+- `o` — provide an Open Library id or url
 - `e` — edit the proposed Title, Author, Date, Narrator, and filename
 - `g` — provide a Goodreads id or url
 - `c` — cancel a pending manual lookup
-- `q` — quit  
+- `q` — quit
 
 Edit mode uses the proposed values as defaults. Press Enter to keep a value,
 enter `_` to clear a metadata field, or enter a replacement filename. A
@@ -188,8 +182,6 @@ Interactive mode and `-o`/`--ol`/`-g`/`--goodreads` can retag from the converted
 
 Large author folders: planning shows an updating `Planning i/N · folder` line first. Interactive keeps that pass local, then runs Open Library on those local candidates (so date consensus can clear no-ops) and only then prints the mode banner — e.g. `Interactive // 1 of 7 needs fixing · No missing source files` or `Interactive // No books need fixing`.
 
-## Tests
+## Development
 
-```bash
-poetry run python -m pytest src/tests/test_fix_metadata.py src/tests/test_cleaners_minimalist.py -q
-```
+CLI tests live in the [standalone fixm4b repository](https://github.com/brandonscript/fixm4b). Otto tests its converter integration in `src/tests/`.

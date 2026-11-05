@@ -113,8 +113,8 @@ show_missing = true
 skip_covered = false
 
 [tool.poetry]
-name = "auto-m4b"
-version = "0.6.2"
+name = "otto-m4b"
+version = "0.8.0"
 description = "Python-native audiobook converter — watches a folder and converts multi-file mp3/m4a books to chapterized m4b"
 authors = ["Brandon Shelley <brandon@pacificaviator.co>"]
 license = "MIT"
@@ -143,6 +143,8 @@ spacy = [
     { version = ">=3.8.10,<3.8.14", extras = ["apple"], markers = "sys_platform == 'darwin'" },
     { version = ">=3.8.10,<3.8.14", markers = "sys_platform != 'darwin'" },
 ]
+# Keep the existing macOS NLP backend; newer Torch resolution pulls unrelated CUDA packages.
+torch = { version = "2.7.1", markers = "sys_platform == 'darwin'" }
 spacy-curated-transformers = { version = "^0.3.0", markers = "sys_platform == 'darwin'" }
 nltk = "^3.9.1"
 lazy = "^1.6"
@@ -153,9 +155,9 @@ protobuf = "^6.31.1"
 sentencepiece = "^0.2.0"
 watchdog = ">=4.0"
 titlecase = "^2.4.1"
-goodscraps = {path = "../goodscraps", develop = true}
-bookpeek = {path = "../bookpeek", develop = true, extras = ["whisper", "online"]}
-fixm4b = {path = "../fixm4b", develop = true}
+goodscraps = "^0.1.8"
+bookpeek = {version = "^0.2.1", extras = ["whisper", "online"]}
+fixm4b = "^0.1.4"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"

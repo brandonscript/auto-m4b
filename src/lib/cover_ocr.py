@@ -128,4 +128,3 @@ def extract_cover_ocr_text(book: "Audiobook") -> str:
         print_debug(f"cover OCR: embedded cover failed: {e}")
 
     return ""
-

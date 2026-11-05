@@ -17,7 +17,6 @@ from src.lib.config import cfg
 from src.lib.watch_folder import WatchFolder
 from src.tests.helpers.pytest_utils import testutils
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -151,7 +150,7 @@ class TestShouldIgnore:
         assert WatchFolder._should_ignore(watch_dir / ".hidden") is True
 
     def test_ignores_hash_dirs(self, watch_dir: Path):
-        assert WatchFolder._should_ignore(watch_dir / "#auto-m4b") is True
+        assert WatchFolder._should_ignore(watch_dir / "#otto-m4b") is True
         assert WatchFolder._should_ignore(watch_dir / "#done") is True
 
     def test_ignores_synology_metadata_dirs(self, watch_dir: Path):
@@ -240,7 +239,7 @@ class TestFindConvertibleBooks:
             shutil.rmtree(archive_copy, ignore_errors=True)
 
     def test_ignores_hash_dirs(self, watch_dir: Path):
-        bad = watch_dir / "#auto-m4b"
+        bad = watch_dir / "#otto-m4b"
         _make_audio_files(bad, "ch1.mp3", "ch2.mp3")
         _backdate(bad)
         found = WatchFolder.find_convertible_books()
@@ -336,9 +335,9 @@ class TestScanAndCopy:
         assert len(copied) == 1
 
         # Marker file must appear in the SOURCE directory
-        assert (book / ".auto-m4b").exists()
+        assert (book / ".otto-m4b").exists()
         # Marker should NOT be in the inbox copy (we write it after copytree)
-        assert not (cfg.inbox_dir / "MarkedBook" / ".auto-m4b").exists()
+        assert not (cfg.inbox_dir / "MarkedBook" / ".otto-m4b").exists()
 
     def test_marker_prevents_recopy_after_inbox_removed(self, watch_dir: Path):
         """Even if inbox/converted/archive entries disappear (e.g. user moves the
@@ -369,7 +368,7 @@ class TestScanAndCopy:
 
         first = WatchFolder.scan_and_copy()
         assert first == [cfg.inbox_dir / container.name]
-        assert (container / ".auto-m4b").read_text(encoding="utf-8") == "3-The Hero of Ages"
+        assert (container / ".otto-m4b").read_text(encoding="utf-8") == "3-The Hero of Ages"
 
         second_book = container / "4-The Alloy of Law"
         _make_audio_files(second_book, "ch1.mp3", "ch2.mp3")
@@ -380,14 +379,14 @@ class TestScanAndCopy:
         assert second == [cfg.inbox_dir / container.name / second_book.name]
         assert (cfg.inbox_dir / container.name / first_book.name).exists()
         assert (cfg.inbox_dir / container.name / second_book.name).exists()
-        assert "4-The Alloy of Law" in (container / ".auto-m4b").read_text(encoding="utf-8")
+        assert "4-The Alloy of Law" in (container / ".otto-m4b").read_text(encoding="utf-8")
 
     def test_retries_nested_book_when_converted_output_is_empty(self, watch_dir: Path):
         """An empty converted shell must not make a marked child permanently handled."""
         container = watch_dir / "Retry Container"
         child = container / "Book One"
         _make_audio_files(child, "ch1.mp3", "ch2.mp3")
-        (container / ".auto-m4b").write_text(child.name, encoding="utf-8")
+        (container / ".otto-m4b").write_text(child.name, encoding="utf-8")
         _backdate(container)
 
         # Reproduce the bad state: an archive record exists, but the converted
@@ -427,3 +426,12 @@ class TestScanAndCopy:
 
         assert copied == []
         assert not (cfg.inbox_dir / "InProgress").exists()
+
+
+def test_legacy_watch_marker_prevents_reimport(watch_dir):
+    book = watch_dir / "Legacy Book"
+    _make_audio_files(book, "01.mp3", "02.mp3")
+    (book / ".auto-m4b").touch()
+    assert WatchFolder._is_already_handled(book)
+    assert (book / ".otto-m4b").exists()
+    assert not (book / ".auto-m4b").exists()

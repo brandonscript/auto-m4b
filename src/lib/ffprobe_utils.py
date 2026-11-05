@@ -50,7 +50,7 @@ def fix_ffprobe(counter: int = 0):
     site_packages = venv_path / f"lib/{binary}/site-packages"
     bin_root = venv_path / "bin" / binary
     if not site_packages.exists():
-        raise RuntimeError(f"auto_m4b's site_packages not found at '{site_packages}', cannot fix ffprobe")
+        raise RuntimeError(f"otto_m4b's site_packages not found at '{site_packages}', cannot fix ffprobe")
 
     fix_cmd = f"{bin_root} -m pip uninstall ffmpeg-python python-ffmpeg -y && {bin_root} -m pip install ffmpeg-python --target {site_packages} --force-reinstall --upgrade"
 

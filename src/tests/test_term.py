@@ -27,9 +27,9 @@ from src.lib.term import (
             20, 1,  
             "/home/user/Downloads/\n this_is_a_really_long_fil..._that_should_be_broken_up"),
         (Path(
-            "/private/var/folders/18/vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/auto-m4b/merge/tower_treasure__flat_mp3"),
+            "/private/var/folders/18/vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/otto-m4b/merge/tower_treasure__flat_mp3"),
             40, 1,  
-            "/private/var/folders/18/\n vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/\n auto-m4b/merge/tower_treasure__flat_mp3",),
+            "/private/var/folders/18/\n vqpntnpj0sj5b5yb0s1m2_gc0000gn/T/\n otto-m4b/merge/tower_treasure__flat_mp3",),
         # fmt: on
     ],
 )

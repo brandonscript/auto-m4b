@@ -501,7 +501,7 @@ class Audiobook(BaseModel):
 
     @property
     def log_filename(self):
-        return f"auto-m4b.{self.basename}.log"
+        return f"otto-m4b.{self.basename}.log"
 
     @property
     def log_file(self) -> Path:
@@ -510,7 +510,7 @@ class Audiobook(BaseModel):
     @property
     def post_convert_log_filename(self) -> str:
         stem = self.output_filename_stem
-        return f"auto-m4b.{stem}.post-convert.log"
+        return f"otto-m4b.{stem}.post-convert.log"
 
     @property
     def post_convert_log_file(self) -> Path:

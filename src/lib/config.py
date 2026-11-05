@@ -161,7 +161,7 @@ def env_property(
     return cast(Callable[..., D], decorator)
 
 
-class AutoM4bArgs:
+class OttoM4bArgs:
     env: Path | None
     debug: bool | None
     test: bool | None
@@ -191,7 +191,7 @@ class AutoM4bArgs:
         return to_json(self.__dict__)
 
     def __repr__(self) -> str:
-        return f"AutoM4bArgs({self.__str__()})"
+        return f"OttoM4bArgs({self.__str__()})"
 
 
 def ensure_dir_exists_and_is_writable(path: Path, throw: bool = True) -> None:
@@ -223,13 +223,9 @@ def use_pid_file():
 
     # read the pid file and look for a line starting with `FATAL` in all caps, if so, the app crashed and we should exit
     if cfg.FATAL_FILE.exists() and cfg.CRASH_PROTECTION:
-        age = time.time() - cfg.FATAL_FILE.stat().st_mtime
-        if age > 30:
-            cfg.FATAL_FILE.unlink()
-        else:
-            err = f"auto-m4b fatally crashed on last run, once the problem is fixed, please delete the following lock file to continue:\n\n {cfg.FATAL_FILE}\n\n{cfg.FATAL_FILE.open().read()}"
-            print_error(err)
-            raise RuntimeError(err)
+        err = f"otto-m4b fatally crashed on last run, once the problem is fixed, please delete the following lock file to continue:\n\n {cfg.FATAL_FILE}\n\n{cfg.FATAL_FILE.open().read()}"
+        print_error(err)
+        raise RuntimeError(err)
 
     already_exists = cfg.PID_FILE.is_file()
 
@@ -237,7 +233,7 @@ def use_pid_file():
         cfg.PID_FILE.touch()
         current_local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pid = os.getpid()
-        cfg.PID_FILE.write_text(f"auto-m4b started at {current_local_time}, watching {cfg.inbox_dir} - pid={pid}\n")
+        cfg.PID_FILE.write_text(f"otto-m4b started at {current_local_time}, watching {cfg.inbox_dir} - pid={pid}\n")
 
     try:
         yield already_exists
@@ -255,16 +251,24 @@ class Config:
         self._env: dict[str, Any] = {}
         self.load_env(quiet=True)
 
-    def startup(self, args: AutoM4bArgs | None = None):
+    def startup(self, args: OttoM4bArgs | None = None):
         from src.lib.inbox_state import InboxState
         from src.lib.term import print_dark_grey, print_grey, print_mint
 
         start_time = time.perf_counter()
 
-        with use_pid_file() as pid_exists:
-            with self.load_env(args) as env_msg:
+        from src.lib.name_migration import migrate_logs
+
+        with self.load_env(args) as env_msg:
+            # Load explicit paths before migrating state or creating observers.
+            self.tmp_dir
+            self.META_DIR
+            for root in (self.inbox_dir, self.converted_dir, self.archive_dir, self.failed_dir):
+                if root:
+                    migrate_logs(root)
+            with use_pid_file() as pid_exists:
                 if not pid_exists and not InboxState().loop_counter:
-                    print_mint("\nStarting auto-m4b...")
+                    print_mint("\nStarting otto-m4b...")
                     print_grey(self.info_str)
                     if self.OPEN_LIBRARY_USER_AGENT:
                         print_grey(f"openlibrary.org UserAgent: {self.OPEN_LIBRARY_USER_AGENT}")
@@ -455,7 +459,7 @@ class Config:
         https://openlibrary.org/developers/api
 
         Make sure you use your own email address, and a unique
-        name other than `auto-m4b`.
+        name other than `otto-m4b`.
 
         This env var should be in the following format:
 
@@ -568,9 +572,9 @@ class Config:
         return self.args.max_loops if self.args.max_loops else -1
 
     @property
-    def args(self) -> AutoM4bArgs:
+    def args(self) -> OttoM4bArgs:
         if not hasattr(self, "_ARGS"):
-            self._args = AutoM4bArgs()
+            self._args = OttoM4bArgs()
         return self._args
 
     @property
@@ -582,9 +586,9 @@ class Config:
         try:
             from src import __version__ as _ver  # type: ignore[attr-defined]
 
-            return f"auto-m4b-py {_ver}"
+            return f"otto-m4b-py {_ver}"
         except Exception:
-            return "auto-m4b-py (native)"
+            return "otto-m4b-py (native)"
 
     @cached_property
     def info_str(self):
@@ -613,10 +617,9 @@ class Config:
 
     @cached_property
     def META_DIR(self):
-        meta_dir = Path.home() / ".auto-m4b"
-        if not meta_dir.exists():
-            meta_dir.mkdir(parents=True, exist_ok=True)
-        return meta_dir
+        from src.lib.name_migration import migrate_home
+
+        return migrate_home(Path.home())
 
     @cached_property
     def inbox_dir(self):
@@ -645,20 +648,23 @@ class Config:
     @cached_property
     def watch_dir(self) -> Path | None:
         """Optional secondary source folder to watch for new audiobooks.
-        Set WATCH_FOLDER in the environment to enable. When set, auto-m4b will
+        Set WATCH_FOLDER in the environment to enable. When set, otto-m4b will
         scan this directory each loop and copy qualifying books (those with more
         than one audio file) to the inbox before the normal conversion pass."""
         return self.load_path_env("WATCH_FOLDER", allow_empty=True)
 
     @cached_property
     def tmp_dir(self):
-        t = Path(tempfile.gettempdir()).resolve() / "auto-m4b"
-        t.mkdir(parents=True, exist_ok=True)
-        return t
+        from src.lib.name_migration import migrate_temp
+
+        return migrate_temp(
+            Path(tempfile.gettempdir()).resolve(),
+            working=self.load_path_env("WORKING_FOLDER", allow_empty=True),
+        )
 
     @cached_property
     def working_dir(self):
-        """The working directory for auto-m4b, defaults to /<tmpdir>/auto-m4b."""
+        """The working directory for otto-m4b, defaults to /<tmpdir>/otto-m4b."""
         d = self.load_path_env("WORKING_FOLDER", None, allow_empty=True)
         if not d:
             return self.tmp_dir
@@ -693,7 +699,7 @@ class Config:
 
     @cached_property
     def GLOBAL_LOG_FILE(self):
-        log_file = self.converted_dir / "auto-m4b.log"
+        log_file = self.converted_dir / "otto-m4b.log"
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch(exist_ok=True)
         return log_file
@@ -742,9 +748,9 @@ class Config:
                 pass
 
     @contextmanager
-    def load_env(self, args: AutoM4bArgs | None = None, *, quiet: bool = False):
+    def load_env(self, args: OttoM4bArgs | None = None, *, quiet: bool = False):
         msg = ""
-        self._args = args or AutoM4bArgs()
+        self._args = args or OttoM4bArgs()
 
         self.TEST = self._args.test if self._args.test is not None else (self.TEST or "pytest" in sys.modules)
 

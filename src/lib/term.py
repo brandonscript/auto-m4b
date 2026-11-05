@@ -148,7 +148,7 @@ def was_prev_line_divider() -> bool:
 
 
 def is_banner(*lines: str) -> bool:
-    return any((l and ("auto-m4b •" in l or "ꨄ︎" in n)) for (l, n) in zip(list(lines), list(lines)[1:] + [""]))
+    return any((l and ("otto-m4b •" in l or "ꨄ︎" in n)) for (l, n) in zip(list(lines), list(lines)[1:] + [""]))
 
 
 def found_banner_in_print_log() -> bool:

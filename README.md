@@ -1,74 +1,26 @@
 <p align="left">
-  <img src="assets/logo.png" alt="auto-m4b" width="240">
+  <img src="assets/logo.png" alt="otto-m4b" width="240">
 </p>
 
-# auto-m4b
+# otto-m4b
 
-A Python-native audiobook converter that watches a folder for new audiobooks and automatically converts multi-file MP3/M4A collections into a single, chapterized `.m4b`.
+Drop an audiobook into a folder. Otto combines its audio files into one `.m4b`, with chapters, cover art, and metadata, then puts the finished book in your output folder.
 
-## Features
+Otto handles individual books, author/series folders, and existing single-file audiobooks. It can back up the source files before conversion and archive them afterward. Metadata repair is included through [fixm4b](#fixing-metadata-with-fixm4b), which also works on its own.
 
-- **Folder watcher** — continuously monitors your inbox and converts new books as they arrive
-- **Smart book detection** — classifies flat directories, series, containers, and standalone files
-- **Chapter generation** — one chapter per source file, with intelligent title normalization
-- **Cover art** — extracts and embeds cover art from source files
-- **ID3/AAC tag preservation** — carries over title, artist, album, genre, and sort fields
-- **Series support** — handles nested series structures (e.g. `Author / Series / Book 01`)
-- **Crash protection** — skips known-bad books on subsequent runs to avoid infinite retry loops
-- **Backup** — optionally backs up source files before conversion
-- **fix_metadata CLI** — retag/rename already-converted `.m4b` files without re-encoding (see [docs/fix-metadata.md](docs/fix-metadata.md))
+Special thanks to [seanap](https://github.com/seanap/auto-m4b), whose original auto-m4b project inspired otto-m4b and its automated audiobook conversion workflow.
 
-## Requirements
+**Upgrading from auto-m4b?** Read the [migration guide](docs/rename-migration.md) first. Your existing media folder names can stay as they are.
 
-- Python 3.12+
-- [`ffmpeg`](https://ffmpeg.org/) and `ffprobe` in your `PATH`
-- [Poetry](https://python-poetry.org/) (for running from source)
+## Get started with Docker
 
-## Installation
-
-### Docker (recommended)
-
-```bash
-docker pull brandonscript/auto-m4b
-```
-
-Then copy `docker-compose.template.yml` to `docker-compose.yml`, update the volume paths, and run:
-
-```bash
-docker compose up -d
-```
-
-See the [Docker](#docker) section below for the full compose example and `docker run` usage.
-
-### From source
-
-```bash
-git clone https://github.com/brandonscript/auto-m4b.git
-cd auto-m4b
-./install.sh
-```
-
-`install.sh` uses its own location to find the Git checkout, so the repository
-can live anywhere. It installs the Poetry environment and links `fixm4b` into
-`~/.local/bin`; add that directory to `PATH` if needed:
-
-```bash
-fixm4b -i "Author, Name"
-```
-
-For an existing checkout, `poetry run fixm4b ...` is also available directly.
-
-## Docker
-
-### Docker Compose
-
-Copy `docker-compose.template.yml` to `docker-compose.yml` and edit the volume paths:
+Copy [docker-compose.template.yml](docker-compose.template.yml) to `docker-compose.yml`, or start with this example. Change the host paths to folders that exist on your machine:
 
 ```yaml
 services:
-  auto-m4b:
-    image: brandonscript/auto-m4b
-    container_name: auto-m4b
+  otto-m4b:
+    image: brandonscript/otto-m4b
+    container_name: otto-m4b
     restart: unless-stopped
     volumes:
       - /path/to/inbox:/data/inbox
@@ -76,109 +28,103 @@ services:
       - /path/to/archive:/data/archive
       - /path/to/backup:/data/backup
     environment:
-      - INBOX_FOLDER=/data/inbox
-      - CONVERTED_FOLDER=/data/converted
-      - ARCHIVE_FOLDER=/data/archive
-      - BACKUP_FOLDER=/data/backup
-      - TZ=America/Vancouver # your timezone
+      INBOX_FOLDER: /data/inbox
+      CONVERTED_FOLDER: /data/converted
+      ARCHIVE_FOLDER: /data/archive
+      BACKUP_FOLDER: /data/backup
+      TZ: America/Vancouver # use your timezone
 ```
+
+Start Otto and follow its progress:
 
 ```bash
 docker compose up -d
+docker compose logs -f
 ```
 
-### docker run
+Put each book in its own folder under the inbox. Numbered chapter filenames help keep tracks in the right order:
+
+```text
+inbox/
+├── A Book/
+│   ├── 01 - Chapter One.mp3
+│   └── 02 - Chapter Two.mp3
+├── Author Name/
+│   ├── 01 - Book One/
+│   │   ├── 01.mp3
+│   │   └── 02.mp3
+│   └── 02 - Book Two/
+│       ├── 01.mp3
+│       └── 02.mp3
+└── Another Book.m4b
+```
+
+Finished books appear in `CONVERTED_FOLDER`. By default, Otto backs up the sources to `BACKUP_FOLDER` and moves processed sources to `ARCHIVE_FOLDER`. Existing `.m4b` files can pass through without re-encoding unless your settings require conversion.
+
+## Run from source
+
+You need Python **3.12–3.14**, [Poetry](https://python-poetry.org/), and `ffmpeg`/`ffprobe` on your PATH.
 
 ```bash
-docker run -d \
-  --name auto-m4b \
-  --restart unless-stopped \
-  -v /path/to/inbox:/data/inbox \
-  -v /path/to/converted:/data/converted \
-  -v /path/to/archive:/data/archive \
-  -v /path/to/backup:/data/backup \
-  -e INBOX_FOLDER=/data/inbox \
-  -e CONVERTED_FOLDER=/data/converted \
-  -e ARCHIVE_FOLDER=/data/archive \
-  -e BACKUP_FOLDER=/data/backup \
-  -e TZ=America/Vancouver \
-  brandonscript/auto-m4b
+git clone https://github.com/brandonscript/otto-m4b.git
+cd otto-m4b
+./install.sh
+poetry run python -m spacy download en_core_web_sm
 ```
 
-All configuration is done via environment variables — see the [Configuration reference](#configuration-reference) below for the full list.
+Create a `.env` file with your paths:
 
-## Configuration
-
-### From source
-
-Create a `.env` file in the project root (or copy `.env.test` as a starting point):
-
-```env
-# Required — absolute or relative paths
+```dotenv
 INBOX_FOLDER=/path/to/inbox
 CONVERTED_FOLDER=/path/to/converted
 ARCHIVE_FOLDER=/path/to/archive
 BACKUP_FOLDER=/path/to/backup
-
-# Optional
-WORKING_FOLDER=/tmp/auto-m4b   # default: system temp dir
 ```
 
-## Usage
+Then run:
 
 ```bash
-poetry run python -m src
+poetry run python -m src --env .env
 ```
 
-The app will start watching `INBOX_FOLDER` and converting books it finds. Press `Ctrl+C` to stop.
+Press Ctrl+C to stop. To process the current inbox once, add `--max_loops 1`. To select books by name, add `--match "Hardy Boys"`; the value can be a regular expression. Run `poetry run python -m src --help` for the available flags.
 
-### Run once
+## Fixing metadata with fixm4b
+
+[fixm4b](https://github.com/brandonscript/fixm4b) corrects audiobook tags, filenames, and companion description files **without re-encoding the audio**. It is bundled with Otto, and is also published as a standalone tool. Use it when a converted book has the wrong author, title, narrator, or filename.
+
+With a source installation of Otto:
 
 ```bash
-poetry run python -m src --max-loops 1
+poetry run fixm4b -i "/path/to/converted/Author/Book"
 ```
 
-### Filter to a specific book or pattern
+With Docker, use paths as they appear inside the container:
 
 ```bash
-poetry run python -m src --match-filter "Hardy Boys"
+docker exec -it otto-m4b fixm4b -i "/data/converted/Author/Book"
 ```
 
-## Retagging converted books
-
-For metadata/filename fixes **without** re-encoding, use the `fix_metadata` CLI:
+To use it without Otto:
 
 ```bash
-poetry run python -m src.fix_metadata -i "Author Name"
-poetry run python -m src.fix_metadata --apply "Author Name/Book Title (2020)"
+pip install fixm4b
+fixm4b -i "/path/to/converted/Author/Book"
 ```
 
-Full reference (path env vars, archive/`-s` source resolution, Goodreads/Open Library
-controls, and interactive matching): **[docs/fix-metadata.md](docs/fix-metadata.md)**.
+The command is `fixm4b`. A plain invocation previews proposed changes; `-i` lets you review and approve each book, and `--apply` writes changes directly:
 
-## Folder structure
-
-```
-inbox/
-│
-├── flat_mp3_book/               # flat directory of .mp3 files → one .m4b
-│   ├── 01 - Chapter One.mp3
-│   └── 02 - Chapter Two.mp3
-│
-├── Author Name/                 # series — each subfolder becomes its own .m4b
-│   ├── 01 - Book One/
-│   │   └── *.mp3
-│   └── 02 - Book Two/
-│       └── *.mp3
-│
-└── standalone_book.m4b          # single-file .m4b — passed through as-is
+```bash
+fixm4b "/path/to/converted/Author/Book"
+fixm4b --apply "/path/to/converted/Author/Book"
+fixm4b --help
 ```
 
-Converted books land in `CONVERTED_FOLDER`. If `BACKUP=Y` (default), source files are copied to `BACKUP_FOLDER` before conversion.
+If the original source files live elsewhere, use `-s /path/to/archive`. See the [fixm4b guide](docs/fix-metadata.md) for source matching, path configuration, and Goodreads/Open Library options.
 
-## Configuration reference
+## Configuration
 
-All options are set via environment variables (`.env` file or shell environment).
+Docker reads settings from the Compose `environment` section. Source installations can pass a settings file with `--env .env` or export the same variables in the shell.
 
 | Variable                      | Default       | Description                                                                                                                                       |
 | ----------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -187,13 +133,13 @@ All options are set via environment variables (`.env` file or shell environment)
 | `ARCHIVE_FOLDER`              | _(required)_  | Folder where processed source books are moved                                                                                                     |
 | `BACKUP_FOLDER`               | _(required)_  | Folder for pre-conversion backups                                                                                                                 |
 | `WORKING_FOLDER`              | system temp   | Scratch space for merge/build steps                                                                                                               |
-| `SLEEP_TIME`                  | `10`          | Seconds between inbox scans                                                                                                                       |
+| `SLEEP_TIME`                  | `10`          | Inbox polling interval in seconds                                                                                                                       |
 | `WAIT_TIME`                   | `5`           | Seconds to wait after a folder is modified before processing                                                                                      |
 | `CPU_CORES`                   | all cores     | Max parallel ffmpeg encode jobs **per book**                                                                                                      |
 | `MAX_PROBE_THREADS`           | `max(min(CPU_CORES, 16), 4)` | Parallel workers for post-encode duration/title probes (`0` = auto, clamped 4–16)                                                     |
 | `MAX_CONVERT_JOBS`            | `1`           | Max books converting at once. `>1` parallelizes standalone (non-series) books; per-book encode workers are scaled down to fit `CPU_CORES`       |
 | `MAX_BITRATE`                 | `0`           | Max output bitrate in kbps; `0`/unset keeps the source rate. Sources above the cap are re-encoded (m4b passthrough/stream-copy is skipped)        |
-| `MAX_CHAPTER_LENGTH`          | `15,30`       | Min/max chapter length in minutes                                                                                                                 |
+| `MAX_CHAPTER_LENGTH`          | `15,30`       | Minimum/maximum chapter length in minutes                                                                                                                 |
 | `AUDIO_EXTS`                  | mp3,m4a,m4b,… | Comma-separated list of audio extensions to process                                                                                               |
 | `MATCH_FILTER`                | _(none)_      | Regex — only process books whose name matches                                                                                                     |
 | `ON_COMPLETE`                 | `archive`     | What to do with source files after conversion: `archive`, `delete`, or `nothing`                                                                  |
@@ -201,7 +147,7 @@ All options are set via environment variables (`.env` file or shell environment)
 | `BACKUP`                      | `Y`           | Set to `N` to skip backing up source files                                                                                                        |
 | `CRASH_PROTECTION`            | `Y`           | Set to `N` to disable skipping books that previously failed                                                                                       |
 | `USE_FILENAMES_AS_CHAPTERS`   | `N`           | Set to `Y` to derive chapter titles from filenames instead of ID3 tags                                                                            |
-| `CLEANUP_FILENAMES`           | `N`           | Set to `Y` to opt into metadata-driven filename cleanup; the safe default preserves trusted GCS-derived names                                  |
+| `CLEANUP_FILENAMES`           | `N`           | Set to `Y` to opt into metadata-driven filename cleanup; default keeps existing filename behavior                                  |
 | `NO_CATS`                     | `N`           | Set to `Y` to suppress the ASCII cat art between loops                                                                                            |
 | `SCORER_TRACE`                | `N`           | Set to `Y` to enable scorer cache and decision timing diagnostics                                                                                |
 | `OPEN_LIBRARY_USER_AGENT`     | _(none)_      | User-agent string for Open Library API lookups — enables author/narrator swap detection (see [Open Library setup](#open-library-setup))           |
@@ -211,134 +157,61 @@ All options are set via environment variables (`.env` file or shell environment)
 | `POST_CONVERT_SCRIPT`         | _(none)_      | Path to a Python (`.py`) or bash (`.sh`) script to run after each successful conversion (see [Post-conversion scripts](#post-conversion-scripts)) |
 | `POST_CONVERT_SCRIPT_TIMEOUT` | `60`          | Seconds before the post-convert script is killed                                                                                                  |
 
-## Goodreads metadata
+| `WATCH_FOLDER` | _(none)_ | Optional source folder; eligible multi-file books are copied to the inbox |
+| `FAILED_FOLDER` | _(none)_ | Optional destination for failed books and their logs |
+| `BOOKPEEK` | `N` | Enable optional audio-assisted metadata lookup |
 
-Goodreads lookups are opt-in. Set `GOODSCRAPS_USER_AGENT` to an identifiable
-application string to enable them. When Goodreads and Open Library are both
-enabled, auto-m4b queries both, prefers a confident Goodreads match, and uses
-Open Library as a fallback. Confident disagreements are reported in diagnostics
-while Goodreads remains the selected source.
+## Metadata lookups
 
-The `fix_metadata` CLI also supports `--no-goodreads` and
-`--goodreads URL_OR_ID` for disabling automatic lookups or forcing a specific
-Goodreads book.
+Otto uses the tags and filenames it finds locally. You can enable Goodreads and Open Library lookups when those are incomplete or incorrect.
 
-## Open Library setup
+Set `GOODSCRAPS_USER_AGENT` for Goodreads, and `OPEN_LIBRARY_USER_AGENT` for Open Library. Use an application name/version and your real contact email, for example:
 
-auto-m4b can query the [Open Library API](https://openlibrary.org/developers/api) to detect and correct
-swapped author/narrator tags. This is most useful for audiobook MP3 rips that use the "music
-convention" — where the narrator (performer) is stored in the `artist` field and the author
-(creator) is in `composer`, without an `albumartist` tag. Without this correction, auto-m4b may
-tag the output `.m4b` with the narrator as the author and vice versa.
-
-### Why this happens
-
-Many torrent-sourced audiobook rips follow music tagging conventions:
-
-| ID3 field  | Music meaning | Audiobook meaning | auto-m4b output                        |
-| ---------- | ------------- | ----------------- | -------------------------------------- |
-| `artist`   | performer     | **narrator**      | should become `composer`               |
-| `composer` | creator       | **author**        | should become `artist` / `albumartist` |
-
-auto-m4b's local scoring heuristics handle the majority of cases, but when the tags are ambiguous
-(e.g. only `artist` and `composer` are set, no `albumartist`) OL is the only reliable way to
-determine which name is the actual book author.
-
-### How to enable it
-
-Set `OPEN_LIBRARY_USER_AGENT` in your compose file or `.env`:
-
-```
-OPEN_LIBRARY_USER_AGENT=MyApp/1.0 (you@example.com)
+```dotenv
+GOODSCRAPS_USER_AGENT=YourApp/1.0 (you@example.com)
+OPEN_LIBRARY_USER_AGENT=YourApp/1.0 (you@example.com)
 ```
 
-Per [OL's API policy](https://openlibrary.org/developers/api), the string must include:
+Replace the example identity before using it. Goodreads is preferred when it supplies a confident match; Open Library is a fallback. Open Library also helps detect MP3 tags with the author and narrator swapped. Review uncertain matches with `fixm4b` rather than reconverting the audio.
 
-- A short name and version for your application (`MyApp/1.0`)
-- A contact email in parentheses (`you@example.com`)
+## Run a script after conversion
 
-Replace both placeholders with real values — do **not** leave the example text as-is.
-
-When the variable is unset or left as the placeholder, OL lookups are silently skipped and
-author/narrator are determined from ID3 tags alone.
-
-## Post-conversion scripts
-
-auto-m4b can run a custom script after each successful conversion. Set
-`POST_CONVERT_SCRIPT` to the path of a `.py` or `.sh` file (or any executable).
-The script runs **after** the converted `.m4b` has been moved to `CONVERTED_FOLDER`
-and the inbox source has been archived/deleted per `ON_COMPLETE`.
-
-A failing or timed-out script only logs a warning — it never aborts the
-conversion cycle or prevents the next book from being processed. Script
-stdout/stderr (and failure details) are written to a dedicated
-`auto-m4b.<title>.post-convert.log` next to the converted `.m4b` (not the
-`[quality].txt` description file), and non-zero exits also print those details
-to the console warning so they aren't swallowed when `DEBUG` is off.
-
-### Environment variables passed to the script
-
-| Variable                  | Description                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `AUTO_M4B_INBOX_PATH`     | Original inbox path for the book (may no longer exist on disk if archived/deleted)                           |
-| `AUTO_M4B_CONVERTED_PATH` | Full path to the finished `.m4b` file                                                                        |
-| `AUTO_M4B_CONVERTED_DIR`  | Directory containing the converted output                                                                    |
-| `AUTO_M4B_TITLE`          | Book title (from ID3 / Open Library / filename heuristics)                                                   |
-| `AUTO_M4B_AUTHOR`         | Book author                                                                                                  |
-| `AUTO_M4B_KEY`            | Inbox-relative key (folder name / nested path)                                                               |
-| `AUTO_M4B_WATCH_SOURCE`   | Reconstructed path under `WATCH_FOLDER` (`WATCH_FOLDER`/`AUTO_M4B_KEY`), or empty if `WATCH_FOLDER` is unset |
-
-### Python example
-
-```python
-#!/usr/bin/env python3
-import os
-
-title = os.environ["AUTO_M4B_TITLE"]
-author = os.environ["AUTO_M4B_AUTHOR"]
-converted = os.environ["AUTO_M4B_CONVERTED_PATH"]
-print(f"Converted '{title}' by {author} → {converted}")
-```
-
-### Bash example
-
-```bash
-#!/usr/bin/env bash
-echo "Converted '${AUTO_M4B_TITLE}' by ${AUTO_M4B_AUTHOR} → ${AUTO_M4B_CONVERTED_PATH}"
-```
-
-### Docker setup
-
-Mount a scripts directory into the container and point `POST_CONVERT_SCRIPT` at it:
+Set `POST_CONVERT_SCRIPT` to a Python script, shell script, or executable. With Docker, mount its directory and use the container path:
 
 ```yaml
 volumes:
   - /path/to/scripts:/scripts:ro
 environment:
-  - POST_CONVERT_SCRIPT=/scripts/my-hook.py
-  - POST_CONVERT_SCRIPT_TIMEOUT=30
+  POST_CONVERT_SCRIPT: /scripts/notify.py
+  POST_CONVERT_SCRIPT_TIMEOUT: 30
 ```
 
-### Custom integrations
+The hook runs after the finished file is in place and the source has been handled according to `ON_COMPLETE`. It receives these environment variables:
 
-Use `POST_CONVERT_SCRIPT` to connect auto-m4b to another app, service, or script.
-For example, a hook can update labels, move source files, or notify another
-service after a successful conversion. Integration scripts are specific to your
-setup and are not included in this repo; mount your own script as shown above.
+| Variable | Value |
+| --- | --- |
+| `OTTO_M4B_CONVERTED_PATH` | Finished `.m4b` path |
+| `OTTO_M4B_CONVERTED_DIR` | Output directory |
+| `OTTO_M4B_TITLE` | Book title |
+| `OTTO_M4B_AUTHOR` | Author |
+| `OTTO_M4B_KEY` | Book path relative to the inbox |
+| `OTTO_M4B_INBOX_PATH` | Original inbox path, which may have been moved or deleted |
+| `OTTO_M4B_WATCH_SOURCE` | Source path under `WATCH_FOLDER`, or empty when unset |
+
+Existing hooks also receive the equivalent `AUTO_M4B_*` variables during the rename transition. Use `OTTO_M4B_*` for new scripts.
+
+Hook output is saved beside the book as `otto-m4b.<title>.post-convert.log`. Failed or timed-out hooks produce a warning; Otto continues to the next book.
 
 ## Development
 
 ```bash
-# Install dependencies
-poetry install
-
-# Run tests
-poetry run python -m pytest src/tests/
-
-# Run linting
+poetry install --no-root
+poetry run python -m pytest src/tests/ -p no:randomly -q
 poetry run mypy src/
 ```
 
+See [AGENTS.md](AGENTS.md) for branch, dependency, and release conventions.
+
 ## License
 
-[MIT](LICENSE) © 2026 [github.com/brandonscript](https://github.com/brandonscript)
+[MIT](LICENSE) © 2026 [Brandon Shelley](https://github.com/brandonscript).

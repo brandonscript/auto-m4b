@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from src.lib import run
-from src.lib.config import AutoM4bArgs, cfg
+from src.lib.config import OttoM4bArgs, cfg
 from src.lib.inbox_state import InboxState
 from src.lib.term import nl, print_error, print_red, was_prev_line_empty
 from src.lib.term import print_debug as _print_debug
@@ -27,7 +27,7 @@ def handle_err(e: Exception):
         print_error(f"Error: {e}")
 
     if cfg.CRASH_PROTECTION:
-        err = f"auto-m4b fatally crashed - delete the error lock file before restarting:\n\n {cfg.FATAL_FILE}"
+        err = f"otto-m4b fatally crashed - delete the error lock file before restarting:\n\n {cfg.FATAL_FILE}"
         print_error(err)
 
     if "pytest" in sys.modules:
@@ -44,12 +44,12 @@ def use_error_handler():
         handle_err(e)
 
 
-@copy_kwargs_omit_first_arg(AutoM4bArgs.__init__)
+@copy_kwargs_omit_first_arg(OttoM4bArgs.__init__)
 def app(**kwargs):
     with use_error_handler():
         import threading
 
-        args = AutoM4bArgs(**kwargs)
+        args = OttoM4bArgs(**kwargs)
         cfg.startup(args)
         inbox = InboxState()
 
@@ -81,10 +81,10 @@ def app(**kwargs):
                 if event.is_directory:
                     return
                 name = Path(event.src_path).name
-                # Ignore log files and other auto-m4b generated files that are
+                # Ignore log files and other otto-m4b generated files that are
                 # written/deleted by process_book() itself — reacting to those
                 # would cause an immediate re-trigger loop.
-                if name.startswith("auto-m4b.") or name.endswith(".log"):
+                if name.startswith(("otto-m4b.", "auto-m4b.")) or name.endswith(".log"):
                     return
                 dirty.set()
 

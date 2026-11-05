@@ -29,7 +29,7 @@ from src.tests.helpers.pytest_utils import testutils
 def test_get_all_processed_books(indirect_fixture, expected):
     assert (
         testutils.get_all_processed_books(
-            indirect_fixture, root_dir=Path("/auto-m4b/src/tests/tmp/inbox")
+            indirect_fixture, root_dir=Path("/otto-m4b/src/tests/tmp/inbox")
         )
         == expected
     )
@@ -59,22 +59,22 @@ def test_strip_cats_ascii(test_input, expected):
         ("------", False),
         (("----", "auto", "[DEBUG]"), False),
         (
-            "-------------------------  ⌐◒-◒  auto-m4b • 2024-04-12 18:53:01  -------------------------",
+            "-------------------------  ⌐◒-◒  otto-m4b • 2024-04-12 18:53:01  -------------------------",
             True,
         ),
         (
             (
-                "-------------------------  ⌐◒-◒  auto-m4b • 2024-04-12 18:53:01  -------------------------",
+                "-------------------------  ⌐◒-◒  otto-m4b • 2024-04-12 18:53:01  -------------------------",
                 "Watching for books in /path/to/inbox ꨄ︎",
             ),
             True,
         ),
         (
-            """-------------------------  ⌐◒-◒  auto-m4b • 2024-04-12 18:53:01  -------------------------
+            """-------------------------  ⌐◒-◒  otto-m4b • 2024-04-12 18:53:01  -------------------------
 Watching for books in /path/to/inbox ꨄ︎
 
 [DEBUG] Waiting for inbox updates: 1 (70202c72 → 5ad760a2)
--------------------------  ⌐◒-◒  auto-m4b • 2024-04-12 18:53:01  -------------------------
+-------------------------  ⌐◒-◒  otto-m4b • 2024-04-12 18:53:01  -------------------------
 Watching for books in /path/to/inbox ꨄ︎
 
  *** New activity detected in the inbox...
@@ -92,11 +92,11 @@ Found 1 book in the inbox matching tower (ignoring 11))""",
         ),
         (
             (
-                "-------------------------  ⌐◒-◒  auto-m4b • 2024-04-12 18:53:01  -------------------------",
+                "-------------------------  ⌐◒-◒  otto-m4b • 2024-04-12 18:53:01  -------------------------",
                 "Watching for books in /path/to/inbox ꨄ︎",
                 "",
                 "[DEBUG] Waiting for inbox updates: 1 (70202c72 → 5ad760a2)",
-                "-------------------------  ⌐◒-◒  auto-m4b • 2024-04-12 18:53:01  ----------------------------------",
+                "-------------------------  ⌐◒-◒  otto-m4b • 2024-04-12 18:53:01  ----------------------------------",
                 "Watching for books in /path/to/inbox ꨄ︎",
                 "",
                 " *** New activity detected in the inbox...",

@@ -1,10 +1,10 @@
 
-Starting auto-m4b...
+Starting otto-m4b...
 TEST + DEBUG modes on
 10 CPU cores / 0.1s sleep / Max ch. length: 15-30m / m4b-tool v0.5-prerelease-25-g81b9542 (Docker)
 
-------------------------  ⌐◒-◒  auto-m4b • 2024-04-02 21:16:12  -------------------------
-Watching for books in /auto-m4b/src/tests/tmp/inbox ꨄ︎
+------------------------  ⌐◒-◒  otto-m4b • 2024-04-02 21:16:12  -------------------------
+Watching for books in /otto-m4b/src/tests/tmp/inbox ꨄ︎
 
 Found 5 books in the inbox matching ^(chanur) (ignoring 1)
 
@@ -17,9 +17,9 @@ Found 5 books in the inbox matching ^(chanur) (ignoring 1)
 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
 
 File/folder info:
-- Source: /auto-m4b/src/tests/tmp/inbox/
+- Source: /otto-m4b/src/tests/tmp/inbox/
           Chanur Series/01 - Pride Of Chanur
-- Output: /auto-m4b/src/tests/tmp/converted/
+- Output: /otto-m4b/src/tests/tmp/converted/
           Chanur Series/01 - Pride Of Chanur
 - File type: mp3
 - Audio files: 2
@@ -39,11 +39,11 @@ Sampling Cherryh CJ - Chanur 01 - Pride of Chanur - 1 of 2.mp3 for book metadata
 - No cover art
 
 Starting mp3 → m4b conversion at 09:16:18 PM,\xa0Tue, 02 Apr 2024...
-/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /auto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/01 - Pride Of Chanur -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/01 - Pride Of Chanur/01 - Pride Of Chanur.m4b" --logfile="/mnt/build/01 - Pride Of Chanur/auto-m4b.01 - Pride Of Chanur.log" --no-chapter-reindexing --name="Pride Of Chanur" --sortname="Pride Of Chanur" --album="Pride Of Chanur" --sortalbum="Pride Of Chanur" --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
+/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /otto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/01 - Pride Of Chanur -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/01 - Pride Of Chanur/01 - Pride Of Chanur.m4b" --logfile="/mnt/build/01 - Pride Of Chanur/otto-m4b.01 - Pride Of Chanur.log" --no-chapter-reindexing --name="Pride Of Chanur" --sortname="Pride Of Chanur" --album="Pride Of Chanur" --sortalbum="Pride Of Chanur" --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
 
 Verifying id3 tags... ✓
 
-Moving to converted books folder → /auto-m4b/src/tests/tmp/converted/Chanur Series/
+Moving to converted books folder → /otto-m4b/src/tests/tmp/converted/Chanur Series/
                                    01 - Pride Of Chanur/01 - Pride Of Chanur.m4b
 
  *** Test mode: The original folder will not be moved or deleted
@@ -61,9 +61,9 @@ Converted 01 - Pride Of Chanur in a second 🐾✨🥞
 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
 
 File/folder info:
-- Source: /auto-m4b/src/tests/tmp/inbox/Chanur Series/
+- Source: /otto-m4b/src/tests/tmp/inbox/Chanur Series/
           02 - Chanur's Venture
-- Output: /auto-m4b/src/tests/tmp/converted/Chanur Series/
+- Output: /otto-m4b/src/tests/tmp/converted/Chanur Series/
           02 - Chanur's Venture
 - File type: mp3
 - Audio files: 2
@@ -83,11 +83,11 @@ Sampling Cherryh CJ - Chanur 02 - Chanur's Venture - 1 of 2.mp3 for book metadat
 - No cover art
 
 Starting mp3 → m4b conversion at 09:16:21 PM,\xa0Tue, 02 Apr 2024...
-/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /auto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/02 - Chanur's Venture -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/02 - Chanur's Venture/02 - Chanur's Venture.m4b" --logfile="/mnt/build/02 - Chanur's Venture/auto-m4b.02 - Chanur's Venture.log" --no-chapter-reindexing --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
+/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /otto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/02 - Chanur's Venture -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/02 - Chanur's Venture/02 - Chanur's Venture.m4b" --logfile="/mnt/build/02 - Chanur's Venture/otto-m4b.02 - Chanur's Venture.log" --no-chapter-reindexing --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
 
 Verifying id3 tags... ✓
 
-Moving to converted books folder → /auto-m4b/src/tests/tmp/converted/Chanur Series/
+Moving to converted books folder → /otto-m4b/src/tests/tmp/converted/Chanur Series/
                                    02 - Chanur's Venture/02 - Chanur's Venture.m4b
 
  *** Test mode: The original folder will not be moved or deleted
@@ -105,8 +105,8 @@ Converted 02 - Chanur's Venture in a second 🐾✨🥞
 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
 
 File/folder info:
-- Source: /auto-m4b/src/tests/tmp/inbox/Chanur Series/03 - Kif Strikes Back
-- Output: /auto-m4b/src/tests/tmp/converted/Chanur Series/03 - Kif Strikes Back
+- Source: /otto-m4b/src/tests/tmp/inbox/Chanur Series/03 - Kif Strikes Back
+- Output: /otto-m4b/src/tests/tmp/converted/Chanur Series/03 - Kif Strikes Back
 - File type: mp3
 - Audio files: 2
 - Total size: 1 MB
@@ -125,11 +125,11 @@ Sampling Cherryh CJ - Chanur 03 - Kif Strikes Back - 1 of 2.mp3 for book metadat
 - No cover art
 
 Starting mp3 → m4b conversion at 09:16:24 PM,\xa0Tue, 02 Apr 2024...
-/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /auto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/03 - Kif Strikes Back -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/03 - Kif Strikes Back/03 - Kif Strikes Back.m4b" --logfile="/mnt/build/03 - Kif Strikes Back/auto-m4b.03 - Kif Strikes Back.log" --no-chapter-reindexing --name="Kif Strikes Back" --sortname="Kif Strikes Back" --album="Kif Strikes Back" --sortalbum="Kif Strikes Back" --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
+/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /otto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/03 - Kif Strikes Back -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/03 - Kif Strikes Back/03 - Kif Strikes Back.m4b" --logfile="/mnt/build/03 - Kif Strikes Back/otto-m4b.03 - Kif Strikes Back.log" --no-chapter-reindexing --name="Kif Strikes Back" --sortname="Kif Strikes Back" --album="Kif Strikes Back" --sortalbum="Kif Strikes Back" --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
 
 Verifying id3 tags... ✓
 
-Moving to converted books folder → /auto-m4b/src/tests/tmp/converted/Chanur Series/
+Moving to converted books folder → /otto-m4b/src/tests/tmp/converted/Chanur Series/
                                    03 - Kif Strikes Back/03 - Kif Strikes Back.m4b
 
  *** Test mode: The original folder will not be moved or deleted
@@ -147,8 +147,8 @@ Converted 03 - Kif Strikes Back in a second 🐾✨🥞
 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
 
 File/folder info:
-- Source: /auto-m4b/src/tests/tmp/inbox/Chanur Series/04 - Chanur's Homecoming
-- Output: /auto-m4b/src/tests/tmp/converted/Chanur Series/04 - Chanur's Homecoming
+- Source: /otto-m4b/src/tests/tmp/inbox/Chanur Series/04 - Chanur's Homecoming
+- Output: /otto-m4b/src/tests/tmp/converted/Chanur Series/04 - Chanur's Homecoming
 - File type: mp3
 - Audio files: 2
 - Total size: 1 MB
@@ -167,11 +167,11 @@ Sampling Cherryh CJ - Chanur 04 - Chanur's Homecoming - 1 of 2.mp3 for book meta
 - No cover art
 
 Starting mp3 → m4b conversion at 09:16:27 PM,\xa0Tue, 02 Apr 2024...
-/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /auto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/04 - Chanur's Homecoming -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/04 - Chanur's Homecoming/04 - Chanur's Homecoming.m4b" --logfile="/mnt/build/04 - Chanur's Homecoming/auto-m4b.04 - Chanur's Homecoming.log" --no-chapter-reindexing --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
+/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /otto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/04 - Chanur's Homecoming -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/04 - Chanur's Homecoming/04 - Chanur's Homecoming.m4b" --logfile="/mnt/build/04 - Chanur's Homecoming/otto-m4b.04 - Chanur's Homecoming.log" --no-chapter-reindexing --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
 
 Verifying id3 tags... ✓
 
-Moving to converted books folder → /auto-m4b/src/tests/tmp/converted/Chanur Series/
+Moving to converted books folder → /otto-m4b/src/tests/tmp/converted/Chanur Series/
                                    04 - Chanur's Homecoming/04 - Chanur's Homecoming.m4b
 
  *** Test mode: The original folder will not be moved or deleted
@@ -189,8 +189,8 @@ Converted 04 - Chanur's Homecoming in a second 🐾✨🥞
 ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
 
 File/folder info:
-- Source: /auto-m4b/src/tests/tmp/inbox/Chanur Series/05 - Chanur's Legacy
-- Output: /auto-m4b/src/tests/tmp/converted/Chanur Series/05 - Chanur's Legacy
+- Source: /otto-m4b/src/tests/tmp/inbox/Chanur Series/05 - Chanur's Legacy
+- Output: /otto-m4b/src/tests/tmp/converted/Chanur Series/05 - Chanur's Legacy
 - File type: mp3
 - Audio files: 2
 - Total size: 1 MB
@@ -209,11 +209,11 @@ Sampling Cherryh CJ - Chanur 05 - Chanur's Legacy - 1 of 2.mp3 for book metadata
 - No cover art
 
 Starting mp3 → m4b conversion at 09:16:30 PM,\xa0Tue, 02 Apr 2024...
-/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /auto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/05 - Chanur's Legacy -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/05 - Chanur's Legacy/05 - Chanur's Legacy.m4b" --logfile="/mnt/build/05 - Chanur's Legacy/auto-m4b.05 - Chanur's Legacy.log" --no-chapter-reindexing --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
+/opt/homebrew/bin/docker run -it --rm -u 501:20 -v /otto-m4b/src/tests/tmp:/mnt:rw sandreas/m4b-tool:latest merge /mnt/merge/05 - Chanur's Legacy -n --audio-codec=libfdk_aac --audio-bitrate=128000 --audio-samplerate=22050 --jobs=10 --output-file="/mnt/build/05 - Chanur's Legacy/05 - Chanur's Legacy.m4b" --logfile="/mnt/build/05 - Chanur's Legacy/otto-m4b.05 - Chanur's Legacy.log" --no-chapter-reindexing --artist="Cherryh CJ" --sortartist="Cherryh CJ" --writer="Cherryh CJ" --albumartist="Cherryh CJ" --encoded-by=BOOKSY --genre=Audiobook
 
 Verifying id3 tags... ✓
 
-Moving to converted books folder → /auto-m4b/src/tests/tmp/converted/Chanur Series/
+Moving to converted books folder → /otto-m4b/src/tests/tmp/converted/Chanur Series/
                                    05 - Chanur's Legacy/05 - Chanur's Legacy.m4b
 
  *** Test mode: The original folder will not be moved or deleted

@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from pytest import CaptureFixture
 
-from src.auto_m4b import app
+from src.otto_m4b import app
 from src.lib.audiobook import Audiobook
 from src.lib.fs_utils import rename_dir
 from src.lib.inbox_state import InboxState
@@ -380,7 +380,7 @@ class test_unhappy_paths:
         inbox = InboxState()
 
         conspiracy_theories__flat_mp3_copy = deepcopy(conspiracy_theories__flat_mp3)
-        (TEST_DIRS.converted / "auto-m4b.log").unlink(missing_ok=True)  # remove the log file to force a conversion
+        (TEST_DIRS.converted / "otto-m4b.log").unlink(missing_ok=True)  # remove the log file to force a conversion
         testutils.set_match_filter("Conspiracies")
         app(max_loops=1)
         assert conspiracy_theories__flat_mp3.converted_dir.exists()

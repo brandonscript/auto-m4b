@@ -12,5 +12,5 @@
 scripts/
 sandbox/
 docker-compose*.yml
-auto-m4b.code-workspace
+otto-m4b.code-workspace
 .pytest_cache/

@@ -10,7 +10,7 @@ from src.lib.hooks import _append_post_convert_log, run_post_convert_script
 
 
 def test_append_post_convert_log_writes_dedicated_file(tmp_path: Path):
-    log = tmp_path / "auto-m4b.Book.post-convert.log"
+    log = tmp_path / "otto-m4b.Book.post-convert.log"
     book = SimpleNamespace(post_convert_log_file=log)
 
     _append_post_convert_log(
@@ -36,7 +36,7 @@ def test_run_post_convert_script_writes_failure_log(tmp_path: Path):
 
     converted_dir = tmp_path / "converted"
     converted_dir.mkdir()
-    log = converted_dir / "auto-m4b.Book.post-convert.log"
+    log = converted_dir / "otto-m4b.Book.post-convert.log"
     book = SimpleNamespace(
         post_convert_log_file=log,
         inbox_dir=tmp_path / "inbox" / "Book",
@@ -58,3 +58,12 @@ def test_run_post_convert_script_writes_failure_log(tmp_path: Path):
     assert "Exit code: 7" in text
     assert "out-msg" in text
     assert "err-msg" in text
+
+
+def test_legacy_hook_aliases(tiny__flat_mp3):
+    from src.lib.hooks import _build_script_env
+
+    values = _build_script_env(tiny__flat_mp3)
+    for key, value in values.items():
+        if key.startswith("OTTO_M4B_"):
+            assert values[key.replace("OTTO_M4B_", "AUTO_M4B_", 1)] == value

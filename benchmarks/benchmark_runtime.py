@@ -19,7 +19,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).parents[1].resolve()
 FIXTURE_ROOT = REPO_ROOT / "src" / "tests" / "fixtures"
 
-DEFAULT_IMPORTS = ("src", "src.auto_m4b", "src.fixm4b", "src.fix_metadata", "src.lib.nlp")
+DEFAULT_IMPORTS = ("src", "src.otto_m4b", "src.fixm4b", "src.fix_metadata", "src.lib.nlp")
 DEFAULT_SCANS = ("tiny__flat_mp3", "nathan_lowell__nested_series_m4a", "secret_project_series__nested_flat_mixed")
 
 

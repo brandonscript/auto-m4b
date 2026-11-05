@@ -1,6 +1,6 @@
 import pytest
 
-from src.auto_m4b import app
+from src.otto_m4b import app
 from src.tests.helpers.pytest_dumps import TEST_DIRS
 from src.tests.helpers.pytest_utils import testutils
 
