@@ -58,7 +58,7 @@ def log_global_results(
 ) -> None:
     # note: requires `column` version 2.39 or higher, available in util-linux 2.39 or higher
 
-    # takes the original book's path and the result of the book and logs to outputfolder/auto-m4b.log
+    # takes the original book's path and the result of the book and logs to outputfolder/otto-m4b.log
     # format: [date] [time] [original book relative path] [info] ["result"=success|failed] [failure-message]
     # pad the relative path with spaces to 70 characters and truncate to 70 characters
     # sanitize book_src to remove multiple spaces and replace | with _

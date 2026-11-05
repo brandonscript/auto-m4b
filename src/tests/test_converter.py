@@ -416,7 +416,7 @@ class TestChapterEmbedding:
 
     def test_mp3_chapters_embedded(self, blank_audiobook, reset_all):
         """blank_audiobook fixture → 2 mp3 files → native convert → chapters in output."""
-        from src.auto_m4b import app
+        from src.otto_m4b import app
         from src.tests.helpers.pytest_utils import testutils
 
         app(max_loops=1)
@@ -435,7 +435,7 @@ class TestChapterEmbedding:
 
     def test_mp3_to_m4b_valid_output(self, tiny__flat_mp3, reset_all):
         """tiny__flat_mp3 (5 files) → native merge → valid m4b with 5 chapters."""
-        from src.auto_m4b import app
+        from src.otto_m4b import app
 
         app(max_loops=1)
 

@@ -77,7 +77,7 @@ def _worker(fixture_name: str, cpu_cores: int) -> None:
     if not fixture.is_dir():
         raise SystemExit(f"fixture directory not found: {fixture}")
 
-    with tempfile.TemporaryDirectory(prefix="auto-m4b-benchmark-") as temp:
+    with tempfile.TemporaryDirectory(prefix="otto-m4b-benchmark-") as temp:
         root = Path(temp)
         inbox = root / "inbox"
         converted = root / "converted"

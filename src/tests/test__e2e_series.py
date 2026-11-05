@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from src.auto_m4b import app
+from src.otto_m4b import app
 from src.lib.audiobook import Audiobook
 from src.lib.inbox_state import InboxState
 from src.lib.strings import en
@@ -103,7 +103,7 @@ class test_series:
         capfd: pytest.CaptureFixture[str],
     ):
         """When a series parent directory has only one child remaining (e.g. after other
-        books in the series were already archived), auto-m4b must NOT flatten the remaining
+        books in the series were already archived), otto-m4b must NOT flatten the remaining
         book's files into the series parent root.
 
         Regression for the John Grisham / 'The Appeal' bug: score_series_parent returned

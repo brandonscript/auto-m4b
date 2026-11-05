@@ -5,13 +5,12 @@ from pathlib import Path
 from src.lib.fs_utils import is_audio_file
 from src.lib.term import print_debug, print_warning, smart_print, tint_path
 
-
 _IGNORE_DIR_NAMES: frozenset[str] = frozenset({"@eaDir", "@tmp", ".DS_Store"})
 
 # Written into the SOURCE directory after a successful copy to inbox.
 # Prevents re-copying if the user later moves/deletes the converted m4b
 # or the archive, which would otherwise fool _is_already_handled.
-_MARKER_NAME = ".auto-m4b"
+from src.lib.name_migration import MARKER as _MARKER_NAME, marker_path
 
 
 class WatchFolder:
@@ -40,9 +39,7 @@ class WatchFolder:
         """Return immediate child directories containing at least two audio files."""
         try:
             children = sorted(
-                child
-                for child in path.iterdir()
-                if child.is_dir() and not WatchFolder._should_ignore(child)
+                child for child in path.iterdir() if child.is_dir() and not WatchFolder._should_ignore(child)
             )
         except OSError:
             return []
@@ -51,7 +48,7 @@ class WatchFolder:
     @staticmethod
     def _marker_children(source: Path) -> set[str] | None:
         """Read nested child names recorded in a source marker."""
-        marker = source / _MARKER_NAME
+        marker = marker_path(source)
         try:
             text = marker.read_text(encoding="utf-8").strip()
         except OSError:
@@ -86,14 +83,9 @@ class WatchFolder:
             return [
                 child
                 for child in children
-                if child.name not in recorded
-                or not WatchFolder._nested_child_exists(source, child)
+                if child.name not in recorded or not WatchFolder._nested_child_exists(source, child)
             ]
-        return [
-            child
-            for child in children
-            if not WatchFolder._nested_child_exists(source, child)
-        ]
+        return [child for child in children if not WatchFolder._nested_child_exists(source, child)]
 
     @staticmethod
     def _write_marker(source: Path, children: list[Path]) -> None:
@@ -147,7 +139,7 @@ class WatchFolder:
         """
         from src.lib.config import cfg
 
-        if (source / _MARKER_NAME).exists():
+        if marker_path(source).exists():
             children = WatchFolder._nested_audio_dirs(source)
             if not children:
                 return True
@@ -225,7 +217,7 @@ class WatchFolder:
                 continue
             dest = cfg.inbox_dir / book.name
             nested_children = WatchFolder._nested_audio_dirs(book)
-            marker = book / _MARKER_NAME
+            marker = marker_path(book)
             if marker.exists() and nested_children:
                 pending_children = WatchFolder._unhandled_nested_dirs(book, nested_children)
                 for child in pending_children:

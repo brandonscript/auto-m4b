@@ -43,7 +43,7 @@ jobs:
           key: venv-v4-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install --no-interaction --no-root
 
       - name: Install system dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
@@ -108,7 +108,7 @@ jobs:
           key: venv-v4-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install --no-interaction --no-root
 
       - name: Install system dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
@@ -169,7 +169,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: brandonscript/auto-m4b
+          images: brandonscript/otto-m4b
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -197,7 +197,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: brandonscript/auto-m4b
+          repository: brandonscript/otto-m4b
           short-description: Python audiobook converter for chapterized M4B files.
           readme-filepath: ./README.md
           enable-url-completion: true

@@ -358,7 +358,7 @@ class testutils:
             path = TEST_DIRS.inbox / path
         path.parent.mkdir(parents=True, exist_ok=True)
         if cls._mock_mp3_template_dir is None:
-            cls._mock_mp3_template_dir = Path(tempfile.gettempdir()) / f"auto-m4b-pytest-mocks-{os.getpid()}"
+            cls._mock_mp3_template_dir = Path(tempfile.gettempdir()) / f"otto-m4b-pytest-mocks-{os.getpid()}"
             cls._mock_mp3_template_dir.mkdir(parents=True, exist_ok=True)
 
         template = cls._mock_mp3_templates.get(size)
@@ -433,7 +433,7 @@ class testutils:
 
     @classmethod
     def is_startup(cls, *lines: str | None) -> bool:
-        return any(bool(line and line.startswith("Starting auto-m4b...")) for line in lines)
+        return any(bool(line and line.startswith("Starting otto-m4b...")) for line in lines)
 
     @classmethod
     def is_footer(cls, *lines: str | None) -> bool:
@@ -586,7 +586,7 @@ class testutils:
         if isinstance(out, CaptureFixture):
             out = cls.get_stdout(out)
 
-        actual = out.count("auto-m4b •")
+        actual = out.count("otto-m4b •")
         if expected_eq != -1:
             assert actual == expected_eq, f"Expected header to print {expected_eq} time(s), got {actual}"
         if expected_gte != -1:
@@ -870,8 +870,8 @@ class testutils:
         m4b = m4bs[0]
         assert m4b.stat().st_size > 0, f"Output .m4b is empty: {m4b}"
 
-        # Old-style auto-m4b.*.log files must not be left behind
-        log = book.converted_dir / f"auto-m4b.{book.basename}.log"
+        # Old-style otto-m4b.*.log files must not be left behind
+        log = book.converted_dir / f"otto-m4b.{book.basename}.log"
         assert not log.exists(), f"Stale log file left in converted dir: {log}"
 
         # Description file is named "{title or basename} [{quality}].txt".

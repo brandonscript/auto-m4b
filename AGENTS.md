@@ -1,4 +1,4 @@
-# Agent notes for auto-m4b
+# Agent notes for otto-m4b
 
 Quick reference for AI agents working in this repo.
 
@@ -13,7 +13,7 @@ Do **not** use the system `python` or `pytest` directly — imports like `tinta`
 ### First-time / fresh clone setup
 
 ```bash
-cd /path/to/auto-m4b
+cd /path/to/otto-m4b
 poetry install
 poetry run python -m spacy download en_core_web_sm
 ```
@@ -37,14 +37,14 @@ Verify you're on the right interpreter:
 
 ```bash
 poetry run python -c "import sys; print(sys.executable)"
-# → .../auto-m4b/.venv/bin/python
+# → .../otto-m4b/.venv/bin/python
 ```
 
 ## Project layout
 
 | Path                  | Purpose                                                            |
 | --------------------- | ------------------------------------------------------------------ |
-| `src/`                | Application code (`src/lib/`, `src/auto_m4b.py`)                   |
+| `src/`                | Application code (`src/lib/`, `src/otto_m4b.py`)                   |
 | `src/lib/metadata/`   | Shared metadata planner (fix CLI + convert): plan, priors, OL attach, stems, apply |
 | `src/fix_metadata.py`| CLI UX/apply wrapper around `src.lib.metadata` (no re-encode)      |
 | `docs/fix-metadata.md` | Operator/agent reference for that CLI                            |
@@ -112,11 +112,11 @@ git commit -m "your message"
 git push origin dev
 ```
 
-Do not leave passing changes uncommitted on the local branch. The container runs off whatever is checked out at `/etc/docker/auto-m4b/`, but the canonical source of truth is `origin/dev`.
+Do not leave passing changes uncommitted on the local branch. The container runs off whatever is checked out at `/etc/docker/otto-m4b/`, but the canonical source of truth is `origin/dev`.
 
 **C. Auto-rebuild the live container when the real inbox is empty.**
 
-After finishing auto-m4b code changes (tests green, committed/pushed as appropriate), check the **real** production inbox. If it has no books waiting **and** the `auto-m4b` container is currently running, rebuild it automatically so Phantom picks up the new code:
+After finishing otto-m4b code changes (tests green, committed/pushed as appropriate), check the **real** production inbox. If it has no books waiting **and** the `otto-m4b` container is currently running, rebuild it automatically so Phantom picks up the new code:
 
 ```bash
 INBOX="/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox"
@@ -124,12 +124,12 @@ INBOX="/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox"
 ls -A "$INBOX" 2>/dev/null | grep -v '^\.' | grep -v '^\.DS_Store$' || true
 
 # If empty and container is up:
-docker ps --format '{{.Names}}' | grep -qx auto-m4b && dr rebuild auto-m4b:nvidia
+docker ps --format '{{.Names}}' | grep -qx otto-m4b && dr rebuild otto-m4b:nvidia
 ```
 
 - **Do rebuild** when the inbox has no convertible book folders/files (empty or only junk like `.DS_Store`).
 - **Do not rebuild** if books are still in the inbox — that would interrupt an in-flight conversion. Tell the user the changes are ready and they should rebuild once the inbox drains (or ask them to confirm).
-- Prefer `dr rebuild auto-m4b:nvidia` (Phantom’s GPU variant). Both variants share `container_name: auto-m4b`.
+- Prefer `dr rebuild otto-m4b:nvidia` (Phantom’s GPU variant). Both variants share `container_name: otto-m4b`.
 
 ### Branching strategy
 
@@ -180,7 +180,7 @@ Convert and the shared planner import through thin shims under `src/lib/metadata
 
 ## Open Library author/narrator swap detection
 
-auto-m4b can query the [Open Library API](https://openlibrary.org/developers/api) to detect when
+otto-m4b can query the [Open Library API](https://openlibrary.org/developers/api) to detect when
 author and narrator tags are swapped in source files (common with MP3 rips that use the music
 convention: `artist = narrator`, `composer = author`, no `albumartist`).
 
@@ -204,22 +204,22 @@ when unset, conversion preserves the existing trusted GCS/passthrough filename b
 ## Docker build workflow
 
 **Site-specific compose files are not in this repo.** On Phantom they live in
-`/etc/docker/auto-m4b-host/` and are symlinked as `docker-compose.auto-m4b.yml` /
-`docker-compose.auto-m4b-nvidia.yml` inside the clone. Public consumers should copy
+`/etc/docker/otto-m4b-host/` and are symlinked as `docker-compose.otto-m4b.yml` /
+`docker-compose.otto-m4b-nvidia.yml` inside the clone. Public consumers should copy
 `docker-compose.template.yml`. Do not commit personal compose files here.
 
 The Dockerfile is split into two layers to keep dev rebuilds fast:
 
-- **`Dockerfile.base`** — all heavy dependencies: ffmpeg, Poetry packages, spaCy model, NLTK corpora. Produces `auto-m4b-base:latest`. Only needs rebuilding when `pyproject.toml`, `poetry.lock`, or system deps change.
-- **`Dockerfile`** — just `COPY src/` on top of `auto-m4b-base:latest`. Rebuilds in seconds.
+- **`Dockerfile.base`** — all heavy dependencies: ffmpeg, Poetry packages, spaCy model, NLTK corpora. Produces `otto-m4b-base:latest`. Only needs rebuilding when `pyproject.toml`, `poetry.lock`, or system deps change.
+- **`Dockerfile`** — just `COPY src/` on top of `otto-m4b-base:latest`. Rebuilds in seconds.
 
 ```bash
 # Build (or rebuild) the base — only needed when deps change:
-dr build auto-m4b-base       # or: docker compose -f docker-compose.auto-m4b.yml --profile base build auto-m4b-base
+dr build otto-m4b-base       # or: docker compose -f docker-compose.otto-m4b.yml --profile base build otto-m4b-base
 
 # Normal dev rebuild (fast — only re-copies src/):
-# Phantom runs the NVIDIA variant, so always build and start auto-m4b:nvidia
-dr build auto-m4b:nvidia     # or: docker compose -f docker-compose.auto-m4b-nvidia.yml build auto-m4b
+# Phantom runs the NVIDIA variant, so always build and start otto-m4b:nvidia
+dr build otto-m4b:nvidia     # or: docker compose -f docker-compose.otto-m4b-nvidia.yml build otto-m4b
 ```
 
 ## Container variants
@@ -227,11 +227,11 @@ dr build auto-m4b:nvidia     # or: docker compose -f docker-compose.auto-m4b-nvi
 Two mutually exclusive variants are available. Starting one automatically stops and removes the other:
 
 ```bash
-dr start auto-m4b          # standard (CPU-only ffmpeg)
-dr start auto-m4b:nvidia   # NVIDIA GPU-accelerated ffmpeg  ← used on Phantom
+dr start otto-m4b          # standard (CPU-only ffmpeg)
+dr start otto-m4b:nvidia   # NVIDIA GPU-accelerated ffmpeg  ← used on Phantom
 ```
 
-Both use `container_name: auto-m4b`, so `docker logs -f auto-m4b` works regardless of which variant is running.
+Both use `container_name: otto-m4b`, so `docker logs -f otto-m4b` works regardless of which variant is running.
 
 ## Host-mounted paths (Phantom → Ragnarok SMB share)
 
@@ -243,11 +243,11 @@ The container works on a Ragnarok SMB share that is mounted on Phantom at `/mnt/
 | Converted output        | `/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/converted` | `/media/Books/Audiobooks/#auto-m4b/converted` |
 | Archive                 | `/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/archive`   | `/media/Books/Audiobooks/#auto-m4b/archive`   |
 | Backup                  | `/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/backup`    | `/media/Books/Audiobooks/#auto-m4b/backup`    |
-| Working/temp            | `/tmp/auto-m4b` (container-local)                          | `/tmp/auto-m4b`                               |
+| Working/temp            | `/tmp/otto-m4b` (container-local)                          | `/tmp/otto-m4b`                               |
 
 When testing against live books, drop or inspect files in the host-side inbox path above.
 
-## fix_metadata CLI (retag without re-encode)
+## fixm4b CLI (retag without re-encode)
 
 Use this when converted (or `#plex`) books have wrong tags/filenames and you do **not** want to reconvert. Full flag/env reference: **[docs/fix-metadata.md](docs/fix-metadata.md)**.
 
@@ -256,12 +256,12 @@ Use this when converted (or `#plex`) books have wrong tags/filenames and you do 
 export CLI_CONVERTED_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/converted
 export CLI_ARCHIVE_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/archive
 export CLI_INBOX_FOLDER=/mnt/ragnarok/media/Books/Audiobooks/#auto-m4b/inbox
-export OPEN_LIBRARY_USER_AGENT='auto-m4b/1.0 (you@example.com)'
+export OPEN_LIBRARY_USER_AGENT='otto-m4b/1.0 (you@example.com)'
 
-poetry run python -m src.fix_metadata -i "George, Margaret"
-poetry run python -m src.fix_metadata --apply --ol OL45804W \
+poetry run fixm4b -i "George, Margaret"
+poetry run fixm4b --apply --ol OL45804W \
   "George, Margaret/Elizabeth I (2011)"
-poetry run python -m src.fix_metadata -h
+poetry run fixm4b -h
 ```
 
 Notes for agents:
@@ -270,14 +270,14 @@ Notes for agents:
 - Relative paths resolve under `CLI_CONVERTED_FOLDER`; no args → entire converted tree (auto-recursive).
 - Source tags come from archive mirror (or `-s`). Multi-part archives use GCS + part strippers — titles should not keep `Part 1`.
 - OL match/link is shown when `OPEN_LIBRARY_USER_AGENT` is set; `--ol` / interactive `o` force a work/edition onto a **single** book.
-- Do not rebuild the live container solely for CLI-only changes; the host Poetry tree is enough to run `python -m src.fix_metadata`.
+- Do not rebuild the live container solely for CLI-only changes; the host Poetry tree is enough to run `fixm4b`.
 
 ## Key architecture notes for development
 
-### Watchdog (`src/auto_m4b.py`)
+### Watchdog (`src/otto_m4b.py`)
 
 - Uses `watchdog` `PollingObserver` on the inbox directory.
-- The `_InboxHandler` filters out files whose names start with `"auto-m4b."` or end with `".log"` — this prevents auto-m4b's own per-book log files from creating a re-trigger loop.
+- The `_InboxHandler` filters out files whose names start with `"otto-m4b."` or end with `".log"` — this prevents otto-m4b's own per-book log files from creating a re-trigger loop.
 - The observer sets a `threading.Event` (`dirty`) which the main loop waits on; it does not loop on a timer.
 
 ### InboxState (`src/lib/inbox_state.py`)

@@ -318,7 +318,7 @@ def test_hash_dir_ignores_log_files(
 
     # create a bunch of log files
     for d in [old_mill__multidisc_mp3.path, tower_treasure__flat_mp3.path]:
-        (d / "test-auto-m4b.log").touch()
+        (d / "test-otto-m4b.log").touch()
 
     assert hash_path(TEST_DIRS.inbox, only_file_exts=[".mp3"]) == baseline_inbox_hash
     assert hash_path(old_mill__multidisc_mp3.path, only_file_exts=[".mp3"]) == baseline_mill_hash
@@ -326,7 +326,7 @@ def test_hash_dir_ignores_log_files(
 
     # remove the log files
     for d in [old_mill__multidisc_mp3.path, tower_treasure__flat_mp3.path]:
-        (d / "test-auto-m4b.log").unlink()
+        (d / "test-otto-m4b.log").unlink()
 
 
 def test_hash_dir_respects_only_file_exts(

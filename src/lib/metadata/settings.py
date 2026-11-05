@@ -10,7 +10,7 @@ _override: Fixm4bSettings | None = None
 
 
 def get_settings() -> Fixm4bSettings:
-    """Prefer an explicit test/CLI override; otherwise adapt auto-m4b ``cfg`` live."""
+    """Prefer an explicit test/CLI override; otherwise adapt otto-m4b ``cfg`` live."""
     if _override is not None:
         return _override
     from src.lib.config import cfg

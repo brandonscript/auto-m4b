@@ -62,7 +62,7 @@ class test_converter_e2e:
 
     def test_flat_mp3_book(self, tiny__flat_mp3: Audiobook):
         """A flat mp3 book should produce a valid .m4b with one chapter per file."""
-        from src.auto_m4b import app
+        from src.otto_m4b import app
 
         n_src_files = tiny__flat_mp3.num_files("inbox")
 
@@ -81,7 +81,7 @@ class test_converter_e2e:
 
     def test_m4b_passthrough(self, blackmail_bibingka__flat_m4b: Audiobook):
         """A flat m4b book should be passed through (copy codec) to a valid .m4b."""
-        from src.auto_m4b import app
+        from src.otto_m4b import app
         from src.tests.helpers.pytest_utils import testutils
 
         app(max_loops=1)

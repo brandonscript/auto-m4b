@@ -117,7 +117,7 @@ def _clear_all_caches():
         except AttributeError:
             pass
 
-    # Clear the NLP SQLite cache (stored in ~/.auto-m4b/) so stale entries
+    # Clear the NLP SQLite cache (stored in ~/.otto-m4b/) so stale entries
     # from previous tests/runs don't return wrong narrator/author values.
     for _cache_file in cfg.META_DIR.glob("nlp_cache*.db"):
         _cache_file.unlink(missing_ok=True)
@@ -903,7 +903,7 @@ def not_an_audio_file():
 @pytest.fixture(scope="function", autouse=False)
 def mock_inbox(setup_teardown, requires_empty_inbox):
     """Populate INBOX_FOLDER with mocked sample audiobooks."""
-    template_dir = Path(tempfile.gettempdir()) / f"auto-m4b-pytest-inbox-{os.getpid()}"
+    template_dir = Path(tempfile.gettempdir()) / f"otto-m4b-pytest-inbox-{os.getpid()}"
     if template_dir.exists():
         shutil.copytree(template_dir, TEST_DIRS.inbox, dirs_exist_ok=True)
         yield TEST_DIRS.inbox
@@ -1057,8 +1057,8 @@ def mock_inbox_being_copied_to():
 
 @pytest.fixture(scope="function", autouse=False)
 def global_test_log():
-    orig_log = FIXTURES_ROOT / "sample-auto-m4b.log"
-    test_log = TEST_DIRS.converted / "auto-m4b.log"
+    orig_log = FIXTURES_ROOT / "sample-otto-m4b.log"
+    test_log = TEST_DIRS.converted / "otto-m4b.log"
     test_log.unlink(missing_ok=True)
     shutil.copy2(orig_log, test_log)
     yield test_log

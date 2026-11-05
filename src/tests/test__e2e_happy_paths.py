@@ -5,7 +5,7 @@ import time
 import pytest
 from pytest import CaptureFixture
 
-from src.auto_m4b import app
+from src.otto_m4b import app
 from src.lib import term
 from src.lib.audiobook import Audiobook
 from src.lib.id3_utils import extract_cover_art
@@ -203,7 +203,7 @@ class test_happy_paths:
         )
         assert testutils.assert_processed_output(out, *converted, loops=check, starting_loop=starting_loop)
 
-        assert out.count("Starting auto-m4b...") == (1 if starting_loop == 0 else 0)
+        assert out.count("Starting otto-m4b...") == (1 if starting_loop == 0 else 0)
         assert watching_count == out.count("Watching for books in")
         assert out.count("Checking for books in") == 0, "Checking header should never appear"
         assert banner_count == out.count("⌐◒-◒")

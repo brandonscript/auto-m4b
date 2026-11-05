@@ -165,7 +165,7 @@ def write_m4b_tags(
         f["trkn"] = [(1, 1)]
         f["disk"] = ""
         f["\xa9cmt"] = comment
-        f["\xa9too"] = "brandonscript/auto-m4b"
+        f["\xa9too"] = "brandonscript/otto-m4b"
 
         # if cover exists, normalize to JPEG/PNG (mutagen only accepts those) and set it
         if cover and cover.is_file():
@@ -202,7 +202,7 @@ def write_id3_tags_mutagen(
         tags,
         cover=cover,
         on_write=Id3Tags.rm_from_cache,
-        encoder_tag="brandonscript/auto-m4b",
+        encoder_tag="brandonscript/otto-m4b",
     )
 
 
@@ -890,7 +890,7 @@ def _verify_write_and_stamp(
 
         try:
             output = MP4(m4b_to_check)
-            output["\xa9too"] = ["brandonscript/auto-m4b"]
+            output["\xa9too"] = ["brandonscript/otto-m4b"]
             output.save()
         except Exception as e:
             print_debug(f"Could not stamp encoder tag on {m4b_to_check.name}: {e}")

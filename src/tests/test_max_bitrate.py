@@ -93,7 +93,7 @@ class TestPassthroughGateRespectsMaxBitrate:
         capfd: pytest.CaptureFixture[str],
     ):
         """Single m4b above MAX_BITRATE must not take process_already_m4b."""
-        from src.auto_m4b import app
+        from src.otto_m4b import app
         from src.tests.helpers.pytest_utils import testutils
 
         cfg.MAX_BITRATE = 32

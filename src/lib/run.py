@@ -177,7 +177,7 @@ def print_banner(after: Callable[..., Any] | None = None):
     dash = "-" * 25
 
     if not header_skip:
-        print_mint(f"{dash}  ⌐◒-◒  auto-m4b • {current_local_time}  {dash}")
+        print_mint(f"{dash}  ⌐◒-◒  otto-m4b • {current_local_time}  {dash}")
         print_grey(f"Watching for books in [[{cfg.inbox_dir}]] ꨄ︎")
         if cfg.watch_dir:
             print_grey(f"        and [[{cfg.watch_dir}]]")
@@ -644,12 +644,12 @@ def print_book_info(book: "Audiobook"):
 def convert_book(book: Audiobook):
     if not book.merge_dir.exists():
         raise FileNotFoundError(
-            f"Fatal: Merge folder '{book.merge_dir}' does not exist – ensure that auto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
+            f"Fatal: Merge folder '{book.merge_dir}' does not exist – ensure that otto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
         )
 
     if not book.num_files("merge"):
         raise FileNotFoundError(
-            f"Fatal: No audio files found in merge folder '{book.merge_dir}' – ensure that auto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
+            f"Fatal: No audio files found in merge folder '{book.merge_dir}' – ensure that otto_m4b has permissions to write to this path. If this error persists, please open an issue on GitHub."
         )
 
     # Pre-extract cover art for m4a/m4b inputs
@@ -1259,7 +1259,7 @@ def process_inbox():
         if "pytest" not in sys.modules:
             # Production startup: print banner immediately so the user sees the app
             # is alive, then do the (potentially slow) full scan in the background.
-            # The watchdog loop in auto_m4b.py uses dirty.wait(timeout) so it wakes
+            # The watchdog loop in otto_m4b.py uses dirty.wait(timeout) so it wakes
             # up and begins processing once inbox.ready is set.
             print_banner()
             import threading

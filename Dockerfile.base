@@ -20,11 +20,11 @@ RUN python -c "import nltk; [nltk.download(p, quiet=True) for p in \
     ('popular', 'punkt_tab', 'averaged_perceptron_tagger_eng', \
      'maxent_ne_chunker_tab', 'words', 'stopwords')]"
 
-# Pre-create the ~/.auto-m4b dir and stamp the NLTK timestamp so that nlp.py
+# Pre-create the ~/.otto-m4b dir and stamp the NLTK timestamp so that nlp.py
 # does not re-download NLTK corpora on every fresh container start.
 RUN python -c "\
 import json, os, pathlib; \
 from datetime import datetime; \
-d = pathlib.Path.home() / '.auto-m4b'; \
+d = pathlib.Path.home() / '.otto-m4b'; \
 d.mkdir(parents=True, exist_ok=True); \
 (d / '.nltk').write_text(json.dumps({'last_update': datetime.now().isoformat()}))"

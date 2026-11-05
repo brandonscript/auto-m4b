@@ -1,31 +1,34 @@
 """Fix ID3 tags + filenames for already-converted m4b files (no re-encode).
 
+The supported CLI is ``fixm4b`` (bundled with Otto or installed standalone).
+This module remains for existing integrations.
+
 Usage examples::
 
     # Default: scan CLI_CONVERTED_FOLDER (or CONVERTED_FOLDER), auto-recursive
-    poetry run python -m src.fix_metadata
-    poetry run python -m src.fix_metadata -i
+    poetry run fixm4b
+    poetry run fixm4b -i
 
     # Relative author / book under converted
-    poetry run python -m src.fix_metadata -i "George, Margaret"
-    poetry run python -m src.fix_metadata "George, Margaret/Helen of Troy (2006)"
+    poetry run fixm4b -i "George, Margaret"
+    poetry run fixm4b "George, Margaret/Helen of Troy (2006)"
 
     # Explicit source tree (nesting must match converted scope)
-    poetry run python -m src.fix_metadata -i -s /path/to/originals "George, Margaret"
+    poetry run fixm4b -i -s /path/to/originals "George, Margaret"
 
     # Force Open Library match for a single book
-    poetry run python -m src.fix_metadata --apply --ol OL45804W \\
+    poetry run fixm4b --apply --ol OL45804W \\
       "George, Margaret/Elizabeth I (2011)"
 
     # External abs path (e.g. #plex) — source audio must sit beside the m4b, or pass -s
-    poetry run python -m src.fix_metadata --apply \\
+    poetry run fixm4b --apply \\
       "/media/.../#plex/French, Tana/The Searcher (2020)"
 
 Host CLI paths (set in shell; mirror compose var names)::
 
-    CLI_CONVERTED_FOLDER=/mnt/.../#auto-m4b/converted
-    CLI_ARCHIVE_FOLDER=/mnt/.../#auto-m4b/archive
-    CLI_INBOX_FOLDER=/mnt/.../#auto-m4b/inbox
+    CLI_CONVERTED_FOLDER=/mnt/.../#otto-m4b/converted
+    CLI_ARCHIVE_FOLDER=/mnt/.../#otto-m4b/archive
+    CLI_INBOX_FOLDER=/mnt/.../#otto-m4b/inbox
 """
 
 from __future__ import annotations

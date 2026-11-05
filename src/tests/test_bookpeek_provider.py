@@ -55,7 +55,7 @@ def _fake_result(
 
 
 def test_build_bookpeek_config_reuses_autom4b_user_agents(monkeypatch):
-    monkeypatch.setattr(cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (gr@example.com)")
+    monkeypatch.setattr(cfg, "GOODSCRAPS_USER_AGENT", "otto-m4b/1.0 (gr@example.com)")
     monkeypatch.setattr(cfg, "OPEN_LIBRARY_USER_AGENT", "MyApp/1.0 (ol@example.com)")
     monkeypatch.setattr(cfg, "GOODSCRAPS_TIMEOUT", 22.0)
     monkeypatch.setattr(cfg, "OPEN_LIBRARY_TIMEOUT", 18.0)
@@ -65,7 +65,7 @@ def test_build_bookpeek_config_reuses_autom4b_user_agents(monkeypatch):
     assert enrich.enabled is True
     assert enrich.goodreads is True
     assert enrich.openlibrary is True
-    assert enrich.goodreads_user_agent == "auto-m4b/1.0 (gr@example.com)"
+    assert enrich.goodreads_user_agent == "otto-m4b/1.0 (gr@example.com)"
     assert enrich.openlibrary_user_agent == "MyApp/1.0 (ol@example.com)"
     assert enrich.goodreads_timeout == 22.0
     assert enrich.openlibrary_timeout == 18.0
@@ -94,7 +94,7 @@ def test_scan_bookpeek_skipped_when_disabled(monkeypatch, tmp_path):
 
 def test_scan_bookpeek_injects_online_and_ua(monkeypatch, tmp_path):
     monkeypatch.setattr(cfg, "BOOKPEEK", True)
-    monkeypatch.setattr(cfg, "GOODSCRAPS_USER_AGENT", "auto-m4b/1.0 (gr@example.com)")
+    monkeypatch.setattr(cfg, "GOODSCRAPS_USER_AGENT", "otto-m4b/1.0 (gr@example.com)")
     monkeypatch.setattr(cfg, "OPEN_LIBRARY_USER_AGENT", "")
     monkeypatch.setattr(cfg, "GOODSCRAPS_TIMEOUT", 30.0)
     monkeypatch.setattr(cfg, "OPEN_LIBRARY_TIMEOUT", 15.0)
@@ -124,7 +124,7 @@ def test_scan_bookpeek_injects_online_and_ua(monkeypatch, tmp_path):
     result = scan_bookpeek(audio)
     assert result is not None
     assert captured["online"] is True
-    assert captured["config"].enrich.goodreads_user_agent == "auto-m4b/1.0 (gr@example.com)"
+    assert captured["config"].enrich.goodreads_user_agent == "otto-m4b/1.0 (gr@example.com)"
     assert captured["config"].enrich.goodreads is True
     assert captured["config"].enrich.openlibrary is False
 

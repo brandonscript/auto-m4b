@@ -20,22 +20,23 @@ if TYPE_CHECKING:
 
 
 def _build_script_env(book: "Audiobook") -> dict[str, str]:
-    """Build AUTO_M4B_* env vars describing the converted book."""
+    """Build OTTO_M4B_* env vars describing the converted book."""
     from src.lib.config import cfg
 
     watch_source = ""
     if cfg.watch_dir and book.key:
         watch_source = str(cfg.watch_dir / book.key)
 
-    return {
-        "AUTO_M4B_INBOX_PATH": str(book.inbox_dir),
-        "AUTO_M4B_CONVERTED_PATH": str(book.converted_file) if book.converted_file else "",
-        "AUTO_M4B_CONVERTED_DIR": str(book.converted_dir),
-        "AUTO_M4B_TITLE": book.title or "",
-        "AUTO_M4B_AUTHOR": book.author or "",
-        "AUTO_M4B_KEY": book.key or "",
-        "AUTO_M4B_WATCH_SOURCE": watch_source,
+    values = {
+        "OTTO_M4B_INBOX_PATH": str(book.inbox_dir),
+        "OTTO_M4B_CONVERTED_PATH": str(book.converted_file) if book.converted_file else "",
+        "OTTO_M4B_CONVERTED_DIR": str(book.converted_dir),
+        "OTTO_M4B_TITLE": book.title or "",
+        "OTTO_M4B_AUTHOR": book.author or "",
+        "OTTO_M4B_KEY": book.key or "",
+        "OTTO_M4B_WATCH_SOURCE": watch_source,
     }
+    return {**values, **{key.replace("OTTO_M4B_", "AUTO_M4B_", 1): value for key, value in values.items()}}
 
 
 def _resolve_command(script: Path) -> list[str]:
@@ -108,7 +109,7 @@ def run_post_convert_script(book: "Audiobook") -> None:
 
     Never raises — a failing or missing script only logs a warning so the
     conversion cycle continues uninterrupted. Script stdout/stderr (and
-    failure details) are always written to ``auto-m4b.<title>.post-convert.log``
+    failure details) are always written to ``otto-m4b.<title>.post-convert.log``
     next to the converted ``.m4b``.
     """
     from src.lib.config import cfg
@@ -155,9 +156,7 @@ def run_post_convert_script(book: "Audiobook") -> None:
     except OSError as exc:
         msg = f"failed to start script: {exc}"
         print_warning(f"[post-convert] {msg}")
-        _append_post_convert_log(
-            book, script_name=script.name, status="start_error", error=msg
-        )
+        _append_post_convert_log(book, script_name=script.name, status="start_error", error=msg)
         return
 
     stdout = result.stdout or ""
