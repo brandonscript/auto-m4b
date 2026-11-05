@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# Requires BuildKit additional_contexts (see docker-compose.template.yml):
+#   goodscraps → sibling checkout, bookpeek → sibling checkout, fixm4b → sibling checkout
 FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,6 +25,11 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
 WORKDIR /app
+
+# Path deps in pyproject.toml are ../goodscraps, ../bookpeek, ../fixm4b relative to /app
+COPY --from=goodscraps . /goodscraps/
+COPY --from=bookpeek . /bookpeek/
+COPY --from=fixm4b . /fixm4b/
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
